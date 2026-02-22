@@ -88,6 +88,21 @@ paste and an M6 threaded stainless thermocouple probe in the original M4 mountin
 (requires re-tapping to M6 — see the
 [pico_espresso project](https://github.com/vecinimod/pico_espresso) for details and photos).
 
+### Thermocouple interface alternatives
+
+All three options below use the same physical SPI pin connections; only the ESPHome
+`platform:` and `cs_pin:` differ (see the YAML comments for ready-to-use code blocks).
+
+| Interface board | Sensor type | Accuracy | Fault detection | Notes |
+|---|---|---|---|---|
+| **MAX6675** | K-type only | ±1.5 °C | Open-wire bit only | Most common; cheap; good enough |
+| **MAX31855** | K-type only | ±2 °C | Open/short-GND/short-VCC | Better diagnostics; recommended for new builds |
+| **NTC thermistor** | NTC 10 kΩ | ±1 °C (< 100 °C), ±3 °C (> 100 °C) | None | No SPI; one analog pin; limited to ~150 °C |
+
+> For steam-capable machines (setpoints up to 140 °C), a K-type thermocouple (MAX6675 or
+> MAX31855) is strongly preferred over NTC because the NTC resistance curve becomes very
+> non-linear above 100 °C, reducing accuracy.
+
 ---
 
 ## SSR Wiring (Heater)
@@ -101,6 +116,27 @@ SSR AC2     ──► thermoblock
 
 The SSR must be rated for at least **10 A** at 250 VAC. Mount it on an aluminium heatsink
 or directly on the machine chassis (if metal) with thermal paste.
+
+### SSR type alternatives
+
+| SSR type | Control signal | ESPHome output | Recommended |
+|---|---|---|---|
+| DC control, zero-crossing | 3–32 V DC | `slow_pwm` (period 1 s) | ✅ Best choice — silent, low EMI |
+| DC control, random-firing | 3–32 V DC | `slow_pwm` (period 1 s) | ✅ Also fine, slightly more EMI |
+| Mechanical relay (not SSR) | 5 V relay module | `slow_pwm` (period ≥ 5 s) | ⚠️ Typically rated ~100 k cycles; at 5 s period + 50% duty, expect ~140 h before end-of-life |
+
+### `slow_pwm` period guidance
+
+| Period | Heater duty-cycle steps | SSR stress | Notes |
+|---|---|---|---|
+| `0.5s` | 200 ms steps | High | Too fast for most SSRs; avoid |
+| `1s` (default) | 1 % resolution over 100 s | Normal | Best for PID with thermoblock |
+| `2s` | 2 % resolution | Low | Use for larger boilers or mechanical relays |
+| `5s` | 5 % resolution, 200 ms min on-time | Very low | Required for mechanical relays |
+
+> The `period` in `output.slow_pwm` controls how often the SSR is switched.
+> Shorter periods give the PID finer control but stress the SSR more.
+> For opto-isolated solid-state relays (SSRs), 1 s is the standard and safe choice.
 
 ---
 

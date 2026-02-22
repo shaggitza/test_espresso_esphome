@@ -94,10 +94,29 @@ i2c:
 
 # =============================================================================
 # TEMPERATURE SENSOR — native ESPHome sensor (first-class citizen)
-# The thermoblock surface temperature, read by a MAX6675 thermocouple board.
+# The thermoblock surface temperature, read by a thermocouple board via SPI.
 # Visible in HA as a sensor entity. Can be used independently in automations.
+#
+# SUPPORTED THERMOCOUPLE INTERFACES — choose ONE of the three options below:
+#
+#  Option A — MAX6675 (most common, K-type only, single fault bit, ±1.5 °C)
+#    Pros:  cheap, widely available, simple
+#    Cons:  K-type only, no cold-junction compensation accuracy, no open-wire detail
+#
+#  Option B — MAX31855 (better, K-type only, full fault diagnostics, ±2 °C)
+#    Pros:  open/short-to-GND/VCC fault codes, readable cold-junction temp
+#    Cons:  slightly more expensive; K-type only
+#
+#  Option C — NTC thermistor (no SPI, single analog pin, ±1 °C)
+#    Pros:  no SPI bus needed, very cheap
+#    Cons:  shorter range (~150 °C max), needs calibration, less accurate at high temp
+#    Use:   replace the SPI block above with an ADC-based sensor using a voltage divider.
+#
+# Recommendation: MAX31855 for new builds (better fault reporting); MAX6675 if already
+# sourced. Only use NTC if SPI pins are unavailable.
 # =============================================================================
 sensor:
+  # ---------- Option A: MAX6675 (active — comment out to switch) ----------
   - platform: max6675
     id: thermoblock_temp
     name: "Thermoblock Temperature"
@@ -107,6 +126,67 @@ sensor:
       - sliding_window_moving_average:
           window_size: 5
           send_every: 1
+    # Safety: hard over-temperature cutoff — independent of PID.
+    # If the thermoblock exceeds this limit the heater is forced OFF immediately.
+    # Tune OVER_TEMP_CUTOFF to ~30 °C above your highest normal setpoint.
+    on_value_range:
+      - above: 165            # °C — absolute maximum; adjust to your machine's rating
+        then:
+          - climate.control:
+              id: main_heater
+              mode: "off"
+          - logger.log:
+              format: "SAFETY: Over-temperature cutoff (%.1f °C). Heater forced OFF."
+              args: ["x"]
+              level: ERROR
+
+  # ---------- Option B: MAX31855 (comment out Option A and uncomment this) ----------
+  # - platform: max31855
+  #   id: thermoblock_temp
+  #   name: "Thermoblock Temperature"
+  #   cs_pin: GPIO5             # ← CHANGE ME
+  #   update_interval: 1s
+  #   filters:
+  #     - sliding_window_moving_average:
+  #         window_size: 5
+  #         send_every: 1
+  #   on_value_range:
+  #     - above: 165
+  #       then:
+  #         - climate.control:
+  #             id: main_heater
+  #             mode: "off"
+  #         - logger.log:
+  #             format: "SAFETY: Over-temperature cutoff (%.1f °C). Heater forced OFF."
+  #             args: ["x"]
+  #             level: ERROR
+
+  # ---------- Option C: NTC thermistor (no SPI; comment out Options A & B) ----------
+  # Remove the spi: block above if using only NTC.
+  # - platform: ntc
+  #   id: thermoblock_temp
+  #   name: "Thermoblock Temperature"
+  #   sensor: ntc_adc_raw      # reference to an adc sensor on the same pin
+  #   calibration:
+  #     b_constant: 3950
+  #     reference_temperature: 25°C
+  #     reference_resistance: 10kOhm
+  #   on_value_range:
+  #     - above: 165
+  #       then:
+  #         - climate.control:
+  #             id: main_heater
+  #             mode: "off"
+  #         - logger.log:
+  #             format: "SAFETY: Over-temperature cutoff (%.1f °C). Heater forced OFF."
+  #             args: ["x"]
+  #             level: ERROR
+  # # ADC helper for NTC option (add this when using Option C):
+  # - platform: adc
+  #   id: ntc_adc_raw
+  #   pin: GPIO35               # ← CHANGE ME — analog-capable pin (GPIO32–GPIO39 on ESP32)
+  #   update_interval: 1s
+  #   attenuation: 11db         # for 3.3 V full-scale range
 
   # Diagnostic sensors (standard ESPHome platforms)
   - platform: uptime
@@ -133,22 +213,71 @@ espresso_machine_flow_meter:
   pulses_per_ml: 0.5195       # ← calibrate for your flow meter (AB32: ~0.5195)
 
 # =============================================================================
-# HEATER OUTPUT — native ESPHome slow_pwm output driving the SSR
+# HEATER OUTPUT — native ESPHome output driving the SSR
 # The SSR defaults to OFF (GPIO LOW) on reset — safe by design.
+#
+# SUPPORTED OUTPUT TYPES — choose ONE:
+#
+#  Option A — slow_pwm (recommended for SSR + thermoblock)
+#    Period 1 s gives the PID fine-grained duty-cycle control (0–100 %).
+#    SSRs switch silently and handle 1 Hz PWM with zero wear.
+#    Shorter period = finer control but higher SSR switching stress.
+#
+#  Option B — gpio (on/off bang-bang, no duty-cycle)
+#    Use only if you do NOT use a PID climate — pair with thermostat climate instead.
+#    Loses the proportional benefit of PID; temperature will oscillate ±1–2 °C.
+#
+#  Option C — ledc (hardware PWM ~1 kHz, for resistive loads only)
+#    Not recommended for SSRs — most SSRs have a minimum turn-on pulse width > 1 ms.
+#    Only use if your SSR explicitly supports high-frequency switching.
 # =============================================================================
 output:
+  # ---------- Option A: slow_pwm (active) ----------
   - platform: slow_pwm
     id: heater_ssr
     pin: GPIO4                # ← CHANGE ME — GPIO to SSR control input
-    period: 1s
+    period: 1s                # 1 s gives good PID resolution; increase to 2 s for less stress
+
+  # ---------- Option B: gpio / bang-bang (comment out Option A and uncomment) ----------
+  # - platform: gpio
+  #   id: heater_ssr
+  #   pin: GPIO4              # ← CHANGE ME
+  # # When using gpio output, replace climate.pid below with climate.thermostat:
+  # # climate:
+  # #   - platform: thermostat
+  # #     id: main_heater
+  # #     sensor: thermoblock_temp
+  # #     heat_deadband: 0.5°C     # hysteresis — tune to taste
+  # #     default_target_temperature_low: 90°C
+  # #     heat_action:
+  # #       - output.turn_on: heater_ssr
+  # #     idle_action:
+  # #       - output.turn_off: heater_ssr
 
 # =============================================================================
-# HEATER — native ESPHome PID climate entity (first-class citizen)
+# HEATER — native ESPHome climate entity (first-class citizen)
 # This is a standard ESPHome climate entity: visible in HA, supports all
 # climate actions (set_temperature, set_mode), and ESPHome's PID autotune.
 # The espresso_machine orchestrator changes the setpoint during brew/steam.
+#
+# SUPPORTED CONTROL ALGORITHMS — choose ONE (see also docs/pid_tuning.md):
+#
+#  Option A — PID (active, recommended)
+#    Proportional-Integral-Derivative control. Smooth, accurate, handles thermoblock
+#    thermal dynamics well. Requires tuning (kp, ki, kd) — use autotune button below.
+#    Best choice for ±0.5 °C accuracy.
+#
+#  Option B — Thermostat (bang-bang / hysteresis)
+#    Simple on/off with a deadband. Easier to configure, but temperature oscillates
+#    ±0.5–2 °C depending on deadband. Use only with a gpio output (Option B above).
+#    No kp/ki/kd to tune — just set heat_deadband.
+#    See commented block in the output section above.
+#
+#  Note: ESPHome does not have a built-in fuzzy-logic or model-predictive controller.
+#  For advanced control, implement a custom lambda in the climate's pid output function.
 # =============================================================================
 climate:
+  # ---------- Option A: PID (active) ----------
   - platform: pid
     id: main_heater
     name: "Espresso Heater"
@@ -156,15 +285,15 @@ climate:
     default_target_temperature: 90   # °C — brew temperature default (ESPHome PID uses plain number in Celsius)
     heat_output: heater_ssr
     control_parameters:
-      kp: 2.5
-      ki: 0.05
-      kd: 15.0
-      output_averaging_samples: 5
-      derivative_averaging_samples: 5
-    # Deadband: stop integrating when within ±0.3 °C of setpoint
+      kp: 2.5     # proportional gain — increase for faster response, decrease if overshooting
+      ki: 0.05    # integral gain — eliminates steady-state error; increase if slow to settle
+      kd: 15.0    # derivative gain — damps overshoot; thermoblocks benefit from high kd
+      output_averaging_samples: 5       # smooth output to SSR (reduces relay wear)
+      derivative_averaging_samples: 5  # smooth derivative term (reduces sensor noise impact)
+    # Deadband: stop integrating when within ±0.3 °C of setpoint (prevents integral windup)
     deadband_parameters:
-      threshold_high: 0.3
-      threshold_low: -0.3
+      threshold_high: 0.3   # °C above setpoint — stop integrating
+      threshold_low: -0.3   # °C below setpoint — stop integrating
 
 # =============================================================================
 # VALVES — espresso_machine_valve platform (first-class citizen)

@@ -68,12 +68,12 @@ on the existing entity. This phase ensures the reference YAML compiles end-to-en
 thermocouple and SSR.
 
 Tasks:
-- [ ] Document supported thermocouple types in YAML comments (MAX6675, MAX31855, NTC)
-- [ ] Document `output.slow_pwm` SSR wiring in `docs/wiring.md`
-- [ ] Safety: add hard over-temperature cutoff in `espresso_machine.cpp` — watchdog on
-  `thermoblock_temp` sensor independent of PID
-- [ ] Expose PID autotune button in example YAML
-- [ ] Validate `esphome config` compiles the heater section
+- [x] Document supported thermocouple types in YAML comments (MAX6675, MAX31855, NTC)
+- [x] Document `output.slow_pwm` SSR wiring in `docs/wiring.md`
+- [x] Safety: hard over-temperature cutoff via `on_value_range` on `thermoblock_temp` — independent of PID
+- [x] Expose PID autotune button in example YAML
+- [x] Document control algorithm alternatives (PID vs bang-bang; Ziegler-Nichols vs Cohen-Coon vs autotune)
+- [ ] Validate `esphome config` compiles the heater section (requires Phase 1 component scaffold)
 
 Deliverables:
 - Thermoblock reaches and holds setpoint ±0.5 °C; sensor and climate entity visible in HA.
