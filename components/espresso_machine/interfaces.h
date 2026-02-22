@@ -40,5 +40,14 @@ class IFlowMeter {
   virtual ~IFlowMeter() = default;
 };
 
+// ---------------------------------------------------------------------------
+// IOrchestrator — exposes machine-busy state for grinder lockout
+// ---------------------------------------------------------------------------
+class IOrchestrator {
+ public:
+  virtual bool is_busy() const = 0;
+  virtual ~IOrchestrator() = default;
+};
+
 }  // namespace espresso_machine
 }  // namespace esphome

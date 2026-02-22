@@ -43,7 +43,7 @@ enum class EspressoMode : uint8_t {
 // ---------------------------------------------------------------------------
 // EspressoMachine — pure orchestrator, owns no hardware
 // ---------------------------------------------------------------------------
-class EspressoMachine : public Component {
+class EspressoMachine : public Component, public espresso_machine::IOrchestrator {
  public:
   // ----- Brew hardware setters (called by Python codegen) -----------------
   // Heater is a native ESPHome climate entity; stored as Component* here.
