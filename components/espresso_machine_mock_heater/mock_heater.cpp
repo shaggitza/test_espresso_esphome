@@ -83,7 +83,7 @@ void MockHeater::setup() {
   ESP_LOGI(TAG, "  Initial temp: %.1f °C", temperature_);
   ESP_LOGI(TAG, "  Ambient temp: %.1f °C", ambient_temp_);
   ESP_LOGI(TAG, "  Power: %.0f W", power_watts_);
-  ESP_LOGI(TAG, "  Thermal mass: %.0f J/°C (10 mL thermoblock)", thermal_mass_);
+  ESP_LOGI(TAG, "  Thermal mass: %.0f J/°C", thermal_mass_);
   ESP_LOGI(TAG, "  Heat loss: %.2f W/°C", heat_loss_);
   ESP_LOGI(TAG, "  Water inlet temp: %.1f °C", water_inlet_temp_);
 }

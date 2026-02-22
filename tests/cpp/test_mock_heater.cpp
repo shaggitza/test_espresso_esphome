@@ -120,13 +120,12 @@ TEST(MockHeater, ReachesEquilibriumAtPartialDuty) {
   // In test, we'll run until temperature stabilizes within tolerance
 
   float prev_temp = f.heater.get_temperature();
-  for (int i = 0; i < 50000; ++i) {  // ~500 seconds
+  for (int i = 0; i < 50000; ++i) {  // ~500 seconds ≈ 0.68 τ (τ = C/h = 1256/1.7 ≈ 739s)
     f.advance_time_ms(10);
   }
 
   float expected_equilibrium = 25.0f + (0.1f * 1200.0f) / 1.7f;
-  // Should be approaching equilibrium (won't be exact after only 500s — τ≈739s)
-  // After 0.68τ: T ≈ 25 + (T_eq-25)×(1-e^-0.68) ≈ 59.7°C
+  // At 0.68τ: T ≈ 25 + (T_eq-25)×(1-e^-0.68) ≈ 59.7°C
   EXPECT_GT(f.heater.get_temperature(), 50.0f);  // Should have risen significantly
 }
 
@@ -232,9 +231,8 @@ TEST(MockHeater, NoFlowMeansNoFlowCooling) {
   f.heater.set_flow_rate(0.0f);
 
   // Single 10 ms step — compare to manual Euler:
-  // dT/dt = -h × (90 - 25) / C = -1.7 × 65 / 42 = -2.631 °C/s
-  // ΔT over 10ms = -2.631 × 0.01 = -0.02631 °C
-  // Expected: 90 - 0.02631 = 89.9737
+  // dT/dt = -h × (90 - 25) / C = -1.7 × 65 / 42 ≈ -2.631 °C/s
+  // ΔT over 10 ms = -2.631 × 0.010 ≈ -0.02631 °C → T ≈ 89.9737 °C
   float expected_after_one_step = 90.0f - (1.7f * (90.0f - 25.0f) / 42.0f) * 0.01f;
   f.advance_time_ms(10);
   EXPECT_NEAR(f.heater.get_temperature(), expected_after_one_step, 0.001f);
