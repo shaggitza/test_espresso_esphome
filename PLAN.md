@@ -85,12 +85,12 @@ Deliverables:
 **Goal:** Accurate volumetric measurement driving shot termination.
 
 Tasks:
-- [ ] `espresso_machine_flow_meter/__init__.py` — schema: `id`, `name`, `pin`, `pulses_per_ml`
-- [ ] Registers as a **sensor platform** exposing two child sensors:
+- [x] `espresso_machine_flow_meter/__init__.py` — schema: `id`, `name`, `pin`, `pulses_per_ml`
+- [x] Registers as a **sensor platform** exposing two child sensors:
   - `{id}_rate` — instantaneous flow rate (ml/s)
   - `{id}_total` — accumulated volume (ml), resets at shot start
-- [ ] Interrupt-driven pulse counter in C++ (`ISR`-safe)
-- [ ] Actions: `espresso_machine_flow_meter.reset`, `espresso_machine_flow_meter.calibrate`
+- [x] Interrupt-driven pulse counter in C++ (`ISR`-safe)
+- [x] Actions: `espresso_machine_flow_meter.reset`, `espresso_machine_flow_meter.calibrate`
 
 Deliverables:
 - Shot volume displayed in HA; shot auto-terminates at `flow_max` ml.
