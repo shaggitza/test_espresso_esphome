@@ -3,6 +3,7 @@
 #include "espresso_machine_flow_meter/flow_meter.h"
 
 using namespace esphome::espresso_machine_flow_meter;
+using esphome::sensor::Sensor;
 
 extern uint32_t g_mock_millis;
 
@@ -105,4 +106,62 @@ TEST(FlowMeter, ResetAfterAccumulationStartsFresh) {
   g_mock_millis = 2000;
   fm.loop();
   EXPECT_FLOAT_EQ(fm.get_total_volume(), 10.0f);
+}
+
+TEST(FlowMeter, CalibrateAdjustsPulsesPerMl) {
+  // 100 pulses delivered; user measures 50 ml → 2.0 pulses/ml
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+  fm.add_pulses(100);
+  fm.calibrate(50.0f);
+
+  // After calibration the meter should convert 100 pulses → 50 ml
+  g_mock_millis = 1000;
+  fm.loop();
+  EXPECT_FLOAT_EQ(fm.get_total_volume(), 50.0f);
+}
+
+TEST(FlowMeter, CalibrateIgnoresZeroVolume) {
+  // calibrate() with 0 ml must be a no-op (avoid division by zero)
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+  fm.add_pulses(100);
+  fm.calibrate(0.0f);
+
+  g_mock_millis = 1000;
+  fm.loop();
+  // pulses_per_ml unchanged → 100 pulses = 100 ml
+  EXPECT_FLOAT_EQ(fm.get_total_volume(), 100.0f);
+}
+
+TEST(FlowMeter, CalibrateIgnoresZeroPulses) {
+  // calibrate() with no pulses counted must be a no-op
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+  // Do not add any pulses
+  fm.calibrate(50.0f);
+
+  fm.add_pulses(10);
+  g_mock_millis = 1000;
+  fm.loop();
+  // pulses_per_ml unchanged → 10 pulses = 10 ml
+  EXPECT_FLOAT_EQ(fm.get_total_volume(), 10.0f);
+}
+
+TEST(FlowMeter, SensorsReceivePublishedValues) {
+  // When sensor pointers are set, loop() should publish rate and total.
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+
+  Sensor rate_sens;
+  Sensor total_sens;
+  fm.set_rate_sensor(&rate_sens);
+  fm.set_total_sensor(&total_sens);
+
+  fm.add_pulses(20);
+  g_mock_millis = 1000;
+  fm.loop();
+
+  EXPECT_FLOAT_EQ(total_sens.state, 20.0f);
+  EXPECT_FLOAT_EQ(rate_sens.state, 20.0f);  // 20 ml in 1 s
 }

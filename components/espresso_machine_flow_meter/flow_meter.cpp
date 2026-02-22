@@ -9,6 +9,7 @@ static const char *const TAG = "espresso_machine_flow_meter";
 void FlowMeter::setup() {
   ESP_LOGI(TAG, "Flow meter initialised (%.4f pulses/ml)", pulses_per_ml_);
   pin_->setup();
+  pin_->attach_interrupt(FlowMeter::pulse_isr, this, gpio::INTERRUPT_RISING_EDGE);
   last_update_ms_ = millis();
 }
 
@@ -28,6 +29,11 @@ void FlowMeter::loop() {
     total_volume_ += delta_ml;
     rate_ = delta_ml / (static_cast<float>(elapsed_ms) / 1000.0f);
   }
+
+  if (rate_sensor_ != nullptr)
+    rate_sensor_->publish_state(rate_);
+  if (total_sensor_ != nullptr)
+    total_sensor_->publish_state(total_volume_);
 }
 
 void FlowMeter::reset() {
@@ -36,6 +42,13 @@ void FlowMeter::reset() {
   total_volume_ = 0.0f;
   rate_ = 0.0f;
   ESP_LOGI(TAG, "Flow meter reset");
+}
+
+void FlowMeter::calibrate(float actual_volume_ml) {
+  if (actual_volume_ml <= 0.0f || pulse_count_ == 0)
+    return;
+  pulses_per_ml_ = static_cast<float>(pulse_count_) / actual_volume_ml;
+  ESP_LOGI(TAG, "Flow meter calibrated: %.4f pulses/ml", pulses_per_ml_);
 }
 
 }  // namespace espresso_machine_flow_meter

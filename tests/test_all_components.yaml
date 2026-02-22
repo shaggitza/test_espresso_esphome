@@ -52,6 +52,10 @@ espresso_machine_flow_meter:
     number: GPIO34
     mode: INPUT
   pulses_per_ml: 0.5195
+  rate_sensor:
+    name: "Brew Flow Rate"
+  total_sensor:
+    name: "Brew Flow Total"
 
 espresso_machine_valve:
   - id: brew_valve
