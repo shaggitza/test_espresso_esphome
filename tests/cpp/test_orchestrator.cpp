@@ -225,7 +225,14 @@ TEST(Orchestrator, SteamStartKeepsSteamValveClosedWhileHeating) {
 TEST(Orchestrator, SteamStopReturnsToIdle) {
   OrchestratorFixture f;
   f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
   f.machine.steam_stop();
+  // Phase 8: steam_stop enters COOLING; advance through COOLING → CLEANUP → IDLE
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::STEAMING);
+  f.machine.loop();  // COOLING → CLEANUP
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::CLEANUP);
+  f.machine.loop();  // CLEANUP → IDLE
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
 }
 
@@ -277,7 +284,13 @@ TEST(Orchestrator, IsBusyWhenSteaming) {
   OrchestratorFixture f;
   f.machine.steam_start();
   EXPECT_TRUE(f.machine.is_busy());
+  f.machine.loop();  // HEATING → STEAMING
   f.machine.steam_stop();
+  // Phase 8: machine stays busy during COOLING and CLEANUP
+  EXPECT_TRUE(f.machine.is_busy());
+  f.machine.loop();  // COOLING → CLEANUP
+  EXPECT_TRUE(f.machine.is_busy());
+  f.machine.loop();  // CLEANUP → IDLE
   EXPECT_FALSE(f.machine.is_busy());
 }
 
@@ -374,4 +387,96 @@ TEST(Orchestrator, PreInfusionResetsFlowBeforeBrewing) {
   f.machine.loop();  // flowing → hold (volume reached)
   f.machine.loop();  // hold complete → BREWING (resets flow)
   EXPECT_GT(f.brew_pump.reset_flow_count, resets_before);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 — Steam state machine (COOLING → CLEANUP → IDLE)
+// ---------------------------------------------------------------------------
+TEST(Orchestrator, SteamStopDuringHeatingCancelsImmediately) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  // Stopping during HEATING goes straight to IDLE (no cool-down needed)
+  f.machine.steam_stop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::IDLE);
+}
+
+TEST(Orchestrator, SteamStopDuringSteamingEntersCooling) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+  f.machine.steam_stop();
+  // Phase 8: cool-down initiated
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::STEAMING);
+}
+
+TEST(Orchestrator, SteamCoolingTransitionsToCleanup) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  f.machine.loop();  // COOLING → CLEANUP (purge valve opens)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::CLEANUP);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);
+}
+
+TEST(Orchestrator, SteamCleanupTransitionsToIdle) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  f.machine.loop();  // COOLING → CLEANUP
+  f.machine.loop();  // CLEANUP → IDLE (purge valve closes)
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+}
+
+TEST(Orchestrator, SteamPumpDutyCycleTurnsOffAtTargetFlowRate) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on)
+  EXPECT_TRUE(f.steam_pump.running);
+
+  // Simulate flow rate reaching target
+  f.steam_pump.rate = 2.0f;
+  f.machine.loop();  // STEAMING: rate >= target → pump off
+  EXPECT_FALSE(f.steam_pump.running);
+}
+
+TEST(Orchestrator, SteamPumpDutyCycleTurnsOnBelowTargetFlowRate) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on)
+
+  // Simulate flow above target so pump turns off
+  f.steam_pump.rate = 2.0f;
+  f.machine.loop();  // STEAMING: rate >= target → pump off
+  EXPECT_FALSE(f.steam_pump.running);
+
+  // Drop rate below target
+  f.steam_pump.rate = 1.5f;
+  f.machine.loop();  // STEAMING: rate < target → pump on
+  EXPECT_TRUE(f.steam_pump.running);
+}
+
+TEST(Orchestrator, SteamPumpRunsContinuouslyWithoutFlowMeter) {
+  OrchestratorFixture f;
+  // steam_pump.rate defaults to 0.0f (no flow meter), target is 2.0f
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on)
+  f.machine.loop();  // STEAMING: rate(0) < target(2) → pump stays on
+  EXPECT_TRUE(f.steam_pump.running);
+}
+
+TEST(Orchestrator, SteamStopIgnoredDuringCooling) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();   // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  // Second steam_stop() during COOLING is a no-op
+  f.machine.steam_stop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
 }
