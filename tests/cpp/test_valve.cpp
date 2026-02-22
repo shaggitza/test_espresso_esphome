@@ -177,6 +177,6 @@ TEST_F(ValveInterlockTest, TurnOnEnforcesInterlock) {
 TEST_F(ValveInterlockTest, OnlyOneValveOpenAtATime) {
   v1_->open();
   v2_->open();
-  int open_count = (v1_->is_open() ? 1 : 0) + (v2_->is_open() ? 1 : 0);
-  EXPECT_EQ(open_count, 1);
+  int open_valve_count = (v1_->is_open() ? 1 : 0) + (v2_->is_open() ? 1 : 0);
+  EXPECT_EQ(open_valve_count, 1);
 }
