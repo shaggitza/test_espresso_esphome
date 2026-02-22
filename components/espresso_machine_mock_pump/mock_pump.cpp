@@ -1,4 +1,5 @@
 #include "mock_pump.h"
+#include "esphome/core/hal.h"
 #include <cmath>
 
 namespace esphome {
@@ -101,6 +102,11 @@ void MockPump::loop() {
       }
     }
     run_time_ = 0.0f;  // Reset run time for next start
+  }
+
+  // Push current flow rate to mock heater for thermoblock cooling simulation
+  if (flow_observer_) {
+    flow_observer_->set_flow_rate(current_flow_rate_);
   }
 
   // Log periodically (every ~5 seconds for debugging)

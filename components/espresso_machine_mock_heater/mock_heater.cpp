@@ -1,4 +1,6 @@
 #include "mock_heater.h"
+#include <algorithm>
+#include "esphome/core/hal.h"
 
 namespace esphome {
 namespace espresso_machine_mock_heater {
@@ -81,8 +83,9 @@ void MockHeater::setup() {
   ESP_LOGI(TAG, "  Initial temp: %.1f °C", temperature_);
   ESP_LOGI(TAG, "  Ambient temp: %.1f °C", ambient_temp_);
   ESP_LOGI(TAG, "  Power: %.0f W", power_watts_);
-  ESP_LOGI(TAG, "  Thermal mass: %.0f J/°C", thermal_mass_);
+  ESP_LOGI(TAG, "  Thermal mass: %.0f J/°C (10 mL thermoblock)", thermal_mass_);
   ESP_LOGI(TAG, "  Heat loss: %.2f W/°C", heat_loss_);
+  ESP_LOGI(TAG, "  Water inlet temp: %.1f °C", water_inlet_temp_);
 }
 
 void MockHeater::loop() {
@@ -100,11 +103,15 @@ void MockHeater::loop() {
   // Get current duty cycle from PID output
   float duty = output_ ? output_->get_duty() : 0.0f;
 
-  // Thermal ODE: dT/dt = (duty × P − h × (T − T_amb)) / C
-  // Forward Euler integration: T += dT/dt × dt
+  // Thermal ODE: dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × (T − T_inlet)) / C
+  // Flow cooling: water absorbs heat proportional to flow rate and temperature delta
+  // Cp_water ≈ 4.186 J/(mL·°C)
+  static constexpr float CP_WATER = 4.186f;
+
   float heat_in = duty * power_watts_;
-  float heat_out = heat_loss_ * (temperature_ - ambient_temp_);
-  float dT_dt = (heat_in - heat_out) / thermal_mass_;
+  float heat_loss = heat_loss_ * (temperature_ - ambient_temp_);
+  float heat_flow = flow_rate_ * CP_WATER * (temperature_ - water_inlet_temp_);
+  float dT_dt = (heat_in - heat_loss - heat_flow) / thermal_mass_;
 
   temperature_ += dT_dt * dt_s;
 
@@ -120,8 +127,8 @@ void MockHeater::loop() {
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
     last_log_ms = now;
-    ESP_LOGD(TAG, "T=%.1f°C, duty=%.1f%%, dT/dt=%.2f°C/s",
-             temperature_, duty * 100.0f, dT_dt);
+    ESP_LOGD(TAG, "T=%.1f°C, duty=%.1f%%, Q=%.2f mL/s, dT/dt=%.2f°C/s",
+             temperature_, duty * 100.0f, flow_rate_, dT_dt);
   }
 }
 

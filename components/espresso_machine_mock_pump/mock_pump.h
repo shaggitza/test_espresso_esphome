@@ -45,6 +45,9 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_nominal_flow(float f) { nominal_flow_ = f; }
   void set_puck_time_constant(float t) { puck_time_constant_ = t; }
 
+  // Link to mock heater so flow rate drives thermoblock cooling
+  void set_heater(espresso_machine::IFlowObserver *h) { flow_observer_ = h; }
+
   // Sensor setters
   void set_rate_sensor(sensor::Sensor *s) { rate_sensor_ = s; }
   void set_total_sensor(sensor::Sensor *s) { total_sensor_ = s; }
@@ -97,6 +100,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   sensor::Sensor *total_sensor_{nullptr};
   MockPumpNumber *nominal_flow_number_{nullptr};
   MockPumpNumber *puck_time_constant_number_{nullptr};
+  espresso_machine::IFlowObserver *flow_observer_{nullptr};
 
   // Timing
   uint32_t last_update_ms_{0};

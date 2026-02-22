@@ -70,6 +70,7 @@ CONF_AMBIENT_TEMPERATURE = "ambient_temperature"
 CONF_POWER_WATTS = "power_watts"
 CONF_THERMAL_MASS_J_PER_C = "thermal_mass_j_per_c"
 CONF_HEAT_LOSS_W_PER_C = "heat_loss_w_per_c"
+CONF_WATER_INLET_TEMP_C = "water_inlet_temp_c"
 
 # Number entity config keys for runtime tuning
 CONF_POWER_NUMBER = "power_number"
@@ -107,10 +108,11 @@ CONFIG_SCHEMA = cv.Schema(
         # Initial and ambient temperatures
         cv.Optional(CONF_INITIAL_TEMPERATURE, default=25.0): cv.float_,
         cv.Optional(CONF_AMBIENT_TEMPERATURE, default=25.0): cv.float_,
-        # Physics parameters (defaults model a ~300g thermoblock at 1.2kW)
+        # Physics parameters (defaults model a ~10 mL thermoblock at 1.2 kW)
         cv.Optional(CONF_POWER_WATTS, default=1200.0): cv.positive_float,
-        cv.Optional(CONF_THERMAL_MASS_J_PER_C, default=1256.0): cv.positive_float,
+        cv.Optional(CONF_THERMAL_MASS_J_PER_C, default=42.0): cv.positive_float,
         cv.Optional(CONF_HEAT_LOSS_W_PER_C, default=1.7): cv.positive_float,
+        cv.Optional(CONF_WATER_INLET_TEMP_C, default=20.0): cv.float_,
         # Output sub-entity (what the PID's heat_output references)
         cv.Required(CONF_OUTPUT): OUTPUT_SCHEMA,
         # Temperature sensor sub-entity (what the PID's sensor references)
@@ -142,6 +144,7 @@ async def to_code(config):
     cg.add(var.set_power_watts(config[CONF_POWER_WATTS]))
     cg.add(var.set_thermal_mass(config[CONF_THERMAL_MASS_J_PER_C]))
     cg.add(var.set_heat_loss(config[CONF_HEAT_LOSS_W_PER_C]))
+    cg.add(var.set_water_inlet_temp(config[CONF_WATER_INLET_TEMP_C]))
 
     # Create and register the output sub-entity
     out_conf = config[CONF_OUTPUT]

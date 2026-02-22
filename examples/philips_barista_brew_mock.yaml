@@ -29,12 +29,15 @@
 #   - HA runtime tuning
 #
 # THERMAL MODEL (mock heater):
-#   dT/dt = (duty × P − h × (T − T_amb)) / C
+#   dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × (T − T_inlet)) / C
 #     duty   = 0.0–1.0 from PID
 #     P      = power_watts
-#     C      = thermal_mass_j_per_c
+#     C      = thermal_mass_j_per_c  (42 J/°C = 10 mL thermoblock)
 #     h      = heat_loss_w_per_c
 #     T_amb  = ambient_temperature
+#     Q      = flow rate [mL/s] from mock pump
+#     Cp     = 4.186 J/(mL·°C), specific heat of water
+#     T_inlet = water_inlet_temp_c
 #
 # PUCK WETTING MODEL (mock pump):
 #   Q(t) = Q_nom × (1 − exp(−t/τ))
@@ -106,18 +109,20 @@ external_components:
 #   sensor: thermoblock_temp    → MockHeaterTempSensor (same ID as real config)
 #   heat_output: heater_ssr     → MockHeaterOutput (same ID as real config)
 #
-# Physics parameters (defaults model a ~300g thermoblock at 1.2kW):
+# Physics parameters (defaults model a 10 mL thermoblock at 1.2 kW):
 #   power_watts: 1200.0          — heater element power
-#   thermal_mass_j_per_c: 1256.0 — ≈ 300g water-equivalent
+#   thermal_mass_j_per_c: 42.0   — 10 mL water equivalent (10 × 4.186 J/°C)
 #   heat_loss_w_per_c: 1.7       — calibrated: ~90°C at 10% PID duty
+#   water_inlet_temp_c: 20.0     — cold-water inlet temperature
 # =============================================================================
 espresso_machine_mock_heater:
   id: mock_heater
   initial_temperature: 25.0
   ambient_temperature: 25.0
   power_watts: 1200.0
-  thermal_mass_j_per_c: 1256.0
+  thermal_mass_j_per_c: 42.0    # 10 mL thermoblock water equivalent
   heat_loss_w_per_c: 1.7
+  water_inlet_temp_c: 20.0
 
   # Temperature sensor — same ID as physical max6675/max31855
   temperature_sensor:
@@ -167,6 +172,7 @@ espresso_machine_mock_pump:
   name: "Mock Pump"
   nominal_flow_ml_per_s: 4.0
   puck_time_constant_s: 10.0
+  mock_heater: mock_heater
 
   # Flow sensors — same as espresso_machine_flow_meter sensors
   rate_sensor:

@@ -38,7 +38,6 @@ from esphome import automation
 from esphome.components import switch, sensor, number
 from esphome.const import (
     CONF_ID,
-    CONF_NAME,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
 )
@@ -47,6 +46,7 @@ CODEOWNERS = ["@shaggitza"]
 AUTO_LOAD = ["switch", "sensor", "number"]
 
 espresso_machine_mock_pump_ns = cg.esphome_ns.namespace("espresso_machine_mock_pump")
+
 MockPump = espresso_machine_mock_pump_ns.class_(
     "MockPump", switch.Switch, cg.Component
 )
@@ -58,6 +58,7 @@ ResetAction = espresso_machine_mock_pump_ns.class_("ResetAction", automation.Act
 # Config keys
 CONF_NOMINAL_FLOW_ML_PER_S = "nominal_flow_ml_per_s"
 CONF_PUCK_TIME_CONSTANT_S = "puck_time_constant_s"
+CONF_MOCK_HEATER = "mock_heater"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
 
@@ -72,6 +73,8 @@ CONFIG_SCHEMA = (
             # Physics parameters (defaults model a typical espresso extraction)
             cv.Optional(CONF_NOMINAL_FLOW_ML_PER_S, default=4.0): cv.positive_float,
             cv.Optional(CONF_PUCK_TIME_CONSTANT_S, default=10.0): cv.positive_float,
+            # Optional link to mock heater — drives flow-based thermoblock cooling
+            cv.Optional(CONF_MOCK_HEATER): cv.use_id(cg.Component),
             # Flow sensor sub-entities (same interface as espresso_machine_flow_meter)
             cv.Optional(CONF_RATE_SENSOR): sensor.sensor_schema(
                 unit_of_measurement="mL/s",
@@ -116,6 +119,11 @@ async def to_code(config):
     # Set physics parameters
     cg.add(var.set_nominal_flow(config[CONF_NOMINAL_FLOW_ML_PER_S]))
     cg.add(var.set_puck_time_constant(config[CONF_PUCK_TIME_CONSTANT_S]))
+
+    # Wire to mock heater for flow-based thermoblock cooling
+    if CONF_MOCK_HEATER in config:
+        heater = await cg.get_variable(config[CONF_MOCK_HEATER])
+        cg.add(var.set_heater(heater))
 
     # Create and register flow rate sensor
     if CONF_RATE_SENSOR in config:
