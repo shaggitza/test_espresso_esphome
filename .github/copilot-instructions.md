@@ -20,7 +20,11 @@ See `structure.md` for the full layout. Key directories:
 
 | Path | Contents |
 |---|---|
-| `components/espresso_machine/` | ESPHome external component source (Python + C++) |
+| `components/espresso_machine/` | Orchestrator platform (brew + steam state machines) |
+| `components/espresso_machine_valve/` | Solenoid valve platform (switch + interlock) |
+| `components/espresso_machine_pump/` | Pump platform (switch or number) |
+| `components/espresso_machine_grinder/` | Grinder platform (button + number) |
+| `components/espresso_machine_flow_meter/` | Flow sensor platform (rate + volume sensors) |
 | `examples/` | Ready-to-flash YAML device configurations |
 | `docs/` | Wiring guides, PID tuning, HA dashboard, troubleshooting |
 
@@ -36,8 +40,14 @@ When writing or modifying component files, follow these conventions:
 - Sub-component schemas are composed into the parent with `cv.Schema.extend(...)`.
 
 ### C++ files (`.h` / `.cpp`)
-- All classes live in namespace `esphome::espresso_machine`.
-- Classes inherit from `esphome::Component` (or a suitable sub-base).
+- Each platform lives in its own namespace: `esphome::espresso_machine`,
+  `esphome::espresso_machine_valve`, `esphome::espresso_machine_pump`, etc.
+- Platform classes inherit from the appropriate ESPHome base:
+  - Valve → `esphome::switch_::Switch`
+  - Pump → `esphome::switch_::Switch` (relay) or `esphome::number::Number` (dimmer)
+  - Grinder → `esphome::button::Button` + `esphome::number::Number`
+  - Flow meter → `esphome::sensor::Sensor`
+  - Orchestrator → `esphome::Component`
 - Implement `setup()` for one-time initialisation and `loop()` for periodic work.
 - Use state machines in `loop()` — never `delay()` or blocking calls.
 - Follow ESPHome naming: `snake_case` for methods, `UPPER_SNAKE_CASE` for constants.
@@ -51,20 +61,80 @@ When writing or modifying component files, follow these conventions:
 
 ## Key YAML Concepts
 
-The top-level `espresso_machine:` block wires together the subsystems:
+Every hardware subsystem is a **first-class ESPHome entity** declared at the top level with its
+own platform block — exactly as ESPHome itself declares sensors, switches, and climate entities.
+The `espresso_machine:` block is a **pure orchestrator**: it owns no hardware directly and only
+references other entities by `id:`.
 
 ```yaml
-espresso_machine:
-  heater:    { ... }   # thermoblock + PID
-  grinder:   { ... }   # relay-driven grinder
-  flow_meter:{ ... }   # pulse-counting flow sensor
-  pump:      { ... }   # vibration pump
-  valves:    [ ... ]   # named valves
-  brew:      { ... }   # shot state machine config
-  steam:     { ... }   # steam state machine config
-```
+# Temperature sensor — native ESPHome platform (top-level, first-class)
+sensor:
+  - platform: max6675
+    id: thermoblock_temp
 
-Sub-blocks reference each other by `id:` string — e.g. `brew.heater: main_heater`.
+# Heater SSR — native ESPHome output
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4
+    period: 1s
+
+# Heater PID — native ESPHome climate (top-level, first-class)
+climate:
+  - platform: pid
+    id: main_heater
+    sensor: thermoblock_temp
+    heat_output: heater_ssr
+
+# Flow meter — custom espresso_machine_flow_meter platform (top-level, first-class)
+espresso_machine_flow_meter:
+  id: brew_flow
+  pin: GPIO34
+  pulses_per_ml: 0.5195
+
+# Valves — custom espresso_machine_valve platform (each one top-level, first-class)
+espresso_machine_valve:
+  - id: brew_valve
+    pin: GPIO26
+  - id: steam_valve
+    pin: GPIO27
+  - id: purge_valve
+    pin: GPIO14
+
+# Pump — custom espresso_machine_pump platform (top-level, first-class)
+espresso_machine_pump:
+  id: main_pump
+  type: relay
+  pin: GPIO25
+
+# Grinder — custom espresso_machine_grinder platform (top-level, first-class)
+espresso_machine_grinder:
+  id: main_grinder
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
+
+# Orchestrator — references all entities above by id:
+espresso_machine:
+  id: my_espresso
+  brew:
+    heater: main_heater
+    pump: main_pump
+    flow_meter: brew_flow
+    valve: brew_valve
+    purge_valve: purge_valve
+    target_temperature: 90°C
+    flow_max: 40ml
+    flow_offset: 20ml
+  steam:
+    heater: main_heater
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    flow_max: 2ml/s
+    cool_down_to: 90°C
+```
 
 ## Current Development Phase
 

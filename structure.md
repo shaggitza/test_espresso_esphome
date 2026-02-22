@@ -21,54 +21,39 @@ test_espresso_esphome/
 │       └── release.yml             # CI: tag → GitHub Release automation
 │
 ├── components/
-│   └── espresso_machine/            # ESPHome external component root
-│       │
-│       ├── __init__.py              # Top-level component schema and code-gen entry point
-│       ├── espresso_machine.h       # C++ class: EspressoMachine (Component base)
-│       ├── espresso_machine.cpp     # C++ implementation: setup(), loop(), state machine
-│       │
-│       ├── heater/
-│       │   ├── __init__.py          # Schema: type, sensor_type, cs_pin, ssr_pin, pid {}
-│       │   │                        #   (delegates PID logic to ESPHome's built-in climate.pid)
-│       │   ├── heater.h             # ThermoblockHeater class; wraps PID climate
-│       │   └── heater.cpp           # PID loop, safety cutoff, auto-tune trigger
-│       │
-│       ├── grinder/
-│       │   ├── __init__.py          # Schema: type (relay|none), pin, default_grind_time
-│       │   ├── grinder.h            # GrinderController class
-│       │   └── grinder.cpp          # Timed relay logic, interlock with brew/steam
-│       │
-│       ├── flow_meter/
-│       │   ├── __init__.py          # Schema: pin, pulses_per_ml
-│       │   ├── flow_meter.h         # FlowMeter class; pulse counter + volume accumulator
-│       │   └── flow_meter.cpp       # ISR pulse handler, flow rate calculation, calibration
-│       │
-│       ├── valve/
-│       │   ├── __init__.py          # Schema: id, pin, normally_open (optional)
-│       │   ├── valve.h              # Valve class; named GPIO output with safety interlock
-│       │   └── valve.cpp            # open(), close(), interlock enforcement
-│       │
-│       ├── pump/
-│       │   ├── __init__.py          # Schema: id, type (relay|dimmer), pin
-│       │   ├── pump.h               # PumpController class
-│       │   └── pump.cpp             # On/off relay or duty-cycle dimmer control
-│       │
-│       ├── brew/
-│       │   ├── __init__.py          # Schema: heater, target_temperature, temperature_profile,
-│       │   │                        #         flow_meter, flow_max, flow_offset, valve,
-│       │   │                        #         purge_valve, pump, pre_infusion, cleanup_script
-│       │   ├── brew.h               # BrewController class; shot state machine
-│       │   └── brew.cpp             # State machine: idle→heating→pre_infusion→brewing→done→cleanup
-│       │
-│       └── steam/
-│           ├── __init__.py          # Schema: heater, target_temperature, flow_max,
-│           │                        #         cool_down_to, valve, purge_valve, pump
-│           ├── steam.h              # SteamController class
-│           └── steam.cpp            # Heat→steam→cool-down sequence, pump duty-cycle
+│   └── espresso_machine/            # Pure orchestrator component (brew + steam state machines)
+│       ├── __init__.py              # Top-level schema: brew {}, steam {} + entity id references
+│       ├── espresso_machine.h       # EspressoMachine class: coordinates brew/steam/interlock
+│       └── espresso_machine.cpp     # Brew state machine, steam state machine, safety interlocks
+│
+│   └── espresso_machine_valve/      # First-class solenoid valve platform
+│       ├── __init__.py              # Schema: id, name, pin, normally_open
+│       │                            # Registers as switch platform; enforces single-open interlock
+│       ├── valve.h                  # Valve class (inherits Switch)
+│       └── valve.cpp                # open(), close(), interlock with sibling valves
+│
+│   └── espresso_machine_pump/       # First-class vibration pump platform
+│       ├── __init__.py              # Schema: id, name, type (relay|dimmer), pin
+│       │                            # Registers as switch (relay) or number (dimmer) platform
+│       ├── pump.h                   # PumpController class
+│       └── pump.cpp                 # Relay on/off; duty-cycle via slow_pwm; run(volume_ml) action
+│
+│   └── espresso_machine_grinder/    # First-class grinder platform
+│       ├── __init__.py              # Schema: id, name, type (relay|none), pin, default_grind_time
+│       │                            # Registers as button (one-shot) + number (grind time) platform
+│       ├── grinder.h                # GrinderController class
+│       └── grinder.cpp              # Timed relay; refuses activation during brew/steam
+│
+│   └── espresso_machine_flow_meter/ # First-class volumetric flow sensor platform
+│       ├── __init__.py              # Schema: id, name, pin, pulses_per_ml
+│       │                            # Registers as sensor platform; exposes rate + total child sensors
+│       ├── flow_meter.h             # FlowMeter class (inherits Sensor)
+│       └── flow_meter.cpp           # ISR pulse counter, ml/s rate, total volume, reset action
 │
 ├── examples/
 │   └── philips_barista_brew.yaml    # Full annotated example for the Philips Barista Brew
 │                                    # with integrated grinder — ready to flash
+│   └── secrets.yaml.template        # Credentials template (secrets.yaml is git-ignored)
 │
 └── docs/
     ├── wiring.md                    # Pin-out, wiring diagrams, isolation notes
@@ -81,31 +66,55 @@ test_espresso_esphome/
 
 ## Component Architecture
 
+The fundamental design principle: **every hardware subsystem is a first-class ESPHome entity**.
+ESPHome itself follows this pattern — sensors, switches, climate entities, and outputs are all
+declared at the top level and wired together by `id:` references.
+This project extends that pattern with espresso-machine-specific platforms.
+
 ```
-espresso_machine (top-level)
-│
-├── heater            — Temperature sensor + SSR + PID loop
-│     wraps ESPHome climate.pid internally
-│
-├── grinder           — Relay-driven grinder with timed operation
-│
-├── flow_meter        — Pulse-counting flow sensor → ml accumulation
-│
-├── valve             — Named GPIO outputs (brew_valve, steam_valve, purge_valve)
-│     enforces single-open interlock
-│
-├── pump              — Vibration pump control (relay or AC dimmer)
-│
-├── brew              — Shot state machine
-│     orchestrates: heater setpoint → pre_infusion → pump + valve → flow_meter stop → cleanup
-│
-└── steam             — Steam state machine
-      orchestrates: heater setpoint → steam valve → pump duty cycle → cool_down → purge
+Native ESPHome entities (standard top-level blocks)
+  sensor:
+    - platform: max6675        → thermoblock_temp   (temperature sensor → HA)
+  output:
+    - platform: slow_pwm       → heater_ssr         (SSR output)
+  climate:
+    - platform: pid            → main_heater        (PID controller → HA climate entity)
+
+Custom espresso_machine_* platforms (each a top-level block, each a HA entity)
+  espresso_machine_flow_meter  → brew_flow          (flow rate + volume → HA sensors)
+  espresso_machine_valve       → brew_valve         (switch → HA; interlock enforced)
+  espresso_machine_valve       → steam_valve        (switch → HA; interlock enforced)
+  espresso_machine_valve       → purge_valve        (switch → HA; interlock enforced)
+  espresso_machine_pump        → main_pump          (switch/number → HA)
+  espresso_machine_grinder     → main_grinder       (button + number → HA)
+
+Orchestrator (references all entities above by id:)
+  espresso_machine             → my_espresso        (brew + steam state machines → HA)
+```
+
+```
+Entity relationship diagram
+
+  thermoblock_temp ──sensor──► main_heater (PID) ──output──► heater_ssr (SSR)
+                                    │
+                              setpoint changed by
+                                    │
+  brew_flow ────────────────► my_espresso ◄──────────────── main_grinder
+  brew_valve ───────────────►  (orchestrator)  ◄──────────── main_pump
+  steam_valve ──────────────►  brew / steam    ◄──────────── purge_valve
 ```
 
 ---
 
 ## Key Design Decisions
+
+### First-Class Entity Pattern
+
+Each hardware subsystem has its own top-level ESPHome platform block. This means:
+- Valves, pump, grinder, and flow meter are **independently controllable** from HA and scripts.
+- Users can mix and match: use `espresso_machine_valve` standalone without the full orchestrator.
+- Platform-level safety (valve interlock, grinder lockout) is enforced regardless of whether
+  the orchestrator is present.
 
 ### External Component Pattern
 
@@ -115,16 +124,22 @@ pattern. Users reference it directly from GitHub in their YAML:
 ```yaml
 external_components:
   - source: github://shaggitza/test_espresso_esphome@main
-    components: [espresso_machine]
+    components:
+      - espresso_machine
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_grinder
+      - espresso_machine_flow_meter
 ```
 
 No local file copying is needed. ESPHome fetches the component at build time.
 
 ### PID Reuse
 
-Rather than implementing a PID algorithm from scratch, the `heater` subcomponent delegates to
-ESPHome's built-in `climate.pid` platform. This means PID auto-tune, deadband, and output averaging
-are all available out of the box via the standard ESPHome PID parameters.
+The heater uses ESPHome's built-in `climate.pid` platform directly — declared as a standard
+`climate:` block in the user's YAML. The `espresso_machine` orchestrator changes the climate
+entity's setpoint during brew/steam sequences. PID auto-tune, deadband, and output averaging
+are all available out of the box.
 
 ### State Machine in C++
 
@@ -132,13 +147,14 @@ The brew and steam sequences are implemented as C++ state machines in `loop()`. 
 timing deterministic and avoids blocking the ESPHome event loop. ESPHome `script:` actions can
 trigger state transitions from YAML.
 
-### Named Valves
+### Valve Interlock
 
-Valves are identified by their YAML `id:` string rather than by position. This allows users to
-add, remove, or rename valves without breaking the brew/steam configuration.
+The `espresso_machine_valve` platform maintains a registry of all declared valve instances.
+When any valve is opened, the platform closes all other valves automatically (unless
+`override: true` is set). This prevents brew and steam paths from being open simultaneously.
 
 ### Flow Offset
 
-`flow_offset` accounts for the volume of water absorbed by the coffee puck and basket that never
-reaches the cup. It is subtracted from the raw flow meter reading when computing the yield displayed
-in Home Assistant. Users can adjust it to match their basket size and dose.
+`flow_offset` accounts for the volume of water absorbed by the coffee puck and basket that
+never reaches the cup. It is subtracted from the raw flow meter reading when computing the
+yield displayed in Home Assistant. Users can adjust it to match their basket size and dose.

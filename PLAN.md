@@ -34,147 +34,176 @@ reference it from their own YAML with a single `external_components:` block.
 
 ### Phase 1 — Core Component Scaffold
 
-**Goal:** An ESPHome external component that compiles and loads without errors.
+**Goal:** All five ESPHome platform modules compile and load without errors.
+
+Each subsystem is its own top-level ESPHome platform (`espresso_machine_valve`,
+`espresso_machine_pump`, etc.) following ESPHome's first-class entity pattern.
+The `espresso_machine` platform is a pure orchestrator with no hardware of its own.
 
 Tasks:
-- [ ] Create `components/espresso_machine/__init__.py` with top-level `CONFIG_SCHEMA`
-- [ ] Stub C++ class `EspressoMachine` (`.h` / `.cpp`) inheriting from `esphome::Component`
-- [ ] Register component with ESPHome's component registry
+- [ ] Create stub `__init__.py` + `.h` / `.cpp` for each platform:
+  - `espresso_machine/` — orchestrator stub
+  - `espresso_machine_valve/` — switch platform stub
+  - `espresso_machine_pump/` — switch/number platform stub
+  - `espresso_machine_grinder/` — button/number platform stub
+  - `espresso_machine_flow_meter/` — sensor platform stub
+- [ ] Register all platforms with ESPHome's component registry
 - [ ] Validate schema with `esphome config` against the reference YAML
 - [ ] CI workflow: lint Python (`flake8`) + validate YAML example
 
 Deliverables:
-- Component loads, logs its presence at boot, exposes an `id:` in YAML.
+- All components load, log their presence at boot, and expose their `id:` in YAML.
 
 ---
 
-### Phase 2 — Heater Subsystem (PID Thermoblock)
+### Phase 2 — Heater (Native ESPHome PID + Thermocouple)
 
 **Goal:** Accurate, stable temperature control of the thermoblock via SSR.
 
+The heater is **not** a custom platform — it uses ESPHome's built-in `climate.pid`
+and `sensor.max6675` directly. The orchestrator simply calls `climate.set_temperature`
+on the existing entity. This phase ensures the reference YAML compiles end-to-end with a real
+thermocouple and SSR.
+
 Tasks:
-- [ ] `heater/__init__.py` — schema: `type`, `sensor_type`, `cs_pin`, `ssr_pin`, `pid {kp, ki, kd, ...}`
-- [ ] Wrap ESPHome's built-in `climate.pid` for the control loop (reuse, don't reinvent)
-- [ ] Support thermocouple types: MAX6675, MAX31855; NTC resistor
-- [ ] Expose `heater.set_temperature` action and `temperature` sensor to HA
-- [ ] Safety: over-temperature cutoff (hard limit, independent of PID)
-- [ ] Tuning helper: auto-tune mode that runs ESPHome's PID autotune
+- [ ] Document supported thermocouple types in YAML comments (MAX6675, MAX31855, NTC)
+- [ ] Document `output.slow_pwm` SSR wiring in `docs/wiring.md`
+- [ ] Safety: add hard over-temperature cutoff in `espresso_machine.cpp` — watchdog on
+  `thermoblock_temp` sensor independent of PID
+- [ ] Expose PID autotune button in example YAML
+- [ ] Validate `esphome config` compiles the heater section
 
 Deliverables:
-- Thermoblock reaches and holds setpoint ±0.5 °C; sensor value visible in HA.
+- Thermoblock reaches and holds setpoint ±0.5 °C; sensor and climate entity visible in HA.
 
 ---
 
-### Phase 3 — Flow Meter Integration
+### Phase 3 — `espresso_machine_flow_meter` Platform
 
 **Goal:** Accurate volumetric measurement driving shot termination.
 
 Tasks:
-- [ ] `flow_meter/__init__.py` — schema: `pin`, `pulses_per_ml`
-- [ ] Interrupt-driven pulse counter (uses ESPHome `pulse_counter` sensor platform)
-- [ ] Expose: instantaneous flow rate (ml/s), total volume per shot (ml), lifetime total (ml)
-- [ ] Calibration action: `flow_meter.calibrate` — run pump for known volume, compute factor
-- [ ] Reset action: `flow_meter.reset`
+- [ ] `espresso_machine_flow_meter/__init__.py` — schema: `id`, `name`, `pin`, `pulses_per_ml`
+- [ ] Registers as a **sensor platform** exposing two child sensors:
+  - `{id}_rate` — instantaneous flow rate (ml/s)
+  - `{id}_total` — accumulated volume (ml), resets at shot start
+- [ ] Interrupt-driven pulse counter in C++ (`ISR`-safe)
+- [ ] Actions: `espresso_machine_flow_meter.reset`, `espresso_machine_flow_meter.calibrate`
 
 Deliverables:
 - Shot volume displayed in HA; shot auto-terminates at `flow_max` ml.
 
 ---
 
-### Phase 4 — Valve & Pump Subsystem
+### Phase 4 — `espresso_machine_valve` Platform
 
-**Goal:** Named, safe valve and pump control.
+**Goal:** Safe, named solenoid valve control with hardware interlock.
 
 Tasks:
-- [ ] `valve/__init__.py` — schema: `id`, `pin`, (optional) `normally_open`
-- [ ] `pump/__init__.py` — schema: `id`, `type` (`relay` | `dimmer`), `pin`
-- [ ] Safety interlock: at most one valve open at a time (configurable override)
-- [ ] Actions: `valve.open`, `valve.close`, `pump.run` (with optional `volume_ml` or `duration`)
-- [ ] Expose each valve and pump as a `switch` entity in HA
+- [ ] `espresso_machine_valve/__init__.py` — schema: `id`, `name`, `pin`, `normally_open`
+- [ ] Registers as a **switch platform** — each valve is its own HA switch entity
+- [ ] Platform-level interlock: opening one valve closes all others (single-open invariant)
+- [ ] Actions: `espresso_machine_valve.open`, `espresso_machine_valve.close`
+- [ ] `normally_open: false` default — valves close on power loss
 
 Deliverables:
-- Valves and pump controllable from HA; interlocks prevent conflicting states.
+- Each valve is an independent HA switch; interlock enforced at platform level.
 
 ---
 
-### Phase 5 — Grinder Subsystem
+### Phase 5 — `espresso_machine_pump` Platform
 
-**Goal:** Timed relay grind with Home Assistant control.
+**Goal:** Vibration pump control (relay or dimmer).
 
 Tasks:
-- [ ] `grinder/__init__.py` — schema: `type` (`relay` | `none`), `pin`, `default_grind_time`
-- [ ] Action: `grinder.grind` with optional `duration` override
-- [ ] Expose as a `button` entity (one-shot grind) and `number` entity (grind time)
-- [ ] Safety: do not allow grind during active brew or steam
+- [ ] `espresso_machine_pump/__init__.py` — schema: `id`, `name`, `type` (`relay`|`dimmer`), `pin`
+- [ ] `relay` type: registers as a **switch platform** (on/off HA entity)
+- [ ] `dimmer` type: registers as a **number platform** (0–100% HA entity via slow_pwm)
+- [ ] Action: `espresso_machine_pump.run` with `volume_ml` or `duration` and optional `valve` arg
 
 Deliverables:
-- Grinder operable from HA with configurable time.
+- Pump is an independent HA entity; controllable from scripts and automations.
 
 ---
 
-### Phase 6 — Brew Mode
+### Phase 6 — `espresso_machine_grinder` Platform
+
+**Goal:** Timed relay grind with Home Assistant control and brew/steam lockout.
+
+Tasks:
+- [ ] `espresso_machine_grinder/__init__.py` — schema: `id`, `name`, `type` (`relay`|`none`), `pin`, `default_grind_time`
+- [ ] Registers as a **button platform** (one-shot timed grind) and **number platform** (grind time)
+- [ ] Lockout: refuses activation when orchestrator is in brew or steam state
+- [ ] Action: `espresso_machine_grinder.grind` with optional `duration` override
+
+Deliverables:
+- Grinder is an independent HA entity with configurable time; lockout prevents unsafe use.
+
+---
+
+### Phase 7 — Brew Mode (Orchestrator)
 
 **Goal:** Full automated espresso extraction sequence.
 
 Tasks:
-- [ ] `brew/__init__.py` — schema: `heater`, `target_temperature`, `temperature_profile`,
-  `flow_meter`, `flow_max`, `flow_offset`, `valve`, `purge_valve`, `pump`, `pre_infusion`,
-  `cleanup_script`
-- [ ] Temperature profile: offset + ramp_time (temperature surfing implementation)
+- [ ] `espresso_machine/__init__.py` `brew:` sub-schema — references: `heater`, `pump`,
+  `flow_meter`, `valve`, `purge_valve`, `target_temperature`, `temperature_profile`,
+  `flow_max`, `flow_offset`, `pre_infusion`, `cleanup_script`
+- [ ] Temperature surfing: offset + ramp_time in `espresso_machine.cpp`
 - [ ] Pre-infusion phase: low-pressure soak before full extraction
-- [ ] Shot sequence state machine: `idle → heating → pre_infusion → brewing → done → cleanup`
-- [ ] Auto-terminate on `flow_max` reached; expose progress sensor (ml brewed)
-- [ ] `brew.start` / `brew.stop` actions
-- [ ] Publish shot data (time, volume, temperature) as HA events for logging/automation
+- [ ] Shot state machine: `idle → heating → pre_infusion → brewing → done → cleanup`
+- [ ] Auto-terminate when `flow_max` ml reached
+- [ ] `espresso_machine.brew_start` / `espresso_machine.brew_stop` actions
+- [ ] Publish shot stats (time, volume, temperature) as HA events
 
 Deliverables:
 - Full shot pulled automatically; shot stats logged to HA.
 
 ---
 
-### Phase 7 — Steam Mode
+### Phase 8 — Steam Mode (Orchestrator)
 
 **Goal:** Safe, controlled milk steaming.
 
 Tasks:
-- [ ] `steam/__init__.py` — schema: `heater`, `target_temperature`, `flow_max`, `cool_down_to`,
-  `valve`, `purge_valve`, `pump`
-- [ ] Steam sequence: heat to `target_temperature` → open valve → pump duty-cycle for flow control
-- [ ] Auto cool-down: after steam, return heater setpoint to `cool_down_to`
-- [ ] `steam.start` / `steam.stop` actions
-- [ ] Purge sequence on cool-down
+- [ ] `espresso_machine/__init__.py` `steam:` sub-schema — references: `heater`, `pump`,
+  `valve`, `purge_valve`, `target_temperature`, `flow_max`, `cool_down_to`, `cleanup_script`
+- [ ] Steam state machine: `idle → heating → steaming → cooling → cleanup`
+- [ ] Pump duty-cycle during steaming to maintain `flow_max` ml/s
+- [ ] Auto cool-down: set heater setpoint to `cool_down_to` after steam
+- [ ] `espresso_machine.steam_start` / `espresso_machine.steam_stop` actions
 
 Deliverables:
-- Steam wand usable; machine automatically cools back to brew temperature.
+- Steam wand usable from HA; machine automatically cools back to brew temperature.
 
 ---
 
-### Phase 8 — Cleanup Scripts & Automation API
+### Phase 9 — Cleanup Scripts & Automation API
 
 **Goal:** Declarative flush/rinse sequences after brew and steam.
 
 Tasks:
-- [ ] Allow `cleanup_script:` block in `brew:` and `steam:` to reference ESPHome script actions
-- [ ] Built-in helper actions: `espresso.flush` (pump N ml through purge valve)
-- [ ] Document how to combine with ESPHome `script:` platform for custom sequences
+- [ ] `cleanup_script:` block in `brew:` and `steam:` sub-schemas accepts ESPHome action lists
+- [ ] Built-in helper action: `espresso_machine.flush` (pump N ml through purge valve)
+- [ ] Document combining with ESPHome `script:` platform for custom sequences
 
 Deliverables:
 - Machine self-rinses after each shot/steam with a single YAML block.
 
 ---
 
-### Phase 9 — Display & UI (Optional)
+### Phase 10 — Display & UI (Optional)
 
 **Goal:** Local OLED feedback.
 
 Tasks:
-- [ ] Optional `display:` integration block in the top-level schema
+- [ ] Document display lambda using entity IDs from the first-class platforms
 - [ ] Default display layout: current temp, setpoint, mode, shot volume
 - [ ] Works with any ESPHome-supported OLED (SSD1306 / SH1106)
 
 ---
 
-### Phase 10 — Documentation & Release
+### Phase 11 — Documentation & Release
 
 Tasks:
 - [ ] `docs/wiring.md` — complete wiring guide with diagrams

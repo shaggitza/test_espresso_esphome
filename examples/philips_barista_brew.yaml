@@ -8,6 +8,13 @@
 #   3. Create a secrets.yaml alongside this file with your Wi-Fi credentials.
 #   4. Run:  esphome run philips_barista_brew.yaml
 #
+# DESIGN PHILOSOPHY:
+#   Every subsystem (heater, valves, pump, grinder, flow meter) is a first-class
+#   ESPHome entity defined at the top level with its own platform block.
+#   The espresso_machine: block is a pure orchestrator — it only references those
+#   entities by id: and manages the brew / steam state machines.
+#   This lets you use any entity independently from HA or ESPHome scripts.
+#
 # SAFETY WARNING:
 #   This configuration controls the LOW-VOLTAGE side of your machine only.
 #   The 220 V heater, pump and grinder are switched via SSRs/relays already
@@ -60,14 +67,19 @@ wifi:
   #   subnet: 255.255.255.0
 
 # -----------------------------------------------------------------------------
-# External component — pulls the espresso_machine component from this repo
+# External components — pulls all espresso_machine platforms from this repo
 # -----------------------------------------------------------------------------
 external_components:
   - source: github://shaggitza/test_espresso_esphome@main
-    components: [espresso_machine]
+    components:
+      - espresso_machine           # orchestrator: brew + steam state machines
+      - espresso_machine_valve     # solenoid valve with safety interlock
+      - espresso_machine_pump      # vibration pump (relay or dimmer)
+      - espresso_machine_grinder   # timed relay grinder with lockout
+      - espresso_machine_flow_meter  # pulse-counting volumetric sensor
 
 # -----------------------------------------------------------------------------
-# SPI bus — used by the MAX6675/MAX31855 thermocouple interface
+# SPI bus — used by the MAX6675/MAX31855 thermocouple board
 # -----------------------------------------------------------------------------
 spi:
   clk_pin: GPIO18     # ← CHANGE ME
@@ -81,188 +93,226 @@ i2c:
   scl: GPIO22         # ← CHANGE ME
 
 # =============================================================================
-# Espresso Machine Component
+# TEMPERATURE SENSOR — native ESPHome sensor (first-class citizen)
+# The thermoblock surface temperature, read by a MAX6675 thermocouple board.
+# Visible in HA as a sensor entity. Can be used independently in automations.
 # =============================================================================
-espresso_machine:
-  id: my_espresso
+sensor:
+  - platform: max6675
+    id: thermoblock_temp
+    name: "Thermoblock Temperature"
+    cs_pin: GPIO5             # ← CHANGE ME — SPI chip-select for thermocouple board
+    update_interval: 1s
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
 
-  # ---------------------------------------------------------------------------
-  # Heater — thermoblock temperature control via SSR + PID
-  # ---------------------------------------------------------------------------
-  heater:
+  # Diagnostic sensors (standard ESPHome platforms)
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+  - platform: internal_temperature
+    name: "ESP32 Temperature"
+
+# =============================================================================
+# FLOW METER — espresso_machine_flow_meter platform (first-class citizen)
+# Pulse-counting volumetric sensor. Visible in HA as two sensor entities:
+#   • "Brew Flow Rate"  — instantaneous flow rate (ml/s)
+#   • "Brew Flow Total" — accumulated volume this shot (ml)
+# Can be reset independently via the espresso_machine_flow_meter.reset action.
+# =============================================================================
+espresso_machine_flow_meter:
+  id: brew_flow
+  name: "Brew Flow"
+  pin:
+    number: GPIO34            # ← CHANGE ME (input-capable GPIO; GPIO34–39 on ESP32)
+    mode: INPUT_PULLDOWN
+  pulses_per_ml: 0.5195       # ← calibrate for your flow meter (AB32: ~0.5195)
+
+# =============================================================================
+# HEATER OUTPUT — native ESPHome slow_pwm output driving the SSR
+# The SSR defaults to OFF (GPIO LOW) on reset — safe by design.
+# =============================================================================
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4                # ← CHANGE ME — GPIO to SSR control input
+    period: 1s
+
+# =============================================================================
+# HEATER — native ESPHome PID climate entity (first-class citizen)
+# This is a standard ESPHome climate entity: visible in HA, supports all
+# climate actions (set_temperature, set_mode), and ESPHome's PID autotune.
+# The espresso_machine orchestrator changes the setpoint during brew/steam.
+# =============================================================================
+climate:
+  - platform: pid
     id: main_heater
-    type: thermoblock         # thermoblock | boiler
-    sensor_type: max6675      # max6675 | max31855 | ntc
-
-    # SPI chip-select for the thermocouple board
-    cs_pin: GPIO5             # ← CHANGE ME
-
-    # GPIO driving the Solid State Relay (LOW = heater OFF, HIGH = heater ON)
-    ssr_pin: GPIO4            # ← CHANGE ME
-
-    # Safety: hard cutoff if temperature exceeds this value regardless of PID
-    max_temperature: 165°C
-
-    # PID parameters — tune these for your thermoblock
-    # Start with these values and use ESPHome's PID autotune if needed
-    pid:
+    name: "Espresso Heater"
+    sensor: thermoblock_temp
+    default_target_temperature: 90   # °C — brew temperature default (ESPHome PID uses plain number in Celsius)
+    heat_output: heater_ssr
+    control_parameters:
       kp: 2.5
       ki: 0.05
       kd: 15.0
       output_averaging_samples: 5
       derivative_averaging_samples: 5
-      # Deadband: stop integrating when temperature is within ±0.3 °C of setpoint
-      deadband_parameters:
-        threshold_high: 0.3°C
-        threshold_low: -0.3°C
+    # Deadband: stop integrating when within ±0.3 °C of setpoint
+    deadband_parameters:
+      threshold_high: 0.3
+      threshold_low: -0.3
 
-  # ---------------------------------------------------------------------------
-  # Grinder — relay-driven integrated grinder
-  #   Set type: none if your machine has no grinder or you use a separate grinder
-  # ---------------------------------------------------------------------------
-  grinder:
-    id: main_grinder
-    type: relay               # relay | none
-    pin: GPIO23               # ← CHANGE ME
-    default_grind_time: 7s    # adjustable from HA as a number entity
+# =============================================================================
+# VALVES — espresso_machine_valve platform (first-class citizen)
+# Each valve is its own named entity, visible as a switch in HA.
+# The platform enforces the single-open safety interlock: opening one valve
+# automatically closes all others unless override: true is set.
+# Valves default to CLOSED (normally_open: false) — safe on power loss.
+# =============================================================================
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26               # ← CHANGE ME — 3-way solenoid to portafilter
+    normally_open: false
 
-  # ---------------------------------------------------------------------------
-  # Flow meter — volumetric shot measurement
-  #   Pulses are counted on a rising-edge interrupt; flow_rate and total_volume
-  #   are published as sensors to Home Assistant.
-  #
-  #   pulses_per_ml: calibrate by running the pump for a known volume and
-  #   counting pulses. The AB32 flow meter gives ~0.5 pulses/ml.
-  # ---------------------------------------------------------------------------
-  flow_meter:
-    id: brew_flow
-    pin: GPIO34               # ← CHANGE ME (must be an input-capable GPIO)
-    pulses_per_ml: 0.5195     # ← calibrate for your flow meter
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27               # ← CHANGE ME — steam wand solenoid
+    normally_open: false
 
-  # ---------------------------------------------------------------------------
-  # Pump — vibration pump control
-  #   type: relay    — simple on/off (default; works for most machines)
-  #   type: dimmer   — AC phase-cut dimmer for pressure profiling (advanced)
-  # ---------------------------------------------------------------------------
-  pump:
-    id: main_pump
-    type: relay               # relay | dimmer
-    pin: GPIO25               # ← CHANGE ME
+  - id: purge_valve
+    name: "Purge / Drain Valve"
+    pin: GPIO14               # ← CHANGE ME — drain / purge solenoid
+    normally_open: false
 
-  # ---------------------------------------------------------------------------
-  # Valves — named GPIO outputs
-  #   Add one entry per solenoid valve.  Valves are referenced by id: in the
-  #   brew: and steam: blocks below.
-  #   normally_open: false (default) — valve closes when GPIO is LOW
-  # ---------------------------------------------------------------------------
-  valves:
-    - id: brew_valve          # 3-way solenoid: routes water to portafilter
-      pin: GPIO26             # ← CHANGE ME
-      normally_open: false
+# =============================================================================
+# PUMP — espresso_machine_pump platform (first-class citizen)
+# Visible in HA as a switch (on/off) or number (0–100% for dimmer type).
+#   type: relay   — simple on/off via relay (default; works for all machines)
+#   type: dimmer  — AC phase-cut dimmer for pressure profiling (advanced)
+# =============================================================================
+espresso_machine_pump:
+  id: main_pump
+  name: "Vibration Pump"
+  type: relay                 # relay | dimmer
+  pin: GPIO25                 # ← CHANGE ME
 
-    - id: steam_valve         # Steam wand solenoid
-      pin: GPIO27             # ← CHANGE ME
-      normally_open: false
+# =============================================================================
+# GRINDER — espresso_machine_grinder platform (first-class citizen)
+# Visible in HA as:
+#   • A button  — triggers a one-shot timed grind
+#   • A number  — adjusts default_grind_time (saved across reboots)
+# The platform refuses to activate during an active brew or steam sequence.
+#   type: relay — relay-driven motor (common in integrated grinder machines)
+#   type: none  — disables the grinder (for machines without one)
+# =============================================================================
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay                 # relay | none
+  pin: GPIO23                 # ← CHANGE ME
+  default_grind_time: 7s      # adjustable from HA as a number entity
 
-    - id: purge_valve         # Drain/purge solenoid (some machines combine this
-      pin: GPIO14             #   with the brew 3-way valve)
-      normally_open: false    # ← CHANGE ME
+# =============================================================================
+# ESPRESSO MACHINE — orchestrator (first-class citizen)
+# References all entities above by id:.  Does not own any hardware directly.
+# Manages the brew and steam state machines and coordinates safety interlocks.
+# Exposes mode sensor, shot stats, and start/stop actions to HA.
+# =============================================================================
+espresso_machine:
+  id: my_espresso
 
   # ---------------------------------------------------------------------------
   # Brew mode — full espresso shot sequence
+  # State machine: idle → heating → pre_infusion → brewing → done → cleanup
   # ---------------------------------------------------------------------------
   brew:
-    heater: main_heater
-    pump: main_pump
-    flow_meter: brew_flow
-    valve: brew_valve
-    purge_valve: purge_valve
+    heater: main_heater           # id of the climate entity above
+    pump: main_pump               # id of the pump entity above
+    flow_meter: brew_flow         # id of the flow meter entity above
+    valve: brew_valve             # id of the valve entity above
+    purge_valve: purge_valve      # id of the valve entity above
 
     # Target brew temperature at the thermoblock
     target_temperature: 90°C
 
-    # Temperature surfing profile:
-    #   At shot start the setpoint is raised by `offset` degrees.
-    #   It then linearly decays back to `target_temperature` over `ramp_time`.
-    #   This compensates for the thermal mass of the cold portafilter.
+    # Temperature surfing: at shot start the heater setpoint is raised by
+    # `offset`, then linearly decays back to target_temperature over ramp_time.
+    # Compensates for heat absorbed by the cold portafilter.
     temperature_profile:
-      offset: 5°C             # initial overshoot above target_temperature
-      ramp_time: 20s          # time to decay back to target_temperature
+      offset: 5°C               # °C above target_temperature at shot start
+      ramp_time: 20s            # time to decay back to target_temperature
 
-    # Shot volume control
-    #   flow_max:    stop the shot when this many ml have passed the flow meter
-    #   flow_offset: ml absorbed by puck + basket (subtracted from flow reading
-    #                to give the yield shown in HA). Adjust per basket/dose.
+    # Stop the shot when this many ml have passed the flow meter
     flow_max: 40ml
+    # ml absorbed by puck + basket; subtracted from flow reading for HA yield display
     flow_offset: 20ml
 
-    # Pre-infusion: soak the puck at low flow before full-pressure extraction
-    #   The pump runs briefly with the brew valve open and purge valve open,
-    #   then pauses before full extraction begins.
+    # Pre-infusion: wet the puck at low flow before full-pressure extraction
     pre_infusion:
       enabled: true
-      volume_ml: 5ml          # ml to push through during pre-infusion
-      hold_time: 5s           # pause after pre-infusion before full extraction
+      volume_ml: 5ml            # ml to push through during pre-infusion
+      hold_time: 5s             # pause after pre-infusion before full extraction begins
 
-    # Cleanup script: runs automatically after the shot is complete
-    #   This flushes residual coffee oils from the brew path.
+    # Cleanup: automatically flush brew path after shot completes
     cleanup_script:
       - delay: 2s
-      - pump.run:
+      - espresso_machine_pump.run:
           id: main_pump
           volume_ml: 20ml
-          valve: purge_valve  # purge valve open, brew valve closed
+          valve: purge_valve    # purge valve open, brew valve closed
 
   # ---------------------------------------------------------------------------
   # Steam mode — milk steaming sequence
+  # State machine: idle → heating → steaming → cooling → cleanup
   # ---------------------------------------------------------------------------
   steam:
-    heater: main_heater
-    pump: main_pump
-    valve: steam_valve
-    purge_valve: purge_valve
+    heater: main_heater           # id of the climate entity above
+    pump: main_pump               # id of the pump entity above
+    valve: steam_valve            # id of the valve entity above
+    purge_valve: purge_valve      # id of the valve entity above
 
     # Temperature to reach before opening the steam valve
     target_temperature: 135°C
 
-    # Pump duty-cycle target during steaming, expressed in ml/s.
-    #   The pump turns on and off rapidly to maintain this average flow rate.
-    #   Set to 0 to disable pump-assisted steaming (passive steam only).
+    # Pump duty-cycle target during steaming (ml/s)
+    # The pump pulses on/off to maintain this average flow rate.
+    # Set to 0 for passive steam only (no pump assist).
     flow_max: 2ml/s
 
-    # After steaming, automatically ramp the heater back to this temperature
+    # After steaming, ramp the heater back to this temperature automatically
     # so the machine is ready for the next shot without manual intervention.
     cool_down_to: 90°C
 
     # Cleanup: purge steam path after cool-down
     cleanup_script:
-      - valve.open: purge_valve
-      - pump.run:
+      - espresso_machine_valve.open: purge_valve
+      - espresso_machine_pump.run:
           id: main_pump
           volume_ml: 10ml
           valve: purge_valve
-      - valve.close: purge_valve
+      - espresso_machine_valve.close: purge_valve
 
 # =============================================================================
-# Optional: OLED display (128×64 SSD1306 via I2C)
-# Comment out this entire block if you do not have a display.
+# DISPLAY (optional) — native ESPHome SSD1306 via I2C
+# Comment out this entire block if you do not have a display attached.
 # =============================================================================
 display:
   - platform: ssd1306_i2c
     model: "SSD1306 128x64"
     address: 0x3C
     lambda: |-
-      // Line 0: machine mode
-      it.printf(0, 0, id(font_small), "Mode: %s",
+      it.printf(0,  0, id(font_small), "Mode: %s",
         id(my_espresso).mode_name().c_str());
-      // Line 16: current temperature / setpoint
       it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
         id(main_heater).current_temperature,
         id(main_heater).target_temperature);
-      // Line 32: shot volume
       it.printf(0, 32, id(font_small), "Vol: %.1f ml",
         id(brew_flow).total_volume());
-      // Line 48: SSR duty cycle
       it.printf(0, 48, id(font_small), "Heat: %.0f%%",
         id(main_heater).output_value() * 100.0f);
 
@@ -272,24 +322,14 @@ font:
     size: 12
 
 # =============================================================================
-# Home Assistant — expose extra entities
+# BUTTONS — restart and PID autotune
 # =============================================================================
-
-# Restart button (useful for remote recovery)
 button:
   - platform: restart
     name: "Restart"
 
-# Uptime sensor
-sensor:
-  - platform: uptime
-    name: "Uptime"
-
-# Wi-Fi signal strength
-  - platform: wifi_signal
-    name: "Wi-Fi Signal"
-    update_interval: 60s
-
-# Internal temperature of the ESP32 chip (diagnostic)
-  - platform: internal_temperature
-    name: "ESP32 Temperature"
+  # Trigger ESPHome's built-in PID autotune from HA — see docs/pid_tuning.md
+  - platform: template
+    name: "PID Autotune"
+    on_press:
+      - climate.pid.autotune: main_heater

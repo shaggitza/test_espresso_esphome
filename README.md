@@ -85,70 +85,105 @@ The device will be discovered automatically via the ESPHome native API.
 
 ## Component YAML Reference
 
+Each subsystem is a **first-class ESPHome entity** declared at the top level with its own
+platform block. The `espresso_machine:` block is a pure orchestrator — it only references
+other entities by `id:` and manages the brew/steam state machines.
+
 ```yaml
 external_components:
   - source: github://shaggitza/test_espresso_esphome@main
-    components: [espresso_machine]
+    components:
+      - espresso_machine           # orchestrator: brew + steam state machines
+      - espresso_machine_valve     # solenoid valve with safety interlock
+      - espresso_machine_pump      # vibration pump (relay or dimmer)
+      - espresso_machine_grinder   # timed relay grinder with lockout
+      - espresso_machine_flow_meter  # pulse-counting volumetric sensor
 
-espresso_machine:
-  id: my_espresso
-
-  heater:
-    id: main_heater
-    type: thermoblock       # thermoblock | boiler
-    sensor_type: max6675    # max6675 | max31855 | ntc
+# Temperature sensor — native ESPHome (visible in HA, usable in automations)
+sensor:
+  - platform: max6675
+    id: thermoblock_temp
+    name: "Thermoblock Temperature"
     cs_pin: GPIO5
-    ssr_pin: GPIO4
-    pid:
+
+# Heater SSR output — native ESPHome slow_pwm
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4
+    period: 1s
+
+# Heater — native ESPHome PID climate (first-class citizen)
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Espresso Heater"
+    sensor: thermoblock_temp
+    default_target_temperature: 90
+    heat_output: heater_ssr
+    control_parameters:
       kp: 2.5
       ki: 0.05
       kd: 15.0
 
-  grinder:
-    id: main_grinder
-    type: relay             # relay | none
-    pin: GPIO23
-    default_grind_time: 7s
+# Flow meter — espresso_machine_flow_meter platform (first-class citizen)
+espresso_machine_flow_meter:
+  id: brew_flow
+  name: "Brew Flow"
+  pin: GPIO34
+  pulses_per_ml: 0.5195
 
-  flow_meter:
-    id: brew_flow
-    pin: GPIO34
-    pulses_per_ml: 0.5195
+# Valves — espresso_machine_valve platform (first-class citizens)
+# Each valve is its own switch entity in HA; interlock is enforced by the platform.
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+  - id: purge_valve
+    name: "Purge / Drain Valve"
+    pin: GPIO14
 
-  pump:
-    id: main_pump
-    type: relay             # relay | dimmer
-    pin: GPIO25
+# Pump — espresso_machine_pump platform (first-class citizen)
+espresso_machine_pump:
+  id: main_pump
+  name: "Vibration Pump"
+  type: relay          # relay | dimmer
+  pin: GPIO25
 
-  valves:
-    - id: brew_valve
-      pin: GPIO26
-    - id: steam_valve
-      pin: GPIO27
-    - id: purge_valve
-      pin: GPIO14
+# Grinder — espresso_machine_grinder platform (first-class citizen)
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay          # relay | none
+  pin: GPIO23
+  default_grind_time: 7s
 
+# Espresso Machine — pure orchestrator, references all entities above by id:
+espresso_machine:
+  id: my_espresso
   brew:
     heater: main_heater
-    target_temperature: 90°C
-    temperature_profile:
-      offset: 5             # °C above setpoint at shot start
-      ramp_time: 20s        # time to decay back to setpoint
+    pump: main_pump
     flow_meter: brew_flow
-    flow_max: 40ml
-    flow_offset: 20ml
     valve: brew_valve
     purge_valve: purge_valve
-    pump: main_pump
-
+    target_temperature: 90°C
+    temperature_profile:
+      offset: 5°C
+      ramp_time: 20s
+    flow_max: 40ml
+    flow_offset: 20ml
   steam:
     heater: main_heater
-    target_temperature: 135°C
-    flow_max: 2             # ml/s — pump duty-cycle target
-    cool_down_to: 90°C
+    pump: main_pump
     valve: steam_valve
     purge_valve: purge_valve
-    pump: main_pump
+    target_temperature: 135°C
+    flow_max: 2ml/s
+    cool_down_to: 90°C
 ```
 
 See [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) for the full annotated
