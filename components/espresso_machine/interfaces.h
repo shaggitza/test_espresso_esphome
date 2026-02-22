@@ -20,12 +20,25 @@ class IValve {
 
 // ---------------------------------------------------------------------------
 // IPump — vibration pump abstraction
+//
+// The pump owns the flow subsystem: it holds a reference to whatever flow
+// sensor is physically attached and exposes flow data through this interface.
+// This keeps the orchestrator independent of the flow meter type — the same
+// interface works for vibration pumps, rotary pumps, or any future variant.
 // ---------------------------------------------------------------------------
 class IPump {
  public:
   virtual void turn_on() = 0;
   virtual void turn_off() = 0;
   virtual bool is_running() const = 0;
+
+  // Flow subsystem — implemented by pumps that have a flow meter wired.
+  // Default implementations return safe no-op values so pumps without a
+  // flow meter compile and behave correctly out of the box.
+  virtual float get_flow_rate() const { return 0.0f; }
+  virtual float get_flow_total() const { return 0.0f; }
+  virtual void reset_flow() {}
+
   virtual ~IPump() = default;
 };
 

@@ -30,6 +30,9 @@ struct MockPump : public IPump {
   bool running = false;
   int on_count = 0;
   int off_count = 0;
+  float volume = 0.0f;   // simulated flow total (ml)
+  float rate = 0.0f;     // simulated flow rate (ml/s)
+  int reset_flow_count = 0;
 
   void turn_on() override {
     running = true;
@@ -40,25 +43,15 @@ struct MockPump : public IPump {
     off_count++;
   }
   bool is_running() const override { return running; }
-};
-
-struct MockFlowMeter : public IFlowMeter {
-  float volume = 0.0f;
-  float rate = 0.0f;
-  int reset_count = 0;
-
-  float get_rate() const override { return rate; }
-  float get_total_volume() const override { return volume; }
-  void reset() override {
+  float get_flow_rate() const override { return rate; }
+  float get_flow_total() const override { return volume; }
+  void reset_flow() override {
     volume = 0.0f;
     rate = 0.0f;
-    reset_count++;
+    reset_flow_count++;
   }
 };
 
-// ---------------------------------------------------------------------------
-// Helper to build a fully-wired orchestrator
-// ---------------------------------------------------------------------------
 struct OrchestratorFixture {
   MockValve brew_valve;
   MockValve purge_valve;
@@ -66,14 +59,12 @@ struct OrchestratorFixture {
   MockValve steam_purge_valve;
   MockPump brew_pump;
   MockPump steam_pump;
-  MockFlowMeter flow_meter;
   EspressoMachine machine;
 
   OrchestratorFixture() {
     machine.set_brew_valve(&brew_valve);
     machine.set_brew_purge_valve(&purge_valve);
     machine.set_brew_pump(&brew_pump);
-    machine.set_brew_flow_meter(&flow_meter);
     machine.set_brew_target_temperature(90.0f);
     machine.set_brew_flow_max(40.0f);
     machine.set_brew_flow_offset(20.0f);
@@ -124,9 +115,9 @@ TEST(Orchestrator, BrewStartEntersBrewingMode) {
 
 TEST(Orchestrator, BrewStartResetsFlowMeter) {
   OrchestratorFixture f;
-  f.flow_meter.volume = 15.0f;
+  f.brew_pump.volume = 15.0f;
   f.machine.brew_start();
-  EXPECT_EQ(f.flow_meter.reset_count, 1);
+  EXPECT_EQ(f.brew_pump.reset_flow_count, 1);
 }
 
 TEST(Orchestrator, BrewStartKeepsValvesClosedUntilHeating) {
@@ -182,8 +173,8 @@ TEST(Orchestrator, BrewAutoTerminatesAtFlowMax) {
   f.machine.loop();  // HEATING → BREWING
   EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
 
-  // Set flow meter to the trigger volume
-  f.flow_meter.volume = 40.0f;
+  // Set flow total on the pump (flow comes through the pump interface)
+  f.brew_pump.volume = 40.0f;
   f.machine.loop();  // BREWING → DONE
   EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
   EXPECT_FALSE(f.brew_pump.running);
@@ -195,7 +186,7 @@ TEST(Orchestrator, BrewDoesNotTerminateBeforeFlowMax) {
   f.machine.brew_start();
   f.machine.loop();  // HEATING → BREWING
 
-  f.flow_meter.volume = 39.9f;
+  f.brew_pump.volume = 39.9f;
   f.machine.loop();  // still BREWING
   EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
   EXPECT_TRUE(f.brew_pump.running);
@@ -205,7 +196,7 @@ TEST(Orchestrator, BrewDoneTransitionsToIdle) {
   OrchestratorFixture f;
   f.machine.brew_start();
   f.machine.loop();          // HEATING → BREWING
-  f.flow_meter.volume = 40.0f;
+  f.brew_pump.volume = 40.0f;
   f.machine.loop();          // BREWING → DONE
   f.machine.loop();          // DONE → IDLE
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
