@@ -31,6 +31,24 @@ sensor:
     lambda: "return 90.0f;"
     update_interval: 1s
 
+  - platform: template
+    id: last_shot_duration
+    name: "Last Shot Duration"
+    unit_of_measurement: "s"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_time_s();
+
+  - platform: template
+    id: last_shot_yield
+    name: "Last Shot Yield"
+    unit_of_measurement: "mL"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_yield_ml();
+
 # --- Heater SSR and PID climate ---
 output:
   - platform: slow_pwm
@@ -61,6 +79,10 @@ espresso_machine_flow_meter:
     number: GPIO34
     mode: INPUT
   pulses_per_ml: 0.5195
+  rate_sensor:
+    name: "Brew Flow Rate"
+  total_sensor:
+    name: "Brew Flow Total"
 
 # --- Valves ---
 espresso_machine_valve:
@@ -92,8 +114,42 @@ espresso_machine_grinder:
   type: relay
   pin: GPIO23
   default_grind_time: 7s
+  grind_time_number:
+    name: "Grind Time"
 
-# --- Orchestrator: brew block has NO flow_meter key (owned by the pump) ---
+# --- Buttons ---
+button:
+  - platform: restart
+    name: "Restart"
+  - platform: template
+    name: "PID Autotune"
+    on_press:
+      - climate.pid.autotune: main_heater
+  - platform: template
+    name: "Brew Start"
+    on_press:
+      - lambda: id(my_espresso).brew_start();
+  - platform: template
+    name: "Brew Stop"
+    on_press:
+      - lambda: id(my_espresso).brew_stop();
+  - platform: template
+    name: "Steam Start"
+    on_press:
+      - lambda: id(my_espresso).steam_start();
+  - platform: template
+    name: "Steam Stop"
+    on_press:
+      - lambda: id(my_espresso).steam_stop();
+
+# --- Machine mode text sensor ---
+text_sensor:
+  - platform: template
+    name: "Machine Mode"
+    id: machine_mode
+    update_interval: 2s
+    lambda: return std::string(id(my_espresso).mode_name());
+
 espresso_machine:
   id: my_espresso
   brew:

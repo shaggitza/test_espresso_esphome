@@ -98,6 +98,9 @@ class EspressoMachine : public Component {
   // ----- Shot stats (available after each completed shot) ------------------
   float get_last_shot_time_s() const { return last_shot_time_s_; }
   float get_last_shot_volume_ml() const { return last_shot_volume_ml_; }
+  float get_last_shot_yield_ml() const {
+    return last_shot_volume_ml_ > 0.0f ? last_shot_volume_ml_ - brew_flow_offset_ml_ : 0.0f;
+  }
 
   // ----- Safety query for grinder lockout -----------------------------------
   bool is_busy() const { return mode_ != EspressoMode::IDLE; }

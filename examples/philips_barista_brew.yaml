@@ -206,6 +206,28 @@ sensor:
   - platform: internal_temperature
     name: "ESP32 Temperature"
 
+  # ---------------------------------------------------------------------------
+  # Shot statistics — updated once per completed shot.
+  # "Last Shot Duration" and "Last Shot Yield" appear in HA after each pull.
+  # ---------------------------------------------------------------------------
+  - platform: template
+    id: last_shot_duration
+    name: "Last Shot Duration"
+    unit_of_measurement: "s"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_time_s();
+
+  - platform: template
+    id: last_shot_yield
+    name: "Last Shot Yield"
+    unit_of_measurement: "mL"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_yield_ml();
+
 # =============================================================================
 # FLOW METER — espresso_machine_flow_meter platform (first-class citizen)
 # Pulse-counting volumetric sensor. Visible in HA as two sensor entities:
@@ -220,6 +242,10 @@ espresso_machine_flow_meter:
     number: GPIO34            # ← CHANGE ME (input-capable GPIO; GPIO34–39 on ESP32)
     mode: INPUT_PULLDOWN
   pulses_per_ml: 0.5195       # ← calibrate for your flow meter (AB32: ~0.5195)
+  rate_sensor:
+    name: "Brew Flow Rate"    # ml/s — appears in HA as sensor entity
+  total_sensor:
+    name: "Brew Flow Total"   # mL accumulated this shot — appears in HA as sensor entity
 
 # =============================================================================
 # HEATER OUTPUT — native ESPHome output driving the SSR
@@ -367,6 +393,8 @@ espresso_machine_grinder:
   type: relay                 # relay | none
   pin: GPIO23                 # ← CHANGE ME
   default_grind_time: 7s      # adjustable from HA as a number entity
+  grind_time_number:
+    name: "Grind Time"        # number entity in HA (ms); 0.5–30 s adjustable
 
 # =============================================================================
 # BREW PROFILES — espresso_machine_profile platform (PLANNED — not yet implemented)
@@ -569,3 +597,38 @@ button:
     name: "PID Autotune"
     on_press:
       - climate.pid.autotune: main_heater
+
+  # ---------------------------------------------------------------------------
+  # Brew and steam start / stop — the four core machine actions.
+  # Pressing a button calls the corresponding action on the orchestrator.
+  # ---------------------------------------------------------------------------
+  - platform: template
+    name: "Brew Start"
+    on_press:
+      - lambda: id(my_espresso).brew_start();
+
+  - platform: template
+    name: "Brew Stop"
+    on_press:
+      - lambda: id(my_espresso).brew_stop();
+
+  - platform: template
+    name: "Steam Start"
+    on_press:
+      - lambda: id(my_espresso).steam_start();
+
+  - platform: template
+    name: "Steam Stop"
+    on_press:
+      - lambda: id(my_espresso).steam_stop();
+
+# =============================================================================
+# TEXT SENSOR — exposes the current machine mode to HA
+# Values: "idle" | "brewing" | "steaming"
+# =============================================================================
+text_sensor:
+  - platform: template
+    name: "Machine Mode"
+    id: machine_mode
+    update_interval: 2s
+    lambda: return std::string(id(my_espresso).mode_name());
