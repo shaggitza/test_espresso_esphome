@@ -41,6 +41,8 @@ jobs:
           - tests/test_all_components.yaml
           - tests/test_compile.yaml
           - tests/test_example.yaml
+          - tests/test_mock_heater.yaml
+          - tests/test_mock_pump.yaml
 
     steps:
       - uses: actions/checkout@v4

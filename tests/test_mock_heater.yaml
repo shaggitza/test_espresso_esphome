@@ -1,0 +1,57 @@
+# Test: espresso_machine_mock_heater — validates schema and PID integration
+# The mock heater sits at the physical layer: the PID climate reads from its
+# built-in temperature sensor and writes duty cycles to its output — identical
+# to how it would interact with a real MAX31855 + slow_pwm SSR combination.
+esphome:
+  name: test-mock-heater
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [espresso_machine_mock_heater]
+
+# --- Mock heater (replaces thermocouple sensor + SSR output) ---
+espresso_machine_mock_heater:
+  id: mock_heater_out             # PID references this as heat_output:
+  initial_temp: 20.0              # °C — start cold
+  power_watts: 1200.0             # W
+  thermal_mass_j_per_c: 1256.0   # J/°C
+  heat_loss_w_per_c: 1.7         # W/°C
+  ambient_temp: 20.0              # °C
+  temperature_sensor:
+    id: thermoblock_temp          # PID references this as sensor:
+    name: "Thermoblock Temperature"
+  params:
+    power_watts:
+      id: mock_heater_power
+      name: "Sim: Heater Power (W)"
+    thermal_mass:
+      id: mock_thermal_mass
+      name: "Sim: Thermal Mass (J/°C)"
+    heat_loss:
+      id: mock_heat_loss
+      name: "Sim: Heat Loss (W/°C)"
+    ambient_temp:
+      id: mock_ambient_temp
+      name: "Sim: Ambient Temp (°C)"
+
+# --- PID climate (UNCHANGED — identical to the real config) ---
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Espresso Heater"
+    sensor: thermoblock_temp      # reads from mock heater's built-in sensor
+    heat_output: mock_heater_out  # writes duty cycle to mock heater output
+    default_target_temperature: 90
+    control_parameters:
+      kp: 2.5
+      ki: 0.05
+      kd: 15.0

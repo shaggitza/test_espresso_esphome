@@ -1,0 +1,31 @@
+# Test: espresso_machine_mock_pump — validates schema including param number entities
+# The mock pump implements IPump with a puck-wetting flow model.
+# No GPIO or real relay is used; flow is simulated in software.
+esphome:
+  name: test-mock-pump
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [espresso_machine_mock_pump]
+
+# --- Mock pump (replaces espresso_machine_flow_meter + espresso_machine_pump) ---
+espresso_machine_mock_pump:
+  id: main_pump
+  nominal_flow_ml_per_s: 4.0      # ml/s — flow at full puck saturation
+  puck_time_constant_s: 10.0      # s — puck wetting time constant
+  params:
+    nominal_flow:
+      id: mock_nominal_flow
+      name: "Sim: Pump Nominal Flow (mL/s)"
+    puck_time_constant:
+      id: mock_puck_tau
+      name: "Sim: Puck Time Constant (s)"

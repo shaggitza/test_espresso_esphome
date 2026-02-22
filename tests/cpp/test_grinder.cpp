@@ -137,7 +137,8 @@ TEST(Grinder, GrinderTimeNumberPublishesInitialState) {
   GPIOPin pin;
   Grinder g = make_grinder(pin, 7000);
 
-  GrinderTimeNumber num(&g);
+  GrinderTimeNumber num;
+  num.set_parent(&g);
   g.set_grind_time_number(&num);
   g.setup();  // should call num.publish_state(7000)
 
