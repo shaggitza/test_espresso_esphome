@@ -153,11 +153,15 @@ espresso_machine_valve:
     pin: GPIO14
 
 # Pump — espresso_machine_pump platform (first-class citizen)
+# The pump owns the flow meter: it holds the sensor reference and exposes
+# flow data through the IPump interface. This keeps the orchestrator agnostic
+# of the flow meter type and makes future rotary-pump migration seamless.
 espresso_machine_pump:
   id: main_pump
   name: "Vibration Pump"
   type: relay          # relay | dimmer
   pin: GPIO25
+  flow_meter: brew_flow   # flow meter wired to this pump
 
 # Grinder — espresso_machine_grinder platform (first-class citizen)
 espresso_machine_grinder:
@@ -173,7 +177,6 @@ espresso_machine:
   brew:
     heater: main_heater
     pump: main_pump
-    flow_meter: brew_flow
     valve: brew_valve
     purge_valve: purge_valve
     target_temperature: 90°C
