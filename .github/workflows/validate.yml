@@ -39,6 +39,7 @@ jobs:
           - tests/test_grinder.yaml
           - tests/test_orchestrator.yaml
           - tests/test_all_components.yaml
+          - tests/test_compile.yaml
 
     steps:
       - uses: actions/checkout@v4
@@ -52,3 +53,51 @@ jobs:
 
       - name: Validate ${{ matrix.yaml }}
         run: esphome config ${{ matrix.yaml }}
+
+  compile:
+    name: ESPHome compile — host platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-native-${{ hashFiles('tests/test_compile.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-native-
+
+      - name: Install ESPHome
+        run: pip install esphome
+
+      - name: Compile all components (host platform)
+        run: esphome compile tests/test_compile.yaml
+
+  cpp-test:
+    name: C++ unit tests (GoogleTest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -B build/cpp -S tests/cpp
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/cpp -j$(nproc)
+
+      - name: Run tests
+        run: ./build/cpp/all_tests --gtest_output=xml:build/cpp/test_results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp-test-results
+          path: build/cpp/test_results.xml

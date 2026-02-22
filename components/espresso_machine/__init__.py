@@ -68,3 +68,44 @@ CONFIG_SCHEMA = cv.Schema(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+
+    if CONF_BREW in config:
+        brew = config[CONF_BREW]
+
+        heater = await cg.get_variable(brew[CONF_HEATER])
+        cg.add(var.set_brew_heater(heater))
+
+        pump = await cg.get_variable(brew[CONF_PUMP])
+        cg.add(var.set_brew_pump(pump))
+
+        flow_meter = await cg.get_variable(brew[CONF_FLOW_METER])
+        cg.add(var.set_brew_flow_meter(flow_meter))
+
+        valve = await cg.get_variable(brew[CONF_VALVE])
+        cg.add(var.set_brew_valve(valve))
+
+        purge_valve = await cg.get_variable(brew[CONF_PURGE_VALVE])
+        cg.add(var.set_brew_purge_valve(purge_valve))
+
+        cg.add(var.set_brew_target_temperature(brew[CONF_TARGET_TEMPERATURE]))
+        cg.add(var.set_brew_flow_max(brew[CONF_FLOW_MAX]))
+        cg.add(var.set_brew_flow_offset(brew[CONF_FLOW_OFFSET]))
+
+    if CONF_STEAM in config:
+        steam = config[CONF_STEAM]
+
+        heater = await cg.get_variable(steam[CONF_HEATER])
+        cg.add(var.set_steam_heater(heater))
+
+        pump = await cg.get_variable(steam[CONF_PUMP])
+        cg.add(var.set_steam_pump(pump))
+
+        valve = await cg.get_variable(steam[CONF_VALVE])
+        cg.add(var.set_steam_valve(valve))
+
+        purge_valve = await cg.get_variable(steam[CONF_PURGE_VALVE])
+        cg.add(var.set_steam_purge_valve(purge_valve))
+
+        cg.add(var.set_steam_target_temperature(steam[CONF_TARGET_TEMPERATURE]))
+        cg.add(var.set_steam_flow_max(steam[CONF_FLOW_MAX]))
+        cg.add(var.set_steam_cool_down_to(steam[CONF_COOL_DOWN_TO]))

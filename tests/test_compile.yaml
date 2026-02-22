@@ -1,13 +1,10 @@
-# Test: espresso_machine (orchestrator) — validates the orchestrator with full brew+steam
-# wiring. All hardware subsystems are declared inline so cross-references resolve.
-# A template sensor + slow_pwm output + PID climate stand in for the real thermocouple.
+# Test: actual ESPHome compile using the host platform (native Linux g++).
+# This verifies C++ component code compiles end-to-end, not just schema.
+# Uses integer pin numbers (GPIO abstraction is no-op on host).
 esphome:
-  name: test-orchestrator
+  name: test-compile
 
-esp32:
-  board: esp32dev
-  framework:
-    type: arduino
+host:
 
 logger:
 
@@ -19,9 +16,10 @@ external_components:
       - espresso_machine
       - espresso_machine_valve
       - espresso_machine_pump
+      - espresso_machine_grinder
       - espresso_machine_flow_meter
 
-# --- Fake heater (stands in for real MAX6675 + SSR in non-hardware tests) ---
+# --- Fake heater ---
 sensor:
   - platform: template
     id: fake_thermoblock_temp
@@ -31,7 +29,7 @@ sensor:
 output:
   - platform: slow_pwm
     id: fake_heater_ssr
-    pin: GPIO4
+    pin: 1
     period: 1s
 
 climate:
@@ -45,31 +43,34 @@ climate:
       ki: 0.01
       kd: 1.0
 
-# --- Hardware subsystems referenced by the orchestrator ---
 espresso_machine_flow_meter:
   id: brew_flow
   pin:
-    number: GPIO34
-    mode: INPUT
+    number: 2
   pulses_per_ml: 0.5195
 
 espresso_machine_valve:
   - id: brew_valve
-    pin: GPIO26
+    pin: 3
     normally_open: false
   - id: steam_valve
-    pin: GPIO27
+    pin: 4
     normally_open: false
   - id: purge_valve
-    pin: GPIO14
+    pin: 5
     normally_open: false
 
 espresso_machine_pump:
   id: main_pump
   type: relay
-  pin: GPIO25
+  pin: 6
 
-# --- Orchestrator with full brew + steam configuration ---
+espresso_machine_grinder:
+  id: main_grinder
+  type: relay
+  pin: 7
+  default_grind_time: 7s
+
 espresso_machine:
   id: my_espresso
   brew:

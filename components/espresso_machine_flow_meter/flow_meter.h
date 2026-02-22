@@ -3,11 +3,12 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include "espresso_machine/interfaces.h"
 
 namespace esphome {
 namespace espresso_machine_flow_meter {
 
-class FlowMeter : public Component {
+class FlowMeter : public Component, public espresso_machine::IFlowMeter {
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
   void set_pulses_per_ml(float pulses_per_ml) { pulses_per_ml_ = pulses_per_ml; }
@@ -20,6 +21,9 @@ class FlowMeter : public Component {
   // For use in display lambdas
   float total_volume() const { return total_volume_; }
   void reset();
+
+  // Simulates ISR-delivered pulses (used in unit tests and for calibration)
+  void add_pulses(uint32_t count) { pulse_count_ += count; }
 
  protected:
   GPIOPin *pin_{nullptr};

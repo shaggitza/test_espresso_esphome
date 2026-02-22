@@ -3,11 +3,12 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include "espresso_machine/interfaces.h"
 
 namespace esphome {
 namespace espresso_machine_valve {
 
-class Valve : public Component {
+class Valve : public Component, public espresso_machine::IValve {
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
   void set_normally_open(bool normally_open) { normally_open_ = normally_open; }
