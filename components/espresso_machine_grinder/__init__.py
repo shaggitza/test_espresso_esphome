@@ -6,6 +6,7 @@ from esphome.const import CONF_ID, CONF_PIN, CONF_TYPE
 
 CODEOWNERS = ["@shaggitza"]
 MULTI_CONF = True
+AUTO_LOAD = ["button", "number"]
 
 espresso_machine_grinder_ns = cg.esphome_ns.namespace("espresso_machine_grinder")
 Grinder = espresso_machine_grinder_ns.class_("Grinder", button.Button, cg.Component)
@@ -13,6 +14,7 @@ GrinderTimeNumber = espresso_machine_grinder_ns.class_(
     "GrinderTimeNumber", number.Number
 )
 GrindAction = espresso_machine_grinder_ns.class_("GrindAction", automation.Action)
+GrinderType = espresso_machine_grinder_ns.enum("GrinderType")
 
 CONF_DEFAULT_GRIND_TIME = "default_grind_time"
 CONF_GRIND_TIME_NUMBER = "grind_time_number"
@@ -63,9 +65,9 @@ async def to_code(config):
 
     grinder_type = config[CONF_TYPE]
     if grinder_type == "relay":
-        cg.add(var.set_grinder_type(espresso_machine_grinder_ns.GrinderType.RELAY))
+        cg.add(var.set_grinder_type(cg.RawExpression("espresso_machine_grinder::GrinderType::RELAY")))
     else:
-        cg.add(var.set_grinder_type(espresso_machine_grinder_ns.GrinderType.NONE))
+        cg.add(var.set_grinder_type(cg.RawExpression("espresso_machine_grinder::GrinderType::NONE")))
 
     cg.add(
         var.set_default_grind_time(config[CONF_DEFAULT_GRIND_TIME].total_milliseconds)
@@ -82,4 +84,5 @@ async def to_code(config):
             max_value=30000.0,
             step=100.0,
         )
+        cg.add(num.set_parent(var))
         cg.add(var.set_grind_time_number(num))

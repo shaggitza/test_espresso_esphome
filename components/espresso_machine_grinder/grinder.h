@@ -22,12 +22,13 @@ class Grinder;  // forward declaration
 
 class GrinderTimeNumber : public number::Number {
  public:
-  explicit GrinderTimeNumber(Grinder *parent) : parent_(parent) {}
+  GrinderTimeNumber() = default;
+  void set_parent(Grinder *parent) { parent_ = parent; }
 
  protected:
   void control(float value) override;
 
-  Grinder *parent_;
+  Grinder *parent_{nullptr};
 };
 
 // ---------------------------------------------------------------------------

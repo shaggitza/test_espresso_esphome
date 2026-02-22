@@ -11,7 +11,8 @@ static const char *const TAG = "espresso_machine_grinder";
 // ---------------------------------------------------------------------------
 
 void GrinderTimeNumber::control(float value) {
-  parent_->set_default_grind_time(static_cast<uint32_t>(value));
+  if (parent_ != nullptr)
+    parent_->set_default_grind_time(static_cast<uint32_t>(value));
   publish_state(value);
   ESP_LOGI(TAG, "Default grind time updated to %.0f ms", value);
 }

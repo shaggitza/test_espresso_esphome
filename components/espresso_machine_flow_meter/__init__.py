@@ -12,6 +12,7 @@ from esphome.const import (
 
 CODEOWNERS = ["@shaggitza"]
 MULTI_CONF = True
+AUTO_LOAD = ["sensor"]
 
 espresso_machine_flow_meter_ns = cg.esphome_ns.namespace(
     "espresso_machine_flow_meter"
