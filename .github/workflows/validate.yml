@@ -40,6 +40,7 @@ jobs:
           - tests/test_orchestrator.yaml
           - tests/test_all_components.yaml
           - tests/test_compile.yaml
+          - tests/test_example.yaml
 
     steps:
       - uses: actions/checkout@v4

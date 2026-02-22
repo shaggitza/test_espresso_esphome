@@ -6,6 +6,7 @@ from esphome.const import CONF_ID, CONF_PIN
 
 CODEOWNERS = ["@shaggitza"]
 MULTI_CONF = True
+AUTO_LOAD = ["switch"]
 
 espresso_machine_valve_ns = cg.esphome_ns.namespace("espresso_machine_valve")
 Valve = espresso_machine_valve_ns.class_("Valve", switch.Switch, cg.Component)

@@ -1,8 +1,9 @@
-# Test: espresso_machine (orchestrator) — validates the orchestrator with full brew+steam
-# wiring. All hardware subsystems are declared inline so cross-references resolve.
-# A template sensor + slow_pwm output + PID climate stand in for the real thermocouple.
+# Test: validates the full example configuration (philips_barista_brew.yaml)
+# using local components so CI catches schema regressions in the reference config.
+# Covers all options used in the example: pre-infusion, temperature_profile,
+# cleanup_script, flow_meter wired to the pump (not the orchestrator).
 esphome:
-  name: test-orchestrator
+  name: test-example
 
 esp32:
   board: esp32dev
@@ -10,6 +11,7 @@ esp32:
     type: arduino
 
 logger:
+  level: INFO
 
 external_components:
   - source:
@@ -19,58 +21,79 @@ external_components:
       - espresso_machine
       - espresso_machine_valve
       - espresso_machine_pump
+      - espresso_machine_grinder
       - espresso_machine_flow_meter
 
-# --- Fake heater (stands in for real MAX6675 + SSR in non-hardware tests) ---
+# --- Temperature sensor (template replaces real MAX6675 for schema testing) ---
 sensor:
   - platform: template
-    id: fake_thermoblock_temp
+    id: thermoblock_temp
     lambda: "return 90.0f;"
     update_interval: 1s
 
+# --- Heater SSR and PID climate ---
 output:
   - platform: slow_pwm
-    id: fake_heater_ssr
+    id: heater_ssr
     pin: GPIO4
     period: 1s
 
 climate:
   - platform: pid
     id: main_heater
-    sensor: fake_thermoblock_temp
-    heat_output: fake_heater_ssr
+    name: "Espresso Heater"
+    sensor: thermoblock_temp
     default_target_temperature: 90
+    heat_output: heater_ssr
     control_parameters:
-      kp: 0.5
-      ki: 0.01
-      kd: 1.0
+      kp: 2.5
+      ki: 0.05
+      kd: 15.0
+    deadband_parameters:
+      threshold_high: 0.3
+      threshold_low: -0.3
 
-# --- Hardware subsystems referenced by the orchestrator ---
+# --- Flow meter ---
 espresso_machine_flow_meter:
   id: brew_flow
+  name: "Brew Flow"
   pin:
     number: GPIO34
     mode: INPUT
   pulses_per_ml: 0.5195
 
+# --- Valves ---
 espresso_machine_valve:
   - id: brew_valve
+    name: "Brew Valve"
     pin: GPIO26
     normally_open: false
   - id: steam_valve
+    name: "Steam Valve"
     pin: GPIO27
     normally_open: false
   - id: purge_valve
+    name: "Purge / Drain Valve"
     pin: GPIO14
     normally_open: false
 
+# --- Pump with flow_meter wired (pump owns the flow subsystem) ---
 espresso_machine_pump:
   id: main_pump
+  name: "Vibration Pump"
   type: relay
   pin: GPIO25
   flow_meter: brew_flow
 
-# --- Orchestrator with full brew + steam configuration ---
+# --- Grinder ---
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
+
+# --- Orchestrator: brew block has NO flow_meter key (owned by the pump) ---
 espresso_machine:
   id: my_espresso
   brew:

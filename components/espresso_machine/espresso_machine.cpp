@@ -291,9 +291,7 @@ void EspressoMachine::enter_brewing_() {
   // Called only when pre-infusion ran; without pre-infusion, flow was
   // reset at brew_start() and nothing has flowed during HEATING.
   if (pre_infusion_enabled_) {
-    if (brew_flow_meter_)
-      brew_flow_meter_->reset();
-    else if (brew_pump_)
+    if (brew_pump_)
       brew_pump_->reset_flow();
   }
   if (brew_valve_)

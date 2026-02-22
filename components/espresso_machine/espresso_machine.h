@@ -52,7 +52,6 @@ class EspressoMachine : public Component {
   void set_brew_valve(IValve *v) { brew_valve_ = v; }
   void set_brew_purge_valve(IValve *v) { brew_purge_valve_ = v; }
   void set_brew_pump(IPump *p) { brew_pump_ = p; }
-  void set_brew_flow_meter(IFlowMeter *fm) { brew_flow_meter_ = fm; }
 
   // ----- Brew configuration setters ----------------------------------------
   void set_brew_target_temperature(float t) { brew_target_temp_ = t; }
@@ -114,7 +113,6 @@ class EspressoMachine : public Component {
   IValve *brew_valve_{nullptr};
   IValve *brew_purge_valve_{nullptr};
   IPump *brew_pump_{nullptr};
-  IFlowMeter *brew_flow_meter_{nullptr};  // optional direct flow meter reference
 
   // -- Brew config -----------------------------------------------------------
   float brew_target_temp_{90.0f};     // °C

@@ -332,12 +332,25 @@ espresso_machine_valve:
 # Visible in HA as a switch (on/off) or number (0–100% for dimmer type).
 #   type: relay   — simple on/off via relay (default; works for all machines)
 #   type: dimmer  — AC phase-cut dimmer for pressure profiling (advanced)
+#
+# DESIGN: The flow meter is declared here (as flow_meter:) rather than in the
+# espresso_machine: brew: block. The pump owns the flow subsystem because:
+#   1. Rotary pumps can natively deliver specific volumes without a separate
+#      flow meter; keeping flow in the pump entity makes that future change
+#      transparent to the orchestrator.
+#   2. All pump run() calls carry a volume parameter; the pump uses the flow
+#      meter to know when to stop (temp too high, no flow for a period,
+#      volume reached, or manual stop). The orchestrator never needs to
+#      reference the flow meter directly.
+#   3. This yields a clean separation: the orchestrator asks the pump to
+#      "run until X ml" and gets flow data back through the IPump interface.
 # =============================================================================
 espresso_machine_pump:
   id: main_pump
   name: "Vibration Pump"
   type: relay                 # relay | dimmer
   pin: GPIO25                 # ← CHANGE ME
+  flow_meter: brew_flow       # flow meter owned by the pump; see design note above
 
 # =============================================================================
 # GRINDER — espresso_machine_grinder platform (first-class citizen)
@@ -455,7 +468,6 @@ espresso_machine:
   brew:
     heater: main_heater           # id of the climate entity above
     pump: main_pump               # id of the pump entity above
-    flow_meter: brew_flow         # id of the flow meter entity above
     valve: brew_valve             # id of the valve entity above
     purge_valve: purge_valve      # id of the valve entity above
 

@@ -11,6 +11,7 @@ from esphome.const import (
 
 CODEOWNERS = ["@shaggitza"]
 MULTI_CONF = True
+AUTO_LOAD = ["switch", "number"]
 
 espresso_machine_pump_ns = cg.esphome_ns.namespace("espresso_machine_pump")
 PumpSwitch = espresso_machine_pump_ns.class_(
