@@ -32,7 +32,7 @@ reference it from their own YAML with a single `external_components:` block.
 
 ---
 
-### Phase 1 — Core Component Scaffold
+### Phase 1 — Core Component Scaffold ✅
 
 **Goal:** All five ESPHome platform modules compile and load without errors.
 
@@ -41,18 +41,20 @@ Each subsystem is its own top-level ESPHome platform (`espresso_machine_valve`,
 The `espresso_machine` platform is a pure orchestrator with no hardware of its own.
 
 Tasks:
-- [ ] Create stub `__init__.py` + `.h` / `.cpp` for each platform:
+- [x] Create stub `__init__.py` + `.h` / `.cpp` for each platform:
   - `espresso_machine/` — orchestrator stub
-  - `espresso_machine_valve/` — switch platform stub
-  - `espresso_machine_pump/` — switch/number platform stub
-  - `espresso_machine_grinder/` — button/number platform stub
-  - `espresso_machine_flow_meter/` — sensor platform stub
-- [ ] Register all platforms with ESPHome's component registry
-- [ ] Validate schema with `esphome config` against the reference YAML
-- [ ] CI workflow: lint Python (`flake8`) + validate YAML example
+  - `espresso_machine_valve/` — valve platform stub
+  - `espresso_machine_pump/` — pump platform stub
+  - `espresso_machine_grinder/` — grinder platform stub
+  - `espresso_machine_flow_meter/` — flow meter platform stub
+- [x] Register all platforms with ESPHome's component registry
+- [x] Validate schema with `esphome config` against per-component test YAMLs in `tests/`
+- [x] CI workflow: lint Python (`flake8`) + validate YAML tests (`.github/workflows/validate.yml`)
 
 Deliverables:
 - All components load, log their presence at boot, and expose their `id:` in YAML.
+- Six test YAML files in `tests/` (one per component + combined) all pass `esphome config`.
+- GitHub Actions CI enforces lint and schema validation on every PR.
 
 ---
 

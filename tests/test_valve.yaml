@@ -1,0 +1,33 @@
+# Test: espresso_machine_valve — validates the valve platform schema (multiple valves)
+esphome:
+  name: test-valve
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [espresso_machine_valve]
+
+# --- Valve components under test ---
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+    normally_open: false
+
+  - id: purge_valve
+    name: "Purge / Drain Valve"
+    pin: GPIO14
+    normally_open: false

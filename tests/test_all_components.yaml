@@ -1,0 +1,60 @@
+# Test: all Phase 1 hardware components co-existing in a single config.
+# Validates that all external component declarations are compatible.
+esphome:
+  name: test-all-components
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_grinder
+      - espresso_machine_flow_meter
+
+espresso_machine_flow_meter:
+  id: brew_flow
+  name: "Brew Flow"
+  pin:
+    number: GPIO34
+    mode: INPUT
+  pulses_per_ml: 0.5195
+
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+    normally_open: false
+  - id: purge_valve
+    name: "Purge / Drain Valve"
+    pin: GPIO14
+    normally_open: false
+
+espresso_machine_pump:
+  id: main_pump
+  name: "Vibration Pump"
+  type: relay
+  pin: GPIO25
+
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
+
+espresso_machine:
+  id: my_espresso

@@ -1,0 +1,54 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint Python (flake8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Lint component Python files
+        run: flake8 components/ --max-line-length=100
+
+  validate:
+    name: ESPHome config — ${{ matrix.yaml }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        yaml:
+          - tests/test_flow_meter.yaml
+          - tests/test_valve.yaml
+          - tests/test_pump.yaml
+          - tests/test_grinder.yaml
+          - tests/test_orchestrator.yaml
+          - tests/test_all_components.yaml
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ESPHome
+        run: pip install esphome
+
+      - name: Validate ${{ matrix.yaml }}
+        run: esphome config ${{ matrix.yaml }}

@@ -1,0 +1,52 @@
+# Test: espresso_machine (orchestrator) — validates the orchestrator stub with brew+steam schemas.
+# All hardware subsystems are declared inline so cross-references resolve correctly.
+esphome:
+  name: test-orchestrator
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_flow_meter
+
+# --- Hardware subsystems referenced by the orchestrator ---
+espresso_machine_flow_meter:
+  id: brew_flow
+  pin:
+    number: GPIO34
+    mode: INPUT
+  pulses_per_ml: 0.5195
+
+espresso_machine_valve:
+  - id: brew_valve
+    pin: GPIO26
+    normally_open: false
+  - id: steam_valve
+    pin: GPIO27
+    normally_open: false
+  - id: purge_valve
+    pin: GPIO14
+    normally_open: false
+
+espresso_machine_pump:
+  id: main_pump
+  type: relay
+  pin: GPIO25
+
+# --- Orchestrator under test ---
+# Note: brew.heater references a native ESPHome climate entity (added in Phase 2).
+# For Phase 1 schema validation, brew/steam sections are omitted; they are tested
+# individually once the heater platform is introduced in Phase 2.
+espresso_machine:
+  id: my_espresso

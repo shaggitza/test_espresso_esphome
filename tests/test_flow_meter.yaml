@@ -1,0 +1,25 @@
+# Test: espresso_machine_flow_meter — validates the flow meter platform schema
+esphome:
+  name: test-flow-meter
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [espresso_machine_flow_meter]
+
+# --- Flow meter component under test ---
+espresso_machine_flow_meter:
+  id: brew_flow
+  name: "Brew Flow"
+  pin:
+    number: GPIO34
+    mode: INPUT
+  pulses_per_ml: 0.5195

@@ -1,0 +1,23 @@
+# Test: espresso_machine_pump — validates the pump platform schema (relay type)
+esphome:
+  name: test-pump
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [espresso_machine_pump]
+
+# --- Pump component under test (relay type) ---
+espresso_machine_pump:
+  id: main_pump
+  name: "Vibration Pump"
+  type: relay
+  pin: GPIO25
