@@ -1,0 +1,295 @@
+# =============================================================================
+# ESPHome Espresso Machine Controller — Reference Device Configuration
+# Target machine: Philips Barista Brew (integrated grinder, single thermoblock)
+#
+# HOW TO USE:
+#   1. Copy this file to your ESPHome config directory.
+#   2. Update every "# ← CHANGE ME" comment to match your wiring.
+#   3. Create a secrets.yaml alongside this file with your Wi-Fi credentials.
+#   4. Run:  esphome run philips_barista_brew.yaml
+#
+# SAFETY WARNING:
+#   This configuration controls the LOW-VOLTAGE side of your machine only.
+#   The 220 V heater, pump and grinder are switched via SSRs/relays already
+#   present in your machine. Never bypass galvanic isolation.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ESPHome core
+# -----------------------------------------------------------------------------
+esphome:
+  name: philips_barista_brew
+  friendly_name: "Philips Barista Brew"
+  comment: "ESPHome espresso machine controller — github.com/shaggitza/test_espresso_esphome"
+
+esp32:
+  board: esp32dev        # ← CHANGE ME if using a different board variant
+  framework:
+    type: arduino
+
+# -----------------------------------------------------------------------------
+# Logging (reduce verbosity in production to save log bandwidth)
+# -----------------------------------------------------------------------------
+logger:
+  level: INFO
+
+# -----------------------------------------------------------------------------
+# Home Assistant API
+# -----------------------------------------------------------------------------
+api:
+  encryption:
+    key: !secret ha_api_key    # generate with: esphome generate-api-key
+
+# -----------------------------------------------------------------------------
+# OTA updates
+# -----------------------------------------------------------------------------
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# -----------------------------------------------------------------------------
+# Wi-Fi
+# -----------------------------------------------------------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Optional: static IP for stable HA discovery
+  # manual_ip:
+  #   static_ip: 192.168.1.100
+  #   gateway: 192.168.1.1
+  #   subnet: 255.255.255.0
+
+# -----------------------------------------------------------------------------
+# External component — pulls the espresso_machine component from this repo
+# -----------------------------------------------------------------------------
+external_components:
+  - source: github://shaggitza/test_espresso_esphome@main
+    components: [espresso_machine]
+
+# -----------------------------------------------------------------------------
+# SPI bus — used by the MAX6675/MAX31855 thermocouple interface
+# -----------------------------------------------------------------------------
+spi:
+  clk_pin: GPIO18     # ← CHANGE ME
+  miso_pin: GPIO19    # ← CHANGE ME
+
+# -----------------------------------------------------------------------------
+# I2C bus — used by the optional OLED display
+# -----------------------------------------------------------------------------
+i2c:
+  sda: GPIO21         # ← CHANGE ME (or remove this block if no display)
+  scl: GPIO22         # ← CHANGE ME
+
+# =============================================================================
+# Espresso Machine Component
+# =============================================================================
+espresso_machine:
+  id: my_espresso
+
+  # ---------------------------------------------------------------------------
+  # Heater — thermoblock temperature control via SSR + PID
+  # ---------------------------------------------------------------------------
+  heater:
+    id: main_heater
+    type: thermoblock         # thermoblock | boiler
+    sensor_type: max6675      # max6675 | max31855 | ntc
+
+    # SPI chip-select for the thermocouple board
+    cs_pin: GPIO5             # ← CHANGE ME
+
+    # GPIO driving the Solid State Relay (LOW = heater OFF, HIGH = heater ON)
+    ssr_pin: GPIO4            # ← CHANGE ME
+
+    # Safety: hard cutoff if temperature exceeds this value regardless of PID
+    max_temperature: 165°C
+
+    # PID parameters — tune these for your thermoblock
+    # Start with these values and use ESPHome's PID autotune if needed
+    pid:
+      kp: 2.5
+      ki: 0.05
+      kd: 15.0
+      output_averaging_samples: 5
+      derivative_averaging_samples: 5
+      # Deadband: stop integrating when temperature is within ±0.3 °C of setpoint
+      deadband_parameters:
+        threshold_high: 0.3°C
+        threshold_low: -0.3°C
+
+  # ---------------------------------------------------------------------------
+  # Grinder — relay-driven integrated grinder
+  #   Set type: none if your machine has no grinder or you use a separate grinder
+  # ---------------------------------------------------------------------------
+  grinder:
+    id: main_grinder
+    type: relay               # relay | none
+    pin: GPIO23               # ← CHANGE ME
+    default_grind_time: 7s    # adjustable from HA as a number entity
+
+  # ---------------------------------------------------------------------------
+  # Flow meter — volumetric shot measurement
+  #   Pulses are counted on a rising-edge interrupt; flow_rate and total_volume
+  #   are published as sensors to Home Assistant.
+  #
+  #   pulses_per_ml: calibrate by running the pump for a known volume and
+  #   counting pulses. The AB32 flow meter gives ~0.5 pulses/ml.
+  # ---------------------------------------------------------------------------
+  flow_meter:
+    id: brew_flow
+    pin: GPIO34               # ← CHANGE ME (must be an input-capable GPIO)
+    pulses_per_ml: 0.5195     # ← calibrate for your flow meter
+
+  # ---------------------------------------------------------------------------
+  # Pump — vibration pump control
+  #   type: relay    — simple on/off (default; works for most machines)
+  #   type: dimmer   — AC phase-cut dimmer for pressure profiling (advanced)
+  # ---------------------------------------------------------------------------
+  pump:
+    id: main_pump
+    type: relay               # relay | dimmer
+    pin: GPIO25               # ← CHANGE ME
+
+  # ---------------------------------------------------------------------------
+  # Valves — named GPIO outputs
+  #   Add one entry per solenoid valve.  Valves are referenced by id: in the
+  #   brew: and steam: blocks below.
+  #   normally_open: false (default) — valve closes when GPIO is LOW
+  # ---------------------------------------------------------------------------
+  valves:
+    - id: brew_valve          # 3-way solenoid: routes water to portafilter
+      pin: GPIO26             # ← CHANGE ME
+      normally_open: false
+
+    - id: steam_valve         # Steam wand solenoid
+      pin: GPIO27             # ← CHANGE ME
+      normally_open: false
+
+    - id: purge_valve         # Drain/purge solenoid (some machines combine this
+      pin: GPIO14             #   with the brew 3-way valve)
+      normally_open: false    # ← CHANGE ME
+
+  # ---------------------------------------------------------------------------
+  # Brew mode — full espresso shot sequence
+  # ---------------------------------------------------------------------------
+  brew:
+    heater: main_heater
+    pump: main_pump
+    flow_meter: brew_flow
+    valve: brew_valve
+    purge_valve: purge_valve
+
+    # Target brew temperature at the thermoblock
+    target_temperature: 90°C
+
+    # Temperature surfing profile:
+    #   At shot start the setpoint is raised by `offset` degrees.
+    #   It then linearly decays back to `target_temperature` over `ramp_time`.
+    #   This compensates for the thermal mass of the cold portafilter.
+    temperature_profile:
+      offset: 5°C             # initial overshoot above target_temperature
+      ramp_time: 20s          # time to decay back to target_temperature
+
+    # Shot volume control
+    #   flow_max:    stop the shot when this many ml have passed the flow meter
+    #   flow_offset: ml absorbed by puck + basket (subtracted from flow reading
+    #                to give the yield shown in HA). Adjust per basket/dose.
+    flow_max: 40ml
+    flow_offset: 20ml
+
+    # Pre-infusion: soak the puck at low flow before full-pressure extraction
+    #   The pump runs briefly with the brew valve open and purge valve open,
+    #   then pauses before full extraction begins.
+    pre_infusion:
+      enabled: true
+      volume_ml: 5ml          # ml to push through during pre-infusion
+      hold_time: 5s           # pause after pre-infusion before full extraction
+
+    # Cleanup script: runs automatically after the shot is complete
+    #   This flushes residual coffee oils from the brew path.
+    cleanup_script:
+      - delay: 2s
+      - pump.run:
+          id: main_pump
+          volume_ml: 20ml
+          valve: purge_valve  # purge valve open, brew valve closed
+
+  # ---------------------------------------------------------------------------
+  # Steam mode — milk steaming sequence
+  # ---------------------------------------------------------------------------
+  steam:
+    heater: main_heater
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+
+    # Temperature to reach before opening the steam valve
+    target_temperature: 135°C
+
+    # Pump duty-cycle target during steaming, expressed in ml/s.
+    #   The pump turns on and off rapidly to maintain this average flow rate.
+    #   Set to 0 to disable pump-assisted steaming (passive steam only).
+    flow_max: 2ml/s
+
+    # After steaming, automatically ramp the heater back to this temperature
+    # so the machine is ready for the next shot without manual intervention.
+    cool_down_to: 90°C
+
+    # Cleanup: purge steam path after cool-down
+    cleanup_script:
+      - valve.open: purge_valve
+      - pump.run:
+          id: main_pump
+          volume_ml: 10ml
+          valve: purge_valve
+      - valve.close: purge_valve
+
+# =============================================================================
+# Optional: OLED display (128×64 SSD1306 via I2C)
+# Comment out this entire block if you do not have a display.
+# =============================================================================
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    lambda: |-
+      // Line 0: machine mode
+      it.printf(0, 0, id(font_small), "Mode: %s",
+        id(my_espresso).mode_name().c_str());
+      // Line 16: current temperature / setpoint
+      it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
+        id(main_heater).current_temperature,
+        id(main_heater).target_temperature);
+      // Line 32: shot volume
+      it.printf(0, 32, id(font_small), "Vol: %.1f ml",
+        id(brew_flow).total_volume());
+      // Line 48: SSR duty cycle
+      it.printf(0, 48, id(font_small), "Heat: %.0f%%",
+        id(main_heater).output_value() * 100.0f);
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font_small
+    size: 12
+
+# =============================================================================
+# Home Assistant — expose extra entities
+# =============================================================================
+
+# Restart button (useful for remote recovery)
+button:
+  - platform: restart
+    name: "Restart"
+
+# Uptime sensor
+sensor:
+  - platform: uptime
+    name: "Uptime"
+
+# Wi-Fi signal strength
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+
+# Internal temperature of the ESP32 chip (diagnostic)
+  - platform: internal_temperature
+    name: "ESP32 Temperature"
