@@ -3,7 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
-#include "espresso_machine/interfaces.h"
+#include "../espresso_machine/interfaces.h"
 
 namespace esphome {
 namespace espresso_machine_pump {
