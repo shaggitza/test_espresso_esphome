@@ -1,0 +1,311 @@
+# =============================================================================
+# ESPHome Espresso Machine Controller — Reference Device Configuration
+# Target machine: Philips Barista Brew (integrated grinder, single thermoblock)
+#
+# HOW TO USE:
+#   1. Copy this file to your ESPHome config directory.
+#   2. Update every "# ← CHANGE ME" comment to match your wiring.
+#   3. Create a secrets.yaml alongside this file with your Wi-Fi credentials.
+#   4. Run:  esphome run philips_barista_brew.yaml
+#
+# DESIGN PHILOSOPHY:
+#   Every subsystem (heater, valves, pump, grinder, flow meter) is a first-class
+#   ESPHome entity defined at the top level with its own platform block.
+#   The espresso_machine: block is a pure orchestrator — it only references those
+#   entities by id: and manages the brew / steam state machines.
+#   This lets you use any entity independently from HA or ESPHome scripts.
+#
+# SAFETY WARNING:
+#   This configuration controls the LOW-VOLTAGE side of your machine only.
+#   The 220 V heater, pump and grinder are switched via SSRs/relays already
+#   present in your machine. Never bypass galvanic isolation.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ESPHome core
+# -----------------------------------------------------------------------------
+esphome:
+  name: philips-barista-brew
+  friendly_name: "Philips Barista Brew"
+  comment: "ESPHome espresso machine controller — github.com/shaggitza/test_espresso_esphome"
+
+esp32:
+  board: esp32dev        # ← CHANGE ME if using a different board variant
+  framework:
+    type: arduino
+
+# -----------------------------------------------------------------------------
+# Logging (reduce verbosity in production to save log bandwidth)
+# -----------------------------------------------------------------------------
+logger:
+  level: INFO
+
+# -----------------------------------------------------------------------------
+# Home Assistant API
+# -----------------------------------------------------------------------------
+api:
+  encryption:
+    key: !secret ha_api_key    # generate with: esphome generate-api-key
+
+# -----------------------------------------------------------------------------
+# OTA updates
+# -----------------------------------------------------------------------------
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# -----------------------------------------------------------------------------
+# Wi-Fi
+# -----------------------------------------------------------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Optional: static IP for stable HA discovery
+  # manual_ip:
+  #   static_ip: 192.168.1.100
+  #   gateway: 192.168.1.1
+  #   subnet: 255.255.255.0
+
+  # Fallback hotspot (captive portal) in case WiFi connection fails
+  ap:
+    ssid: "Espresso-Fallback"
+    password: "espresso123"
+
+# Enable captive portal for initial setup without WiFi
+captive_portal:
+
+external_components:
+  - source: github://shaggitza/test_espresso_esphome@main
+    refresh: 0s        # Force re-download on every compile (remove after deployed)
+    components:
+      - espresso_machine           # orchestrator: brew + steam state machines
+      - espresso_machine_valve     # solenoid valve with safety interlock
+      - espresso_machine_pump      # vibration pump (relay or dimmer)
+      - espresso_machine_grinder   # timed relay grinder with lockout
+      - espresso_machine_flow_meter  # pulse-counting volumetric sensor
+
+spi:
+  miso_pin: GPIO19   # VSPI MISO (safe, non-strapping)
+  clk_pin: GPIO18    # VSPI CLK (safe, non-strapping)
+
+# -----------------------------------------------------------------------------
+# I2C bus — used by the optional OLED display
+# -----------------------------------------------------------------------------
+i2c:
+  sda: GPIO22
+  scl: GPIO23
+
+# Temperature sensor — native ESPHome (visible in HA, usable in automations)
+sensor:
+  - platform: max31855
+    id: thermoblock_temp
+    name: "Thermoblock Temperature"
+    cs_pin: GPIO21     # Safe GPIO (non-strapping)
+    update_interval: 1s
+    filters:
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+    # Safety: hard over-temperature cutoff — independent of PID.
+    on_value_range:
+      - above: 165            # °C — absolute maximum
+        then:
+          - climate.control:
+              id: main_heater
+              mode: "off"
+          - logger.log:
+              format: "SAFETY: Over-temperature cutoff (%.1f °C). Heater forced OFF."
+              args: ["x"]
+              level: ERROR
+
+  # Diagnostic sensors
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+  - platform: internal_temperature
+    name: "ESP32 Temperature"
+
+  # Shot statistics — updated once per completed shot
+  - platform: template
+    id: last_shot_duration
+    name: "Last Shot Duration"
+    unit_of_measurement: "s"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_time_s();
+
+  - platform: template
+    id: last_shot_yield
+    name: "Last Shot Yield"
+    unit_of_measurement: "mL"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_yield_ml();
+
+# Heater SSR output — native ESPHome slow_pwm
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4
+    period: 1s
+
+# Heater — native ESPHome PID climate (first-class citizen)
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Espresso Heater"
+    sensor: thermoblock_temp
+    default_target_temperature: 90
+    heat_output: heater_ssr
+    control_parameters:
+      kp: 2.5
+      ki: 0.05
+      kd: 15.0
+      output_averaging_samples: 5
+      derivative_averaging_samples: 5
+    deadband_parameters:
+      threshold_high: 0.3
+      threshold_low: -0.3
+
+# Flow meter — espresso_machine_flow_meter platform (first-class citizen)
+espresso_machine_flow_meter:
+  id: brew_flow
+  name: "Brew Flow"
+  pin:
+    number: GPIO34
+    mode: INPUT          # GPIO34-39 don't support internal pullup/pulldown
+  pulses_per_ml: 0.5195
+  rate_sensor:
+    name: "Brew Flow Rate"
+  total_sensor:
+    name: "Brew Flow Total"
+
+# Valves — espresso_machine_valve platform (first-class citizens)
+# Each valve is its own switch entity in HA; interlock is enforced by the platform.
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+    normally_open: false
+  - id: purge_valve
+    name: "Purge Drain Valve"
+    pin: GPIO14
+    normally_open: false
+
+# Pump — espresso_machine_pump platform (first-class citizen)
+espresso_machine_pump:
+  id: main_pump
+  name: "Vibration Pump"
+  flow_meter: brew_flow
+  type: relay
+  pin: GPIO25
+
+# Grinder — espresso_machine_grinder platform (first-class citizen)
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay          # relay | none
+  pin: GPIO32          # Changed from GPIO23 to avoid I2C SCL conflict
+  default_grind_time: 7s
+  grind_time_number:
+    name: "Grind Time"
+
+# Espresso Machine — pure orchestrator, references all entities above by id:
+espresso_machine:
+  id: my_espresso
+  brew:
+    heater: main_heater
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: purge_valve
+    target_temperature: 90°C
+    temperature_profile:
+      offset: 5°C
+      ramp_time: 20s
+    flow_max: 40ml
+    flow_offset: 20ml
+    pre_infusion:
+      enabled: true
+      volume_ml: 5ml
+      hold_time: 5s
+  steam:
+    heater: main_heater
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    flow_max: 2ml/s
+    cool_down_to: 90°C
+
+# =============================================================================
+# DISPLAY (optional) — native ESPHome SSD1306 via I2C
+# =============================================================================
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    lambda: |-
+      it.printf(0,  0, id(font_small), "Mode: %s",
+        id(my_espresso).mode_name());
+      it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
+        id(main_heater).current_temperature,
+        id(main_heater).target_temperature);
+      it.printf(0, 32, id(font_small), "Vol: %.1f ml",
+        id(brew_flow).total_volume());
+      it.printf(0, 48, id(font_small), "Heat: %.0f%%",
+        id(main_heater).get_output_value() * 100.0f);
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font_small
+    size: 12
+
+# =============================================================================
+# BUTTONS — restart and PID autotune
+# =============================================================================
+button:
+  - platform: restart
+    name: "Restart"
+
+  - platform: template
+    name: "PID Autotune"
+    on_press:
+      - climate.pid.autotune: main_heater
+
+  - platform: template
+    name: "Brew Start"
+    on_press:
+      - lambda: id(my_espresso).brew_start();
+
+  - platform: template
+    name: "Brew Stop"
+    on_press:
+      - lambda: id(my_espresso).brew_stop();
+
+  - platform: template
+    name: "Steam Start"
+    on_press:
+      - lambda: id(my_espresso).steam_start();
+
+  - platform: template
+    name: "Steam Stop"
+    on_press:
+      - lambda: id(my_espresso).steam_stop();
+
+# =============================================================================
+# TEXT SENSOR — exposes the current machine mode to HA
+# =============================================================================
+text_sensor:
+  - platform: template
+    name: "Machine Mode"
+    id: machine_mode
+    update_interval: 2s
+    lambda: return std::string(id(my_espresso).mode_name());
