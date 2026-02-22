@@ -17,18 +17,24 @@ but written to be generic enough for other machines with similar hardware.
 
 ## Features
 
-| Feature | Description |
-|---|---|
-| **PID temperature control** | Thermoblock heater controlled via SSR with a software PID loop |
-| **Temperature profiling** | Brew temperature offset + decay curve (temperature surfing) |
-| **Volumetric shot control** | Flow meter integration for accurate ml-based shot measurement |
-| **Grinder integration** | Relay-driven grinder with configurable grind time |
-| **Steam mode** | Separate steam temperature target with pump duty-cycle flow control |
-| **Valve management** | Named valves (brew, steam, purge) for clean shot & steam sequences |
-| **Pre-infusion** | Configurable pre-wet phase before full-pressure extraction |
-| **Cleanup scripts** | Declarative flush/purge sequences after brew and steam |
-| **Home Assistant integration** | Full native ESPHome API — sensors, switches, numbers exposed automatically |
-| **OTA updates** | Standard ESPHome OTA via Wi-Fi |
+See [`FEATURES.md`](FEATURES.md) for the full, up-to-date feature status table (implemented /
+partial / planned). A high-level summary:
+
+| Feature | Status | Notes |
+|---|---|---|
+| **PID temperature control** | ✅ Implemented | Native ESPHome `climate.pid`; autotune supported |
+| **Volumetric shot control** | ✅ Implemented | Flow meter with ISR pulse counter; auto-terminates at target volume |
+| **Valve management + interlock** | ✅ Implemented | Named valves; single-open safety interlock at platform level |
+| **Vibration pump control** | ✅ Implemented | Relay (on/off) and dimmer (0–100 %) types |
+| **Grinder integration** | ✅ Implemented | Timed relay grind; adjustable from HA; brew/steam lockout ⬜ pending |
+| **Pre-infusion** | ✅ Implemented | Volume-driven pre-wet + configurable hold time |
+| **Brew state machine** | 🚧 Partial | All states present; heater setpoint wiring + cleanup pending |
+| **Steam mode** | 🚧 Partial | Valve + pump activation works; temperature-gating + flow control pending |
+| **Temperature surfing** | 🚧 Partial | Config accepted; climate setpoint not yet applied at runtime |
+| **Cleanup scripts** | ⬜ Planned | Schema accepts block; execution wired in Phase 9 |
+| **Brew profiles** | ⬜ Planned | Multi-phase pressure/flow curves (Phase 12) |
+| **Home Assistant integration** | ✅ Implemented | All entities auto-discovered via native ESPHome API |
+| **OTA updates** | ✅ Implemented | Standard ESPHome OTA via Wi-Fi |
 
 ---
 
@@ -200,6 +206,14 @@ See [`structure.md`](structure.md) for the complete layout of source files and t
 ## Roadmap / Plan
 
 See [`PLAN.md`](PLAN.md) for the phased development plan.
+
+---
+
+## Feature Tracking
+
+See [`FEATURES.md`](FEATURES.md) for the authoritative status of every feature (implemented,
+partial, or planned). Developers and agents: **update `FEATURES.md` in the same PR** whenever
+you implement or change a feature.
 
 ---
 

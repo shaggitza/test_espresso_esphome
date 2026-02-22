@@ -8,6 +8,15 @@
 #   3. Create a secrets.yaml alongside this file with your Wi-Fi credentials.
 #   4. Run:  esphome run philips_barista_brew.yaml
 #
+# IMPLEMENTATION STATUS (see FEATURES.md for the full list):
+#   ✅ Implemented:  flow meter, valves (with interlock), pump, grinder, pre-infusion,
+#                    brew auto-termination at flow_max, PID climate (native ESPHome),
+#                    brew_start / brew_stop / steam_start / steam_stop actions
+#   🚧 Partial:      brew/steam state machines (temperature-gating not yet live),
+#                    temperature surfing (config accepted; climate call not wired)
+#   ⬜ Not yet:      cleanup_script execution, steam flow-rate control, grinder lockout,
+#                    brew profiles, shot stats as HA sensor entities
+#
 # DESIGN PHILOSOPHY:
 #   Every subsystem (heater, valves, pump, grinder, flow meter) is a first-class
 #   ESPHome entity defined at the top level with its own platform block.
@@ -471,13 +480,14 @@ espresso_machine:
       volume_ml: 5ml            # ml to push through during pre-infusion
       hold_time: 5s             # pause after pre-infusion before full extraction begins
 
-    # Cleanup: automatically flush brew path after shot completes
+    # Cleanup: automatically flush brew path after shot completes.
+    # NOTE: cleanup_script execution is planned for Phase 9. This block is
+    # accepted by the schema but NOT executed in the current firmware.
     cleanup_script:
       - delay: 2s
       - espresso_machine_pump.run:
           id: main_pump
           volume_ml: 20ml
-          valve: purge_valve    # purge valve open, brew valve closed
 
   # ---------------------------------------------------------------------------
   # Steam mode — milk steaming sequence
@@ -501,13 +511,14 @@ espresso_machine:
     # so the machine is ready for the next shot without manual intervention.
     cool_down_to: 90°C
 
-    # Cleanup: purge steam path after cool-down
+    # Cleanup: purge steam path after cool-down.
+    # NOTE: cleanup_script execution is planned for Phase 9. This block is
+    # accepted by the schema but NOT executed in the current firmware.
     cleanup_script:
       - espresso_machine_valve.open: purge_valve
       - espresso_machine_pump.run:
           id: main_pump
           volume_ml: 10ml
-          valve: purge_valve
       - espresso_machine_valve.close: purge_valve
 
 # =============================================================================
@@ -520,7 +531,7 @@ display:
     address: 0x3C
     lambda: |-
       it.printf(0,  0, id(font_small), "Mode: %s",
-        id(my_espresso).mode_name().c_str());
+        id(my_espresso).mode_name());
       it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
         id(main_heater).current_temperature,
         id(main_heater).target_temperature);

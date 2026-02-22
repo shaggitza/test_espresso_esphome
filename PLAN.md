@@ -80,15 +80,15 @@ Deliverables:
 
 ---
 
-### Phase 3 — `espresso_machine_flow_meter` Platform
+### Phase 3 — `espresso_machine_flow_meter` Platform ✅
 
 **Goal:** Accurate volumetric measurement driving shot termination.
 
 Tasks:
 - [x] `espresso_machine_flow_meter/__init__.py` — schema: `id`, `name`, `pin`, `pulses_per_ml`
-- [x] Registers as a **sensor platform** exposing two child sensors:
-  - `{id}_rate` — instantaneous flow rate (ml/s)
-  - `{id}_total` — accumulated volume (ml), resets at shot start
+- [x] Registers as a **sensor platform** exposing two optional child sensors:
+  - `rate_sensor` — instantaneous flow rate (ml/s)
+  - `total_sensor` — accumulated volume (ml), resets at shot start
 - [x] Interrupt-driven pulse counter in C++ (`ISR`-safe)
 - [x] Actions: `espresso_machine_flow_meter.reset`, `espresso_machine_flow_meter.calibrate`
 
@@ -97,83 +97,86 @@ Deliverables:
 
 ---
 
-### Phase 4 — `espresso_machine_valve` Platform
+### Phase 4 — `espresso_machine_valve` Platform ✅
 
 **Goal:** Safe, named solenoid valve control with hardware interlock.
 
 Tasks:
-- [ ] `espresso_machine_valve/__init__.py` — schema: `id`, `name`, `pin`, `normally_open`
-- [ ] Registers as a **switch platform** — each valve is its own HA switch entity
-- [ ] Platform-level interlock: opening one valve closes all others (single-open invariant)
-- [ ] Actions: `espresso_machine_valve.open`, `espresso_machine_valve.close`
-- [ ] `normally_open: false` default — valves close on power loss
+- [x] `espresso_machine_valve/__init__.py` — schema: `id`, `name`, `pin`, `normally_open`
+- [x] Registers as a **switch platform** — each valve is its own HA switch entity
+- [x] Platform-level interlock: opening one valve closes all others (single-open invariant)
+- [x] Actions: `espresso_machine_valve.open`, `espresso_machine_valve.close`
+- [x] `normally_open: false` default — valves close on power loss
 
 Deliverables:
 - Each valve is an independent HA switch; interlock enforced at platform level.
 
 ---
 
-### Phase 5 — `espresso_machine_pump` Platform
+### Phase 5 — `espresso_machine_pump` Platform ✅
 
 **Goal:** Vibration pump control (relay or dimmer).
 
 Tasks:
-- [ ] `espresso_machine_pump/__init__.py` — schema: `id`, `name`, `type` (`relay`|`dimmer`), `pin`
-- [ ] `relay` type: registers as a **switch platform** (on/off HA entity)
-- [ ] `dimmer` type: registers as a **number platform** (0–100% HA entity via slow_pwm)
-- [ ] Action: `espresso_machine_pump.run` with `volume_ml` or `duration` and optional `valve` arg
+- [x] `espresso_machine_pump/__init__.py` — schema: `id`, `name`, `type` (`relay`|`dimmer`), `pin`
+- [x] `relay` type: registers as a **switch platform** (on/off HA entity)
+- [x] `dimmer` type: registers as a **number platform** (0–100% HA entity via slow_pwm)
+- [x] Action: `espresso_machine_pump.run` with `volume_ml` and optional `timeout_ms`
 
 Deliverables:
 - Pump is an independent HA entity; controllable from scripts and automations.
 
 ---
 
-### Phase 6 — `espresso_machine_grinder` Platform
+### Phase 6 — `espresso_machine_grinder` Platform 🚧
 
 **Goal:** Timed relay grind with Home Assistant control and brew/steam lockout.
 
 Tasks:
-- [ ] `espresso_machine_grinder/__init__.py` — schema: `id`, `name`, `type` (`relay`|`none`), `pin`, `default_grind_time`
-- [ ] Registers as a **button platform** (one-shot timed grind) and **number platform** (grind time)
-- [ ] Lockout: refuses activation when orchestrator is in brew or steam state
-- [ ] Action: `espresso_machine_grinder.grind` with optional `duration` override
+- [x] `espresso_machine_grinder/__init__.py` — schema: `id`, `name`, `type` (`relay`|`none`), `pin`, `default_grind_time`
+- [x] Registers as a **button platform** (one-shot timed grind) and **number platform** (grind time)
+- [ ] Lockout: refuses activation when orchestrator is in brew or steam state (orchestrator reference not yet wired)
+- [x] Action: `espresso_machine_grinder.grind` with optional `duration` override
 
 Deliverables:
 - Grinder is an independent HA entity with configurable time; lockout prevents unsafe use.
 
 ---
 
-### Phase 7 — Brew Mode (Orchestrator)
+### Phase 7 — Brew Mode (Orchestrator) 🚧
 
 **Goal:** Full automated espresso extraction sequence.
 
 Tasks:
-- [ ] `espresso_machine/__init__.py` `brew:` sub-schema — references: `heater`, `pump`,
+- [x] `espresso_machine/__init__.py` `brew:` sub-schema — references: `heater`, `pump`,
   `flow_meter`, `valve`, `purge_valve`, `target_temperature`, `temperature_profile`,
   `flow_max`, `flow_offset`, `pre_infusion`, `cleanup_script`
-- [ ] Temperature surfing: offset + ramp_time in `espresso_machine.cpp`
-- [ ] Pre-infusion phase: low-pressure soak before full extraction
-- [ ] Shot state machine: `idle → heating → pre_infusion → brewing → done → cleanup`
-- [ ] Auto-terminate when `flow_max` ml reached
-- [ ] `espresso_machine.brew_start` / `espresso_machine.brew_stop` actions
-- [ ] Publish shot stats (time, volume, temperature) as HA events
+- [x] Pre-infusion phase: volume-driven pre-wet + hold timer before full extraction
+- [x] Shot state machine: `idle → heating → pre_infusion → brewing → done → cleanup`
+- [x] Auto-terminate when `flow_max` ml reached
+- [x] `espresso_machine.brew_start` / `espresso_machine.brew_stop` actions
+- [x] Shot stats recorded on completion (`last_shot_time_s`, `last_shot_volume_ml`)
+- [ ] Temperature surfing: offset + ramp_time computed but climate setpoint call not yet wired (Phase 2 dependency)
+- [ ] Heater setpoint change on brew start (Phase 2 dependency — climate entity wiring)
+- [ ] Publish shot stats (time, volume, temperature) as HA sensor entities
 
 Deliverables:
 - Full shot pulled automatically; shot stats logged to HA.
 
 ---
 
-### Phase 8 — Steam Mode (Orchestrator)
+### Phase 8 — Steam Mode (Orchestrator) 🚧
 
 **Goal:** Safe, controlled milk steaming.
 
 Tasks:
-- [ ] `espresso_machine/__init__.py` `steam:` sub-schema — references: `heater`, `pump`,
+- [x] `espresso_machine/__init__.py` `steam:` sub-schema — references: `heater`, `pump`,
   `valve`, `purge_valve`, `target_temperature`, `flow_max`, `cool_down_to`, `cleanup_script`
-- [ ] Steam state machine: `idle → heating → steaming → cooling → cleanup`
+- [x] Steam state machine: `idle → heating → steaming → cooling → cleanup`
+- [x] `espresso_machine.steam_start` / `espresso_machine.steam_stop` actions
+- [ ] Heater setpoint raised to `target_temperature` on steam start (Phase 2 dependency)
 - [ ] Pump duty-cycle during steaming to maintain `flow_max` ml/s
-- [ ] Auto cool-down: set heater setpoint to `cool_down_to` after steam
-- [ ] `espresso_machine.steam_start` / `espresso_machine.steam_stop` actions
+- [ ] Auto cool-down: set heater setpoint to `cool_down_to` after steam (Phase 2 dependency)
 
 Deliverables:
 - Steam wand usable from HA; machine automatically cools back to brew temperature.
