@@ -1,0 +1,143 @@
+#pragma once
+
+#include "esphome/core/component.h"
+#include "esphome/core/log.h"
+#include "esphome/components/output/float_output.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/number/number.h"
+
+namespace esphome {
+namespace espresso_machine_mock_heater {
+
+class MockHeater;
+
+// ---------------------------------------------------------------------------
+// MockHeaterOutput — float output that PID's heat_output references
+// Receives duty cycle 0.0–1.0 from PID and stores it for the thermal ODE.
+// ---------------------------------------------------------------------------
+class MockHeaterOutput : public output::FloatOutput, public Component {
+ public:
+  void set_parent(MockHeater *parent) { parent_ = parent; }
+
+  void setup() override {}
+  void loop() override {}
+
+  float get_duty() const { return duty_; }
+
+ protected:
+  void write_state(float state) override;
+
+  MockHeater *parent_{nullptr};
+  float duty_{0.0f};
+};
+
+// ---------------------------------------------------------------------------
+// MockHeaterTempSensor — temperature sensor that PID's sensor references
+// Polls the simulated temperature from MockHeater and publishes it.
+// ---------------------------------------------------------------------------
+class MockHeaterTempSensor : public sensor::Sensor, public PollingComponent {
+ public:
+  void set_parent(MockHeater *parent) { parent_ = parent; }
+
+  void setup() override {}
+  void update() override;
+
+ protected:
+  MockHeater *parent_{nullptr};
+};
+
+// ---------------------------------------------------------------------------
+// MockHeaterNumber — number entity for runtime tuning of physics parameters
+// ---------------------------------------------------------------------------
+class MockHeaterNumber : public number::Number, public Component {
+ public:
+  enum class ParamType { POWER, THERMAL_MASS, HEAT_LOSS, AMBIENT };
+
+  void set_parent(MockHeater *parent) { parent_ = parent; }
+  void set_param_type(ParamType type) { param_type_ = type; }
+
+  void setup() override;
+  void loop() override {}
+
+ protected:
+  void control(float value) override;
+
+  MockHeater *parent_{nullptr};
+  ParamType param_type_{ParamType::POWER};
+};
+
+// ---------------------------------------------------------------------------
+// MockHeater — main component managing thermal simulation
+// ---------------------------------------------------------------------------
+class MockHeater : public Component {
+ public:
+  // Configuration setters (called from generated code)
+  void set_initial_temperature(float t) { temperature_ = t; }
+  void set_ambient_temperature(float t) { ambient_temp_ = t; }
+  void set_power_watts(float p) { power_watts_ = p; }
+  void set_thermal_mass(float c) { thermal_mass_ = c; }
+  void set_heat_loss(float h) { heat_loss_ = h; }
+
+  void set_output(MockHeaterOutput *out) { output_ = out; }
+  void set_temperature_sensor(MockHeaterTempSensor *sens) { temp_sensor_ = sens; }
+
+  // Runtime tuning number entities
+  void set_power_number(MockHeaterNumber *num) {
+    power_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::POWER);
+  }
+  void set_thermal_mass_number(MockHeaterNumber *num) {
+    thermal_mass_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::THERMAL_MASS);
+  }
+  void set_heat_loss_number(MockHeaterNumber *num) {
+    heat_loss_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::HEAT_LOSS);
+  }
+  void set_ambient_number(MockHeaterNumber *num) {
+    ambient_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::AMBIENT);
+  }
+
+  void setup() override;
+  void loop() override;
+
+  // Accessors for sub-entities
+  float get_temperature() const { return temperature_; }
+  float get_duty() const { return output_ ? output_->get_duty() : 0.0f; }
+
+  // Runtime parameter accessors/mutators
+  float get_power_watts() const { return power_watts_; }
+  float get_thermal_mass() const { return thermal_mass_; }
+  float get_heat_loss() const { return heat_loss_; }
+  float get_ambient_temp() const { return ambient_temp_; }
+
+  void update_power_watts(float v) { power_watts_ = v; }
+  void update_thermal_mass(float v) { thermal_mass_ = v; }
+  void update_heat_loss(float v) { heat_loss_ = v; }
+  void update_ambient_temp(float v) { ambient_temp_ = v; }
+
+ protected:
+  // Physics parameters
+  float temperature_{25.0f};       // Current simulated temperature [°C]
+  float ambient_temp_{25.0f};      // Ambient temperature [°C]
+  float power_watts_{1200.0f};     // Heater power [W]
+  float thermal_mass_{1256.0f};    // Thermal mass [J/°C]
+  float heat_loss_{1.7f};          // Heat-loss coefficient [W/°C]
+
+  // Sub-entities
+  MockHeaterOutput *output_{nullptr};
+  MockHeaterTempSensor *temp_sensor_{nullptr};
+
+  // Runtime tuning numbers
+  MockHeaterNumber *power_number_{nullptr};
+  MockHeaterNumber *thermal_mass_number_{nullptr};
+  MockHeaterNumber *heat_loss_number_{nullptr};
+  MockHeaterNumber *ambient_number_{nullptr};
+
+  // Timing for ODE integration
+  uint32_t last_update_ms_{0};
+};
+
+}  // namespace espresso_machine_mock_heater
+}  // namespace esphome

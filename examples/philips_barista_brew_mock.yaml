@@ -1,0 +1,377 @@
+# =============================================================================
+# ESPHome Espresso Machine Controller — MOCK HARDWARE SIMULATION
+# Based on: philips_barista_brew.yaml (section-for-section mirror)
+#
+# PURPOSE:
+#   Exercise the orchestrator + PID loop without physical hardware.
+#   The PID and orchestrator are completely unchanged and cannot distinguish
+#   mock from real hardware. All physics parameters are HA-tunable.
+#
+# HOW TO USE:
+#   1. Copy to your ESPHome config directory.
+#   2. Create secrets.yaml with Wi-Fi credentials.
+#   3. Run:  esphome run philips_barista_brew_mock.yaml
+#   4. Observe PID behavior in HA — adjust physics params via number entities.
+#
+# WHAT'S MOCKED:
+#   Real                                    Mock
+#   ────                                    ────
+#   spi: + sensor: max31855 + output:       espresso_machine_mock_heater:
+#     slow_pwm                                (thermal ODE simulation)
+#   espresso_machine_flow_meter: +          espresso_machine_mock_pump:
+#     espresso_machine_pump:                  (puck wetting flow model)
+#
+# WHAT'S IDENTICAL TO THE REAL CONFIG:
+#   - climate: pid block (same gains, deadband, sensor/heat_output IDs)
+#   - espresso_machine: orchestrator (brew/steam config, pre-infusion, targets)
+#   - All buttons, shot-stat sensors, display lambda, text sensor
+#   - Valves and grinder — unchanged, on dummy GPIOs
+#   - HA runtime tuning
+#
+# THERMAL MODEL (mock heater):
+#   dT/dt = (duty × P − h × (T − T_amb)) / C
+#     duty   = 0.0–1.0 from PID
+#     P      = power_watts
+#     C      = thermal_mass_j_per_c
+#     h      = heat_loss_w_per_c
+#     T_amb  = ambient_temperature
+#
+# PUCK WETTING MODEL (mock pump):
+#   Q(t) = Q_nom × (1 − exp(−t/τ))
+#     Q_nom  = nominal_flow_ml_per_s
+#     τ      = puck_time_constant_s
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ESPHome core
+# -----------------------------------------------------------------------------
+esphome:
+  name: philips_barista_brew_mock
+  friendly_name: "Philips Barista Brew (Mock)"
+  comment: "Simulated espresso machine — no physical hardware required"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# -----------------------------------------------------------------------------
+# Logging — keep INFO for production, DEBUG if tuning physics params
+# -----------------------------------------------------------------------------
+logger:
+  level: INFO
+  # level: DEBUG  # Uncomment to see detailed thermal/flow simulation logs
+
+# -----------------------------------------------------------------------------
+# Home Assistant API
+# -----------------------------------------------------------------------------
+api:
+  encryption:
+    key: !secret ha_api_key
+
+# -----------------------------------------------------------------------------
+# OTA updates
+# -----------------------------------------------------------------------------
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# -----------------------------------------------------------------------------
+# Wi-Fi
+# -----------------------------------------------------------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# -----------------------------------------------------------------------------
+# External components — pulls all espresso_machine platforms from this repo
+# -----------------------------------------------------------------------------
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_grinder
+      - espresso_machine_flow_meter
+      - espresso_machine_mock_heater   # ← NEW: thermal simulation
+      - espresso_machine_mock_pump     # ← NEW: pump + flow simulation
+
+# =============================================================================
+# MOCK HEATER — replaces physical thermocouple + slow_pwm + SPI
+#
+# The PID climate entity references:
+#   sensor: thermoblock_temp    → MockHeaterTempSensor (same ID as real config)
+#   heat_output: heater_ssr     → MockHeaterOutput (same ID as real config)
+#
+# Physics parameters (defaults model a ~300g thermoblock at 1.2kW):
+#   power_watts: 1200.0          — heater element power
+#   thermal_mass_j_per_c: 1256.0 — ≈ 300g water-equivalent
+#   heat_loss_w_per_c: 1.7       — calibrated: ~90°C at 10% PID duty
+# =============================================================================
+espresso_machine_mock_heater:
+  id: mock_heater
+  initial_temperature: 25.0
+  ambient_temperature: 25.0
+  power_watts: 1200.0
+  thermal_mass_j_per_c: 1256.0
+  heat_loss_w_per_c: 1.7
+
+  # Temperature sensor — same ID as physical max6675/max31855
+  temperature_sensor:
+    id: thermoblock_temp
+    name: "Thermoblock Temperature"
+    # Safety: hard over-temperature cutoff — independent of PID
+    on_value_range:
+      - above: 165
+        then:
+          - climate.control:
+              id: main_heater
+              mode: "off"
+          - logger.log:
+              format: "SAFETY: Over-temperature cutoff (%.1f °C). Heater forced OFF."
+              args: ["x"]
+              level: ERROR
+
+  # Output — same ID as physical slow_pwm
+  output:
+    id: heater_ssr
+
+  # HA number entities for runtime tuning of physics parameters
+  power_number:
+    name: "Mock Heater Power"
+  thermal_mass_number:
+    name: "Mock Thermal Mass"
+  heat_loss_number:
+    name: "Mock Heat Loss"
+  ambient_number:
+    name: "Mock Ambient Temperature"
+
+# =============================================================================
+# MOCK PUMP — replaces physical relay pump + flow meter
+#
+# The orchestrator references:
+#   pump: main_pump             → MockPump (same ID as real config)
+#
+# Flow data is provided through the IPump interface — no separate flow meter
+# component needed. The orchestrator's pump->get_flow_total() works unchanged.
+#
+# Physics parameters:
+#   nominal_flow_ml_per_s: 4.0   — steady-state flow rate
+#   puck_time_constant_s: 10.0   — flow ramp-up time constant
+# =============================================================================
+espresso_machine_mock_pump:
+  id: main_pump
+  name: "Mock Pump"
+  nominal_flow_ml_per_s: 4.0
+  puck_time_constant_s: 10.0
+
+  # Flow sensors — same as espresso_machine_flow_meter sensors
+  rate_sensor:
+    name: "Brew Flow Rate"
+  total_sensor:
+    name: "Brew Flow Total"
+
+  # HA number entities for runtime tuning
+  nominal_flow_number:
+    name: "Mock Nominal Flow"
+  puck_time_constant_number:
+    name: "Mock Puck Time Constant"
+
+# =============================================================================
+# ADDITIONAL SENSORS — same as real config
+# =============================================================================
+sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+  - platform: internal_temperature
+    name: "ESP32 Temperature"
+
+  # Shot statistics
+  - platform: template
+    id: last_shot_duration
+    name: "Last Shot Duration"
+    unit_of_measurement: "s"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_time_s();
+
+  - platform: template
+    id: last_shot_yield
+    name: "Last Shot Yield"
+    unit_of_measurement: "mL"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: 5s
+    lambda: return id(my_espresso).get_last_shot_yield_ml();
+
+# =============================================================================
+# HEATER PID — IDENTICAL to real config (uses same sensor/output IDs)
+#
+# This is completely unchanged from philips_barista_brew.yaml.
+# The PID has no idea it's controlling a simulated heater.
+# =============================================================================
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Espresso Heater"
+    sensor: thermoblock_temp           # ← reads from MockHeaterTempSensor
+    default_target_temperature: 90
+    heat_output: heater_ssr            # ← writes to MockHeaterOutput
+    control_parameters:
+      kp: 2.5
+      ki: 0.05
+      kd: 15.0
+      output_averaging_samples: 5
+      derivative_averaging_samples: 5
+    deadband_parameters:
+      threshold_high: 0.3
+      threshold_low: -0.3
+
+# =============================================================================
+# VALVES — unchanged from real config (dummy GPIOs, no physical hardware)
+# =============================================================================
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+    normally_open: false
+
+  - id: purge_valve
+    name: "Purge / Drain Valve"
+    pin: GPIO14
+    normally_open: false
+
+# =============================================================================
+# GRINDER — unchanged from real config (dummy GPIO)
+# =============================================================================
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
+  grind_time_number:
+    name: "Grind Time"
+
+# =============================================================================
+# ORCHESTRATOR — IDENTICAL to real config
+#
+# The orchestrator uses the same IDs and has no idea it's running on mocks.
+# =============================================================================
+espresso_machine:
+  id: my_espresso
+
+  brew:
+    heater: main_heater
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: purge_valve
+    target_temperature: 90°C
+    temperature_profile:
+      offset: 5°C
+      ramp_time: 20s
+    flow_max: 40ml
+    flow_offset: 20ml
+    pre_infusion:
+      enabled: true
+      volume_ml: 5ml
+      hold_time: 5s
+    # cleanup_script not yet implemented — commented out for now
+
+  steam:
+    heater: main_heater
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    flow_max: 2ml/s
+    cool_down_to: 90°C
+    # cleanup_script not yet implemented — commented out for now
+
+# =============================================================================
+# DISPLAY — optional (same as real config)
+# Comment out if no I2C display attached.
+# =============================================================================
+# i2c:
+#   sda: GPIO21
+#   scl: GPIO22
+#
+# display:
+#   - platform: ssd1306_i2c
+#     model: "SSD1306 128x64"
+#     address: 0x3C
+#     lambda: |-
+#       it.printf(0,  0, id(font_small), "Mode: %s",
+#         id(my_espresso).mode_name());
+#       it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
+#         id(main_heater).current_temperature,
+#         id(main_heater).target_temperature);
+#       it.printf(0, 32, id(font_small), "Vol: %.1f ml",
+#         id(main_pump).get_flow_total());
+#       it.printf(0, 48, id(font_small), "Heat: %.0f%%",
+#         id(main_heater).output_value() * 100.0f);
+#
+# font:
+#   - file: "gfonts://Roboto Mono"
+#     id: font_small
+#     size: 12
+
+# =============================================================================
+# BUTTONS — same as real config
+# =============================================================================
+button:
+  - platform: restart
+    name: "Restart"
+
+  - platform: template
+    name: "PID Autotune"
+    on_press:
+      - climate.pid.autotune: main_heater
+
+  - platform: template
+    name: "Brew Start"
+    on_press:
+      - lambda: id(my_espresso).brew_start();
+
+  - platform: template
+    name: "Brew Stop"
+    on_press:
+      - lambda: id(my_espresso).brew_stop();
+
+  - platform: template
+    name: "Steam Start"
+    on_press:
+      - lambda: id(my_espresso).steam_start();
+
+  - platform: template
+    name: "Steam Stop"
+    on_press:
+      - lambda: id(my_espresso).steam_stop();
+
+  # Additional button to reset flow counter for new shot
+  - platform: template
+    name: "Reset Flow"
+    on_press:
+      - espresso_machine_mock_pump.reset: main_pump
+
+# =============================================================================
+# TEXT SENSOR — same as real config
+# =============================================================================
+text_sensor:
+  - platform: template
+    name: "Machine Mode"
+    id: machine_mode
+    update_interval: 2s
+    lambda: return std::string(id(my_espresso).mode_name());

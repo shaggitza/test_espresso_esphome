@@ -50,10 +50,24 @@ test_espresso_esphome/
 │       ├── flow_meter.h             # FlowMeter class (inherits Sensor)
 │       └── flow_meter.cpp           # ISR pulse counter, ml/s rate, total volume, reset action
 │
+│   └── espresso_machine_mock_heater/  # Mock heater for simulation (thermal ODE)
+│       ├── __init__.py                # Schema: power_watts, thermal_mass, heat_loss, ambient_temp
+│       │                              # Exposes output + sensor for PID; HA number entities for tuning
+│       ├── mock_heater.h              # MockHeater, MockHeaterOutput, MockHeaterTempSensor classes
+│       └── mock_heater.cpp            # Thermal ODE: dT/dt = (duty×P - h×ΔT) / C
+│
+│   └── espresso_machine_mock_pump/    # Mock pump for simulation (puck wetting model)
+│       ├── __init__.py                # Schema: nominal_flow_ml_per_s, puck_time_constant_s
+│       │                              # Registers as switch; exposes rate + total sensors
+│       ├── mock_pump.h                # MockPump class (inherits Switch, implements IPump)
+│       └── mock_pump.cpp              # Flow model: Q(t) = Q_nom × (1 − exp(−t/τ))
+│
 ├── examples/
-│   └── philips_barista_brew.yaml    # Full annotated example for the Philips Barista Brew
-│                                    # with integrated grinder — ready to flash
-│   └── secrets.yaml.template        # Credentials template (secrets.yaml is git-ignored)
+│   └── philips_barista_brew.yaml      # Full annotated example for the Philips Barista Brew
+│                                      # with integrated grinder — ready to flash
+│   └── philips_barista_brew_mock.yaml # Mock hardware version — no physical sensors needed
+│                                      # PID and orchestrator unchanged; all physics HA-tunable
+│   └── secrets.yaml.template          # Credentials template (secrets.yaml is git-ignored)
 │
 └── docs/
     ├── wiring.md                    # Pin-out, wiring diagrams, isolation notes
@@ -87,6 +101,13 @@ Custom espresso_machine_* platforms (each a top-level block, each a HA entity)
   espresso_machine_valve       → purge_valve        (switch → HA; interlock enforced)
   espresso_machine_pump        → main_pump          (switch/number → HA)
   espresso_machine_grinder     → main_grinder       (button + number → HA)
+
+Mock components for simulation (drop-in replacements for physical hardware)
+  espresso_machine_mock_heater → mock_heater        (thermal ODE simulation; HA-tunable)
+    └── output                 → heater_ssr         (PID heat_output references this)
+    └── temperature_sensor     → thermoblock_temp   (PID sensor references this)
+  espresso_machine_mock_pump   → main_pump          (puck wetting flow model; HA-tunable)
+    └── rate_sensor + total_sensor                  (same interface as flow_meter)
 
 Orchestrator (references all entities above by id:)
   espresso_machine             → my_espresso        (brew + steam state machines → HA)
@@ -130,6 +151,9 @@ external_components:
       - espresso_machine_pump
       - espresso_machine_grinder
       - espresso_machine_flow_meter
+      # Mock components for simulation (optional — choose one or both):
+      - espresso_machine_mock_heater   # Replaces SPI thermocouple + slow_pwm
+      - espresso_machine_mock_pump     # Replaces pump + flow_meter
 ```
 
 No local file copying is needed. ESPHome fetches the component at build time.

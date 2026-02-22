@@ -1,0 +1,104 @@
+# Test: espresso_machine_mock_pump — validates the mock pump platform schema
+esphome:
+  name: test-mock-pump
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_mock_pump
+      - espresso_machine_valve
+
+# --- Mock pump component under test ---
+espresso_machine_mock_pump:
+  id: main_pump
+  name: "Mock Pump"
+  nominal_flow_ml_per_s: 4.0
+  puck_time_constant_s: 10.0
+
+  rate_sensor:
+    name: "Brew Flow Rate"
+  total_sensor:
+    name: "Brew Flow Total"
+
+  # Optional runtime tuning numbers
+  nominal_flow_number:
+    name: "Mock Nominal Flow"
+  puck_time_constant_number:
+    name: "Mock Puck Time Constant"
+
+# --- Valves (required by orchestrator) ---
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+  - id: purge_valve
+    name: "Purge Valve"
+    pin: GPIO14
+    normally_open: false
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+    normally_open: false
+
+# --- Minimal PID for orchestrator (no mock heater needed for pump test) ---
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4
+    period: 1s
+
+sensor:
+  - platform: template
+    id: thermoblock_temp
+    lambda: return 90.0;
+    update_interval: 1s
+
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Test Heater"
+    sensor: thermoblock_temp
+    default_target_temperature: 90
+    heat_output: heater_ssr
+    control_parameters:
+      kp: 2.5
+      ki: 0.05
+      kd: 15.0
+
+# --- Test: orchestrator can use mock pump ---
+espresso_machine:
+  id: my_espresso
+  brew:
+    heater: main_heater
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: purge_valve
+    target_temperature: 90°C
+    flow_max: 40ml
+    flow_offset: 20ml
+  steam:
+    heater: main_heater
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    flow_max: 2ml/s
+    cool_down_to: 90°C
+
+# --- Test button using reset action ---
+button:
+  - platform: template
+    name: "Reset Flow"
+    on_press:
+      - espresso_machine_mock_pump.reset: main_pump

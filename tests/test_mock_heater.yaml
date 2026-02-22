@@ -1,0 +1,56 @@
+# Test: espresso_machine_mock_heater — validates the mock heater platform schema
+esphome:
+  name: test-mock-heater
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine_mock_heater
+
+# --- Mock heater component under test ---
+espresso_machine_mock_heater:
+  id: mock_heater
+  initial_temperature: 25.0
+  ambient_temperature: 25.0
+  power_watts: 1200.0
+  thermal_mass_j_per_c: 1256.0
+  heat_loss_w_per_c: 1.7
+
+  temperature_sensor:
+    id: thermoblock_temp
+    name: "Thermoblock Temperature"
+
+  output:
+    id: heater_ssr
+
+  # Optional runtime tuning numbers
+  power_number:
+    name: "Mock Heater Power"
+  thermal_mass_number:
+    name: "Mock Thermal Mass"
+  heat_loss_number:
+    name: "Mock Heat Loss"
+  ambient_number:
+    name: "Mock Ambient Temperature"
+
+# --- Test: PID climate can reference mock heater (same as real config) ---
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Test Heater PID"
+    sensor: thermoblock_temp
+    default_target_temperature: 90
+    heat_output: heater_ssr
+    control_parameters:
+      kp: 2.5
+      ki: 0.05
+      kd: 15.0

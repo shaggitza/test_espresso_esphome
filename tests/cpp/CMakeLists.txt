@@ -29,6 +29,8 @@ set(COMPONENT_SOURCES
   ../../components/espresso_machine_pump/pump.cpp
   ../../components/espresso_machine_grinder/grinder.cpp
   ../../components/espresso_machine_flow_meter/flow_meter.cpp
+  ../../components/espresso_machine_mock_heater/mock_heater.cpp
+  ../../components/espresso_machine_mock_pump/mock_pump.cpp
 )
 
 # ---- Global mock state (shared across all translation units) ---------------
@@ -44,6 +46,8 @@ add_executable(all_tests
   test_grinder.cpp
   test_flow_meter.cpp
   test_orchestrator.cpp
+  test_mock_heater.cpp
+  test_mock_pump.cpp
 )
 
 target_include_directories(all_tests PRIVATE mock ../.. ../../components)

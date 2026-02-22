@@ -31,6 +31,8 @@ planned in this project.
 | `espresso_machine_grinder` | `button` + `number` | ✅ | Timed relay grind; adjustable grind-time number entity |
 | `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines present; see brew/steam rows below |
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
+| `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters |
+| `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
 
 ---
 
