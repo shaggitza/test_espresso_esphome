@@ -1,0 +1,91 @@
+# Test: espresso_machine (orchestrator) — validates the orchestrator with full brew+steam
+# wiring. All hardware subsystems are declared inline so cross-references resolve.
+# A template sensor + slow_pwm output + PID climate stand in for the real thermocouple.
+esphome:
+  name: test-orchestrator
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_flow_meter
+
+# --- Fake heater (stands in for real MAX6675 + SSR in non-hardware tests) ---
+sensor:
+  - platform: template
+    id: fake_thermoblock_temp
+    lambda: "return 90.0f;"
+    update_interval: 1s
+
+output:
+  - platform: slow_pwm
+    id: fake_heater_ssr
+    pin: GPIO4
+    period: 1s
+
+climate:
+  - platform: pid
+    id: main_heater
+    sensor: fake_thermoblock_temp
+    heat_output: fake_heater_ssr
+    default_target_temperature: 90
+    control_parameters:
+      kp: 0.5
+      ki: 0.01
+      kd: 1.0
+
+# --- Hardware subsystems referenced by the orchestrator ---
+espresso_machine_flow_meter:
+  id: brew_flow
+  pin:
+    number: GPIO34
+    mode: INPUT
+  pulses_per_ml: 0.5195
+
+espresso_machine_valve:
+  - id: brew_valve
+    pin: GPIO26
+    normally_open: false
+  - id: steam_valve
+    pin: GPIO27
+    normally_open: false
+  - id: purge_valve
+    pin: GPIO14
+    normally_open: false
+
+espresso_machine_pump:
+  id: main_pump
+  type: relay
+  pin: GPIO25
+
+# --- Orchestrator with full brew + steam configuration ---
+espresso_machine:
+  id: my_espresso
+  brew:
+    heater: main_heater
+    pump: main_pump
+    flow_meter: brew_flow
+    valve: brew_valve
+    purge_valve: purge_valve
+    target_temperature: 90°C
+    flow_max: 40ml
+    flow_offset: 20ml
+  steam:
+    heater: main_heater
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    flow_max: 2ml/s
+    cool_down_to: 90°C

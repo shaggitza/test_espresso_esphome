@@ -1,0 +1,24 @@
+# Test: espresso_machine_grinder — validates the grinder platform schema
+esphome:
+  name: test-grinder
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [espresso_machine_grinder]
+
+# --- Grinder component under test ---
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
