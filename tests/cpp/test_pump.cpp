@@ -3,8 +3,30 @@
 #include "espresso_machine_pump/pump.h"
 
 using namespace esphome::espresso_machine_pump;
+using namespace esphome::espresso_machine;
 
 extern uint32_t g_mock_millis;
+
+// ---------------------------------------------------------------------------
+// Minimal IFlowMeter stub for pump tests
+// ---------------------------------------------------------------------------
+struct MockFlowMeter : public IFlowMeter {
+  float volume{0.0f};
+  float rate{0.0f};
+  int reset_count{0};
+
+  float get_rate() const override { return rate; }
+  float get_total_volume() const override { return volume; }
+  void reset() override {
+    volume = 0.0f;
+    rate = 0.0f;
+    reset_count++;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// PumpSwitch (relay) — basic on/off behaviour
+// ---------------------------------------------------------------------------
 
 static PumpSwitch make_pump(GPIOPin &pin) {
   PumpSwitch p;
@@ -12,10 +34,6 @@ static PumpSwitch make_pump(GPIOPin &pin) {
   p.setup();
   return p;
 }
-
-// ---------------------------------------------------------------------------
-// PumpSwitch (relay) tests
-// ---------------------------------------------------------------------------
 
 TEST(PumpSwitch, InitiallyOffAfterSetup) {
   GPIOPin pin;
@@ -62,33 +80,121 @@ TEST(PumpSwitch, TurnOffIsIdempotent) {
   EXPECT_FALSE(pin.state_);
 }
 
-TEST(PumpSwitch, RunTimedStopsPumpAfterDuration) {
+// ---------------------------------------------------------------------------
+// Volume-driven run — flow meter wired
+// ---------------------------------------------------------------------------
+
+TEST(PumpSwitch, RunResetsFlowAndStartsPump) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  fm.volume = 5.0f;  // pre-existing volume
+
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  p.run(40.0f);
+  EXPECT_TRUE(p.is_running());
+  EXPECT_EQ(fm.reset_count, 1);   // flow counter was reset
+  EXPECT_FLOAT_EQ(fm.volume, 0.0f);
+}
+
+TEST(PumpSwitch, RunStopsWhenTargetVolumeReached) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  p.run(40.0f);
+  EXPECT_TRUE(p.is_running());
+
+  // Still running just below target
+  fm.volume = 39.9f;
+  p.loop();
+  EXPECT_TRUE(p.is_running());
+
+  // At target — loop() should auto-stop
+  fm.volume = 40.0f;
+  p.loop();
+  EXPECT_FALSE(p.is_running());
+  EXPECT_FALSE(pin.state_);
+}
+
+TEST(PumpSwitch, RunDoesNotStopBelowTarget) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  p.run(40.0f);
+  fm.volume = 39.9f;
+  p.loop();
+  EXPECT_TRUE(p.is_running());
+}
+
+// ---------------------------------------------------------------------------
+// Volume-driven run — no flow meter (runs until external stop)
+// ---------------------------------------------------------------------------
+
+TEST(PumpSwitch, RunWithoutFlowMeterRunsIndefinitely) {
   GPIOPin pin;
   g_mock_millis = 0;
   PumpSwitch p = make_pump(pin);
-  p.run(500);
+  // No flow meter set
+
+  p.run(40.0f);  // target volume requested, but no meter to measure it
   EXPECT_TRUE(p.is_running());
-  // Still running 1 ms before deadline
+
+  // Simulate many loop() calls — pump must stay on without a flow meter
+  for (int i = 0; i < 100; i++)
+    p.loop();
+  EXPECT_TRUE(p.is_running());
+
+  // External stop still works
+  p.turn_off();
+  EXPECT_FALSE(p.is_running());
+}
+
+// ---------------------------------------------------------------------------
+// Safety timeout
+// ---------------------------------------------------------------------------
+
+TEST(PumpSwitch, RunSafetyTimeoutStopsPump) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  // 500 ms safety cap; flow meter never increments (simulates stall)
+  p.run(40.0f, 500);
+  EXPECT_TRUE(p.is_running());
+
+  // Before timeout
   g_mock_millis = 499;
   p.loop();
   EXPECT_TRUE(p.is_running());
-  // At deadline loop() should stop the pump
+
+  // At timeout — loop() should stop
   g_mock_millis = 500;
   p.loop();
   EXPECT_FALSE(p.is_running());
   EXPECT_FALSE(pin.state_);
 }
 
-TEST(PumpSwitch, RunTimedCanBeStoppedEarly) {
+TEST(PumpSwitch, RunCanBeStoppedExternallyBeforeTarget) {
   GPIOPin pin;
-  g_mock_millis = 0;
+  MockFlowMeter fm;
   PumpSwitch p = make_pump(pin);
-  p.run(5000);
+  p.set_flow_meter(&fm);
+
+  p.run(40.0f);
   EXPECT_TRUE(p.is_running());
-  p.turn_off();
+
+  p.turn_off();  // stop button / temp safety / etc.
   EXPECT_FALSE(p.is_running());
-  // loop() should not restart it
-  g_mock_millis = 5000;
+
+  // loop() must not restart it
+  fm.volume = 0.0f;
   p.loop();
   EXPECT_FALSE(p.is_running());
 }

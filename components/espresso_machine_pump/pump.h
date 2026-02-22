@@ -17,6 +17,7 @@ namespace espresso_machine_pump {
 class PumpSwitch : public switch_::Switch, public Component, public espresso_machine::IPump {
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
+  void set_flow_meter(espresso_machine::IFlowMeter *fm) { flow_meter_ = fm; }
 
   void setup() override;
   void loop() override;
@@ -26,16 +27,39 @@ class PumpSwitch : public switch_::Switch, public Component, public espresso_mac
   void turn_off() override { write_state(false); }
   bool is_running() const override { return running_; }
 
-  // Timed run — turns on the pump and stops after duration_ms.
-  void run(uint32_t duration_ms);
+  // Flow subsystem — delegates to the wired flow meter if present
+  float get_flow_rate() const override {
+    return flow_meter_ ? flow_meter_->get_rate() : 0.0f;
+  }
+  float get_flow_total() const override {
+    return flow_meter_ ? flow_meter_->get_total_volume() : 0.0f;
+  }
+  void reset_flow() override {
+    if (flow_meter_)
+      flow_meter_->reset();
+  }
+
+  // Volume-driven run — resets the flow counter, starts the pump, and
+  // auto-stops when the flow meter reports >= volume_ml dispensed.
+  // If no flow meter is wired the pump runs until an external signal
+  // (stop button, temperature safety, etc.) calls turn_off().
+  // timeout_ms is an optional safety cap; 0 means no timeout.
+  void run(float volume_ml, uint32_t timeout_ms = 0);
 
  protected:
   void write_state(bool state) override;
 
   GPIOPin *pin_{nullptr};
+  espresso_machine::IFlowMeter *flow_meter_{nullptr};
   bool running_{false};
-  bool run_timed_{false};
-  uint32_t run_until_ms_{0};
+
+  // Volume-run tracking
+  bool run_volume_active_{false};
+  float run_target_volume_ml_{0.0f};
+
+  // Safety timeout tracking
+  bool run_timeout_active_{false};
+  uint32_t run_timeout_end_ms_{0};
 };
 
 // ---------------------------------------------------------------------------
@@ -69,8 +93,11 @@ template<typename... Ts>
 class RunAction : public Action<Ts...> {
  public:
   explicit RunAction(PumpSwitch *parent) : parent_(parent) {}
-  TEMPLATABLE_VALUE(uint32_t, duration_ms)
-  void play(Ts... x) override { parent_->run(this->duration_ms_.value(x...)); }
+  TEMPLATABLE_VALUE(float, volume_ml)
+  TEMPLATABLE_VALUE(uint32_t, timeout_ms)
+  void play(Ts... x) override {
+    parent_->run(this->volume_ml_.value(x...), this->timeout_ms_.value(x...));
+  }
 
  private:
   PumpSwitch *parent_;

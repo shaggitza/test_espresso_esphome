@@ -53,10 +53,10 @@ void EspressoMachine::brew_start() {
     brew_valve_->close();
   if (brew_purge_valve_)
     brew_purge_valve_->close();
-  if (brew_pump_)
+  if (brew_pump_) {
     brew_pump_->turn_off();
-  if (brew_flow_meter_)
-    brew_flow_meter_->reset();
+    brew_pump_->reset_flow();
+  }
 
   // NOTE: heater setpoint is raised to brew_target_temp_ in Phase 2.
   // The PID climate entity will be referenced here via a climate::ClimateCall.
@@ -125,8 +125,9 @@ void EspressoMachine::advance_brew_() {
       break;
 
     case BrewState::BREWING: {
-      // Terminate when flow meter reaches the configured target volume
-      float volume = brew_flow_meter_ ? brew_flow_meter_->get_total_volume() : 0.0f;
+      // Terminate when flow meter reaches the configured target volume.
+      // Flow data is obtained through the pump's IFlowMeter subsystem.
+      float volume = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
       if (volume >= brew_flow_max_ml_) {
         ESP_LOGI(TAG, "Brew: target volume %.1fml reached (flow_max=%.1fml) → DONE", volume,
                  brew_flow_max_ml_);

@@ -12,7 +12,6 @@ CONF_BREW = "brew"
 CONF_STEAM = "steam"
 CONF_HEATER = "heater"
 CONF_PUMP = "pump"
-CONF_FLOW_METER = "flow_meter"
 CONF_VALVE = "valve"
 CONF_PURGE_VALVE = "purge_valve"
 CONF_TARGET_TEMPERATURE = "target_temperature"
@@ -29,7 +28,6 @@ BREW_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_HEATER): cv.use_id(cg.Component),
         cv.Required(CONF_PUMP): cv.use_id(cg.Component),
-        cv.Required(CONF_FLOW_METER): cv.use_id(cg.Component),
         cv.Required(CONF_VALVE): cv.use_id(cg.Component),
         cv.Required(CONF_PURGE_VALVE): cv.use_id(cg.Component),
         cv.Required(CONF_TARGET_TEMPERATURE): cv.temperature,
@@ -77,9 +75,6 @@ async def to_code(config):
 
         pump = await cg.get_variable(brew[CONF_PUMP])
         cg.add(var.set_brew_pump(pump))
-
-        flow_meter = await cg.get_variable(brew[CONF_FLOW_METER])
-        cg.add(var.set_brew_flow_meter(flow_meter))
 
         valve = await cg.get_variable(brew[CONF_VALVE])
         cg.add(var.set_brew_valve(valve))

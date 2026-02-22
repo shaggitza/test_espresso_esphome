@@ -21,13 +21,16 @@ PumpNumber = espresso_machine_pump_ns.class_(
 )
 RunAction = espresso_machine_pump_ns.class_("RunAction", automation.Action)
 
-CONF_DURATION_MS = "duration_ms"
+CONF_FLOW_METER = "flow_meter"
+CONF_VOLUME_ML = "volume_ml"
+CONF_TIMEOUT_MS = "timeout_ms"
 
 RELAY_SCHEMA = (
     switch.switch_schema(PumpSwitch)
     .extend(
         {
             cv.Required(CONF_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_FLOW_METER): cv.use_id(cg.Component),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -57,7 +60,8 @@ CONFIG_SCHEMA = cv.typed_schema(
 RUN_ACTION_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_ID): cv.use_id(PumpSwitch),
-        cv.Required(CONF_DURATION_MS): cv.templatable(
+        cv.Required(CONF_VOLUME_ML): cv.templatable(cv.positive_float),
+        cv.Optional(CONF_TIMEOUT_MS, default="0s"): cv.templatable(
             cv.positive_time_period_milliseconds
         ),
     }
@@ -70,10 +74,10 @@ RUN_ACTION_SCHEMA = cv.Schema(
 async def pump_run_action_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, parent)
-    template_ = await cg.templatable(
-        config[CONF_DURATION_MS], args, cg.uint32
-    )
-    cg.add(var.set_duration_ms(template_))
+    template_vol = await cg.templatable(config[CONF_VOLUME_ML], args, cg.float_)
+    cg.add(var.set_volume_ml(template_vol))
+    template_timeout = await cg.templatable(config[CONF_TIMEOUT_MS], args, cg.uint32)
+    cg.add(var.set_timeout_ms(template_timeout))
     return var
 
 
@@ -83,6 +87,9 @@ async def to_code(config):
     if pump_type == "relay":
         var = await switch.new_switch(config)
         await cg.register_component(var, config)
+        if CONF_FLOW_METER in config:
+            flow_meter = await cg.get_variable(config[CONF_FLOW_METER])
+            cg.add(var.set_flow_meter(flow_meter))
     else:
         var = await number.new_number(
             config, min_value=0.0, max_value=100.0, step=1.0

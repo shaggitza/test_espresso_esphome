@@ -18,8 +18,27 @@ void PumpSwitch::setup() {
 }
 
 void PumpSwitch::loop() {
-  if (run_timed_ && running_ && (int32_t)(millis() - run_until_ms_) >= 0) {
-    run_timed_ = false;
+  if (!running_)
+    return;
+
+  // Volume exit: auto-stop when the target volume is reached.
+  if (run_volume_active_ && flow_meter_ != nullptr) {
+    float dispensed = flow_meter_->get_total_volume();
+    if (dispensed >= run_target_volume_ml_) {
+      ESP_LOGI(TAG, "Pump run complete: %.1fml dispensed (target %.1fml)", dispensed,
+               run_target_volume_ml_);
+      run_volume_active_ = false;
+      run_timeout_active_ = false;
+      write_state(false);
+      return;
+    }
+  }
+
+  // Safety timeout exit: last-resort stop if no flow meter or meter stalls.
+  if (run_timeout_active_ && (int32_t)(millis() - run_timeout_end_ms_) >= 0) {
+    ESP_LOGW(TAG, "Pump run safety timeout reached — stopping");
+    run_volume_active_ = false;
+    run_timeout_active_ = false;
     write_state(false);
   }
 }
@@ -37,17 +56,28 @@ void PumpSwitch::write_state(bool state) {
       return;
     ESP_LOGI(TAG, "Pump OFF");
     running_ = false;
-    run_timed_ = false;
+    run_volume_active_ = false;
+    run_timeout_active_ = false;
     pin_->digital_write(false);
     publish_state(false);
   }
 }
 
-void PumpSwitch::run(uint32_t duration_ms) {
-  if (duration_ms > 0) {
-    run_timed_ = true;
-    run_until_ms_ = millis() + duration_ms;
+void PumpSwitch::run(float volume_ml, uint32_t timeout_ms) {
+  // Reset flow counter so we measure only what this run dispenses.
+  reset_flow();
+
+  run_target_volume_ml_ = volume_ml;
+  run_volume_active_ = (volume_ml > 0.0f);
+
+  if (timeout_ms > 0) {
+    run_timeout_active_ = true;
+    run_timeout_end_ms_ = millis() + timeout_ms;
+  } else {
+    run_timeout_active_ = false;
   }
+
+  ESP_LOGI(TAG, "Pump run requested: target=%.1fml timeout=%ums", volume_ml, timeout_ms);
   write_state(true);
 }
 

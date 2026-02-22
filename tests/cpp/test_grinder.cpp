@@ -16,6 +16,10 @@ static Grinder make_grinder(GPIOPin &pin, uint32_t default_ms = 7000,
   return g;
 }
 
+// ---------------------------------------------------------------------------
+// Basic grind behaviour
+// ---------------------------------------------------------------------------
+
 TEST(Grinder, InitiallyNotGrinding) {
   GPIOPin pin;
   Grinder g = make_grinder(pin);
@@ -110,4 +114,49 @@ TEST(Grinder, TypeNoneDoesNotActivatePin) {
   g.grind();
   EXPECT_FALSE(g.is_grinding());
   EXPECT_FALSE(pin.state_);
+}
+
+// ---------------------------------------------------------------------------
+// Button entity — press() triggers a grind
+// ---------------------------------------------------------------------------
+
+TEST(Grinder, PressTriggersGrind) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  Grinder g = make_grinder(pin, 7000);
+  g.press();  // button entity API
+  EXPECT_TRUE(g.is_grinding());
+  EXPECT_TRUE(pin.state_);
+}
+
+// ---------------------------------------------------------------------------
+// GrinderTimeNumber — adjustable grind time via HA number entity
+// ---------------------------------------------------------------------------
+
+TEST(Grinder, GrinderTimeNumberPublishesInitialState) {
+  GPIOPin pin;
+  Grinder g = make_grinder(pin, 7000);
+
+  GrinderTimeNumber num(&g);
+  g.set_grind_time_number(&num);
+  g.setup();  // should call num.publish_state(7000)
+
+  EXPECT_FLOAT_EQ(num.state, 7000.0f);
+}
+
+TEST(Grinder, GrinderTimeNumberUpdatesGrindDuration) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  Grinder g = make_grinder(pin, 7000);
+
+  // Update the default time directly (simulates what GrinderTimeNumber::control() does)
+  g.set_default_grind_time(5000);
+
+  g.grind(0);  // uses default
+  g_mock_millis = 4999;
+  g.loop();
+  EXPECT_TRUE(g.is_grinding());
+  g_mock_millis = 5000;
+  g.loop();
+  EXPECT_FALSE(g.is_grinding());
 }

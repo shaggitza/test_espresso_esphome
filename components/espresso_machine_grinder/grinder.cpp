@@ -41,10 +41,6 @@ void Grinder::loop() {
 }
 
 void Grinder::grind(uint32_t duration_ms) {
-  if (orchestrator_ != nullptr && orchestrator_->is_busy()) {
-    ESP_LOGW(TAG, "Grind blocked: machine is busy (brewing or steaming)");
-    return;
-  }
   if (type_ == GrinderType::NONE || grinding_)
     return;
   uint32_t ms = duration_ms > 0 ? duration_ms : default_grind_time_ms_;

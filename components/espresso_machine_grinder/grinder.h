@@ -6,7 +6,6 @@
 #include "esphome/core/log.h"
 #include "esphome/components/button/button.h"
 #include "esphome/components/number/number.h"
-#include "../espresso_machine/interfaces.h"
 
 namespace esphome {
 namespace espresso_machine_grinder {
@@ -32,14 +31,14 @@ class GrinderTimeNumber : public number::Number {
 };
 
 // ---------------------------------------------------------------------------
-// Grinder — button entity that triggers a timed relay grind
+// Grinder — button entity that triggers a timed relay grind.
+// The grinder is fully independent of the espresso machine orchestrator.
 // ---------------------------------------------------------------------------
 class Grinder : public button::Button, public Component {
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
   void set_grinder_type(GrinderType type) { type_ = type; }
   void set_default_grind_time(uint32_t ms) { default_grind_time_ms_ = ms; }
-  void set_orchestrator(espresso_machine::IOrchestrator *o) { orchestrator_ = o; }
   void set_grind_time_number(GrinderTimeNumber *n) { grind_time_number_ = n; }
 
   void setup() override;
@@ -57,7 +56,6 @@ class Grinder : public button::Button, public Component {
   uint32_t default_grind_time_ms_{7000};
   bool grinding_{false};
   uint32_t grind_end_ms_{0};
-  espresso_machine::IOrchestrator *orchestrator_{nullptr};
   GrinderTimeNumber *grind_time_number_{nullptr};
 };
 

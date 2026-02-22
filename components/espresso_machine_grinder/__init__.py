@@ -14,25 +14,15 @@ GrinderTimeNumber = espresso_machine_grinder_ns.class_(
 )
 GrindAction = espresso_machine_grinder_ns.class_("GrindAction", automation.Action)
 
-# Import orchestrator for lockout (optional dependency)
-espresso_machine_ns = cg.esphome_ns.namespace("espresso_machine")
-IOrchestrator = espresso_machine_ns.class_("IOrchestrator")
-
-GRINDER_TYPES = {
-    "relay": "relay",
-    "none": "none",
-}
-
 CONF_DEFAULT_GRIND_TIME = "default_grind_time"
 CONF_GRIND_TIME_NUMBER = "grind_time_number"
-CONF_ORCHESTRATOR = "orchestrator"
 CONF_DURATION_MS = "duration_ms"
 
 CONFIG_SCHEMA = (
     button.button_schema(Grinder)
     .extend(
         {
-            cv.Required(CONF_TYPE): cv.one_of(*GRINDER_TYPES, lower=True),
+            cv.Required(CONF_TYPE): cv.one_of("relay", "none", lower=True),
             cv.Optional(CONF_PIN): pins.gpio_output_pin_schema,
             cv.Optional(
                 CONF_DEFAULT_GRIND_TIME, default="7s"
@@ -41,7 +31,6 @@ CONFIG_SCHEMA = (
                 GrinderTimeNumber,
                 unit_of_measurement="ms",
             ),
-            cv.Optional(CONF_ORCHESTRATOR): cv.use_id(cg.Component),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -50,7 +39,7 @@ CONFIG_SCHEMA = (
 GRIND_ACTION_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_ID): cv.use_id(Grinder),
-        cv.Optional(CONF_DURATION_MS, default=0): cv.templatable(
+        cv.Optional(CONF_DURATION_MS, default="0s"): cv.templatable(
             cv.positive_time_period_milliseconds
         ),
     }
@@ -74,7 +63,6 @@ async def to_code(config):
 
     grinder_type = config[CONF_TYPE]
     if grinder_type == "relay":
-        from esphome.components.espresso_machine_grinder import GrinderType  # noqa
         cg.add(var.set_grinder_type(espresso_machine_grinder_ns.GrinderType.RELAY))
     else:
         cg.add(var.set_grinder_type(espresso_machine_grinder_ns.GrinderType.NONE))
@@ -95,7 +83,3 @@ async def to_code(config):
             step=100.0,
         )
         cg.add(var.set_grind_time_number(num))
-
-    if CONF_ORCHESTRATOR in config:
-        orch = await cg.get_variable(config[CONF_ORCHESTRATOR])
-        cg.add(var.set_orchestrator(orch))
