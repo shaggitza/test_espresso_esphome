@@ -216,6 +216,53 @@ Tasks:
 
 ---
 
+### Phase 12 — Brew Profiles (Planned / Researched)
+
+**Goal:** First-class named brew profiles with multi-phase pressure/flow curves,
+runtime selection from Home Assistant, and compatibility with Gaggiuino/GaggiaMate
+profile files.
+
+> **Status: Planned.  No code written yet.**
+> See `docs/profiles.md` for full design, YAML API sketch, and compatibility research.
+
+Overview:
+- Brew profiles are **first-class ESPHome entities** declared under the
+  `espresso_machine_profile:` platform.
+- A profile bundles all brewing parameters (temperature, multi-phase pressure/flow
+  curve, exit conditions) into a named object selectable at runtime.
+- The key action `espresso_machine.brew_start` will accept an optional `profile:`
+  argument to swap in a profile for the shot:
+  ```yaml
+  - espresso_machine.brew_start:
+      id: my_espresso
+      profile: profile_bloom
+  ```
+- A `select` entity will be exposed to Home Assistant listing all configured profiles.
+
+Tasks:
+- [ ] Design `espresso_machine_profile:` platform schema (`__init__.py`)
+- [ ] Add multi-phase execution engine to the brew state machine (C++)
+- [ ] Expose `select` entity to HA for runtime profile switching
+- [ ] Add `profile:` argument to `espresso_machine.brew_start` action
+- [ ] Publish per-shot statistics (duration, volume, profile name) as HA sensor entities
+- [ ] Write Gaggiuino/GaggiaMate JSON → ESPHome profile converter (Python CLI tool)
+- [ ] Document converter usage in `docs/profiles.md`
+- [ ] Add example profiles to `examples/philips_barista_brew.yaml`
+- [ ] Integration tests: profile load, phase transitions, exit conditions
+
+Gaggiuino / GaggiaMate compatibility (planned):
+- Research completed — see `docs/profiles.md` for JSON format analysis and planned
+  import path.
+- The goal is zero-edit import: a user drops in a `.json` profile and it works.
+- Weight-based exit requires a future scale platform (HX711 / NAU7802).
+
+Deliverables:
+- User can declare multiple profiles in YAML and switch between them from HA.
+- User can import a Gaggiuino/GaggiaMate JSON profile with minimal editing.
+- Shot statistics are logged per profile and visible in HA.
+
+---
+
 ## Hardware Bill of Materials (Reference Build — Philips Barista Brew)
 
 | Component | Purpose | Notes |
