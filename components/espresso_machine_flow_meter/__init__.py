@@ -77,8 +77,8 @@ RESET_ACTION_SCHEMA = automation.maybe_simple_id(
     "espresso_machine_flow_meter.reset", ResetAction, RESET_ACTION_SCHEMA
 )
 async def reset_action_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
+    parent = await cg.get_variable(config[CONF_ID])
+    return cg.new_Pvariable(action_id, template_arg, parent)
 
 
 CALIBRATE_ACTION_SCHEMA = cv.Schema(
@@ -93,8 +93,8 @@ CALIBRATE_ACTION_SCHEMA = cv.Schema(
     "espresso_machine_flow_meter.calibrate", CalibrateAction, CALIBRATE_ACTION_SCHEMA
 )
 async def calibrate_action_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    var = cg.new_Pvariable(action_id, template_arg, paren)
+    parent = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, parent)
     template_ = await cg.templatable(
         config[CONF_ACTUAL_VOLUME_ML], args, cg.float_
     )
