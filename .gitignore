@@ -34,3 +34,4 @@ secrets.yaml
 # Temporary files
 *.tmp
 *.bak
+_codeql_detected_source_root
