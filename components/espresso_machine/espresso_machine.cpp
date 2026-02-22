@@ -99,11 +99,27 @@ void EspressoMachine::steam_stop() {
     ESP_LOGW(TAG, "steam_stop ignored: machine is %s", mode_name());
     return;
   }
-  ESP_LOGI(TAG, "Steam STOP");
-  safe_stop_all_();
-  steam_state_ = SteamState::IDLE;
-  mode_ = EspressoMode::IDLE;
-
+  if (steam_state_ == SteamState::HEATING) {
+    // Cancel before steaming began — no cool-down needed.
+    ESP_LOGI(TAG, "Steam STOP (cancelled during heat-up)");
+    safe_stop_all_();
+    steam_state_ = SteamState::IDLE;
+    mode_ = EspressoMode::IDLE;
+    return;
+  }
+  if (steam_state_ != SteamState::STEAMING) {
+    ESP_LOGW(TAG, "steam_stop ignored: not in steaming state");
+    return;
+  }
+  ESP_LOGI(TAG, "Steam STOP — entering cool-down");
+  if (steam_valve_)
+    steam_valve_->close();
+  if (steam_purge_valve_)
+    steam_purge_valve_->close();
+  if (steam_pump_)
+    steam_pump_->turn_off();
+  steam_state_ = SteamState::COOLING;
+  state_entered_ms_ = millis();
   // NOTE: heater setpoint lowered to steam_cool_down_to_ in Phase 2
 }
 
@@ -223,15 +239,39 @@ void EspressoMachine::advance_steam_() {
         steam_pump_->turn_on();
       break;
 
-    case SteamState::STEAMING:
-      // Flow-rate control via pump duty cycle comes in Phase 8.
-      // For now, pump runs continuously; user calls steam_stop() manually.
+    case SteamState::STEAMING: {
+      // Bang-bang flow rate control: toggle pump to maintain steam_flow_max_ml_per_s_.
+      // Falls back to continuous pump operation when no flow meter is wired
+      // (get_flow_rate() returns 0 by default, keeping the pump on).
+      if (steam_pump_) {
+        float current_rate = steam_pump_->get_flow_rate();
+        if (current_rate < steam_flow_max_ml_per_s_) {
+          if (!steam_pump_->is_running())
+            steam_pump_->turn_on();
+        } else {
+          if (steam_pump_->is_running())
+            steam_pump_->turn_off();
+        }
+      }
       break;
+    }
 
     case SteamState::COOLING:
-      // Phase 8: monitor temperature drop to steam_cool_down_to_.
-      // Phase 1 placeholder: return to idle immediately.
-      ESP_LOGI(TAG, "Steam: COOLING → IDLE");
+      // Phase 2: transition when temperature sensor reads <= steam_cool_down_to_.
+      // Phase 8 placeholder: proceed to cleanup immediately.
+      ESP_LOGI(TAG, "Steam: COOLING → CLEANUP");
+      steam_state_ = SteamState::CLEANUP;
+      state_entered_ms_ = millis();
+      if (steam_purge_valve_)
+        steam_purge_valve_->open();
+      break;
+
+    case SteamState::CLEANUP:
+      // Phase 9: cleanup_script runs here.
+      // Phase 8 placeholder: close purge valve and return to idle.
+      ESP_LOGI(TAG, "Steam: CLEANUP → IDLE");
+      if (steam_purge_valve_)
+        steam_purge_valve_->close();
       steam_state_ = SteamState::IDLE;
       mode_ = EspressoMode::IDLE;
       break;
