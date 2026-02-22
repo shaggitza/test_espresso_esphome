@@ -114,23 +114,67 @@ void EspressoMachine::advance_brew_() {
   switch (brew_state_) {
     case BrewState::HEATING:
       // Phase 2: transition when temperature sensor reads >= brew_target_temp_.
-      // Phase 1 placeholder: transition immediately to BREWING.
-      ESP_LOGI(TAG, "Brew: HEATING → BREWING (temperature control wired in Phase 2)");
-      brew_state_ = BrewState::BREWING;
+      // Phase 7 placeholder: transition immediately (no climate wiring yet).
       state_entered_ms_ = millis();
-      if (brew_valve_)
-        brew_valve_->open();
-      if (brew_pump_)
-        brew_pump_->turn_on();
+      if (pre_infusion_enabled_) {
+        ESP_LOGI(TAG, "Brew: HEATING → PRE_INFUSION");
+        brew_state_ = BrewState::PRE_INFUSION;
+        pre_infusion_flowing_ = true;
+        if (brew_pump_)
+          brew_pump_->reset_flow();
+        if (brew_valve_)
+          brew_valve_->open();
+        if (brew_pump_)
+          brew_pump_->turn_on();
+      } else {
+        ESP_LOGI(TAG, "Brew: HEATING → BREWING");
+        enter_brewing_();
+      }
       break;
 
+    case BrewState::PRE_INFUSION: {
+      if (pre_infusion_flowing_) {
+        float volume = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
+        if (volume >= pre_infusion_volume_ml_) {
+          ESP_LOGI(TAG, "Brew: pre-infusion %.1fml → holding for %ums",
+                   volume, pre_infusion_hold_time_ms_);
+          if (brew_pump_)
+            brew_pump_->turn_off();
+          pre_infusion_flowing_ = false;
+          pre_infusion_hold_start_ms_ = millis();
+        }
+      } else {
+        if ((millis() - pre_infusion_hold_start_ms_) >= pre_infusion_hold_time_ms_) {
+          ESP_LOGI(TAG, "Brew: PRE_INFUSION hold complete → BREWING");
+          enter_brewing_();
+        }
+      }
+      break;
+    }
+
     case BrewState::BREWING: {
-      // Terminate when flow meter reaches the configured target volume.
-      // Flow data is obtained through the pump's IFlowMeter subsystem.
+      // Temperature surfing: linearly ramp the desired setpoint from
+      // (target + offset) back to target over brew_temp_ramp_time_ms_.
+      // NOTE: actual climate setpoint call is wired in Phase 2.
+      if (brew_temp_offset_ > 0.0f && brew_temp_ramp_time_ms_ > 0) {
+        uint32_t elapsed = millis() - brew_shot_start_ms_;
+        float desired_temp;
+        if (elapsed >= brew_temp_ramp_time_ms_) {
+          desired_temp = brew_target_temp_;
+        } else {
+          float frac = 1.0f - (static_cast<float>(elapsed) / static_cast<float>(brew_temp_ramp_time_ms_));
+          desired_temp = brew_target_temp_ + brew_temp_offset_ * frac;
+        }
+        (void)desired_temp;  // used in Phase 2 climate call
+      }
+
+      // Auto-terminate when flow_max ml reached
       float volume = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
       if (volume >= brew_flow_max_ml_) {
-        ESP_LOGI(TAG, "Brew: target volume %.1fml reached (flow_max=%.1fml) → DONE", volume,
-                 brew_flow_max_ml_);
+        last_shot_time_s_ = static_cast<float>(millis() - brew_shot_start_ms_) / 1000.0f;
+        last_shot_volume_ml_ = volume;
+        ESP_LOGI(TAG, "Brew: DONE — volume=%.1fml  yield=%.1fml  time=%.1fs",
+                 volume, volume - brew_flow_offset_ml_, last_shot_time_s_);
         brew_state_ = BrewState::DONE;
         state_entered_ms_ = millis();
         if (brew_pump_)
@@ -142,9 +186,17 @@ void EspressoMachine::advance_brew_() {
     }
 
     case BrewState::DONE:
-      // Phase 9: run cleanup script (purge path) here.
-      // Phase 1 placeholder: return to idle immediately.
-      ESP_LOGI(TAG, "Brew: DONE → IDLE");
+      // Phase 9: run cleanup_script here.
+      // Phase 7 placeholder: transition to CLEANUP immediately.
+      ESP_LOGI(TAG, "Brew: DONE → CLEANUP");
+      brew_state_ = BrewState::CLEANUP;
+      state_entered_ms_ = millis();
+      break;
+
+    case BrewState::CLEANUP:
+      // Phase 9: cleanup_script runs here.
+      // Phase 7 placeholder: return to idle immediately.
+      ESP_LOGI(TAG, "Brew: CLEANUP → IDLE");
       brew_state_ = BrewState::IDLE;
       mode_ = EspressoMode::IDLE;
       break;
@@ -192,6 +244,26 @@ void EspressoMachine::advance_steam_() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+void EspressoMachine::enter_brewing_() {
+  brew_state_ = BrewState::BREWING;
+  brew_shot_start_ms_ = millis();
+  // Reset flow counter so flow_max measures extraction volume only.
+  // Called only when pre-infusion ran; without pre-infusion, flow was
+  // reset at brew_start() and nothing has flowed during HEATING.
+  if (pre_infusion_enabled_) {
+    if (brew_flow_meter_)
+      brew_flow_meter_->reset();
+    else if (brew_pump_)
+      brew_pump_->reset_flow();
+  }
+  if (brew_valve_)
+    brew_valve_->open();
+  if (brew_pump_)
+    brew_pump_->turn_on();
+  ESP_LOGI(TAG, "Brew: BREWING — target=%.1fml  temp_offset=%.1f°C",
+           brew_flow_max_ml_, brew_temp_offset_);
+}
+
 void EspressoMachine::safe_stop_all_() {
   if (brew_pump_)
     brew_pump_->turn_off();

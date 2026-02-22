@@ -192,13 +192,16 @@ TEST(Orchestrator, BrewDoesNotTerminateBeforeFlowMax) {
   EXPECT_TRUE(f.brew_pump.running);
 }
 
-TEST(Orchestrator, BrewDoneTransitionsToIdle) {
+TEST(Orchestrator, BrewDoneTransitionsToCleanupThenIdle) {
   OrchestratorFixture f;
   f.machine.brew_start();
   f.machine.loop();          // HEATING → BREWING
   f.brew_pump.volume = 40.0f;
   f.machine.loop();          // BREWING → DONE
-  f.machine.loop();          // DONE → IDLE
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+  f.machine.loop();          // DONE → CLEANUP
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+  f.machine.loop();          // CLEANUP → IDLE
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
 }
 
@@ -276,4 +279,99 @@ TEST(Orchestrator, IsBusyWhenSteaming) {
   EXPECT_TRUE(f.machine.is_busy());
   f.machine.steam_stop();
   EXPECT_FALSE(f.machine.is_busy());
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 — shot stats
+// ---------------------------------------------------------------------------
+TEST(Orchestrator, ShotStatsRecordedAtDone) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  g_mock_millis = 25000;      // simulate 25 s elapsed
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  EXPECT_NEAR(f.machine.get_last_shot_time_s(), 25.0f, 0.1f);
+  EXPECT_FLOAT_EQ(f.machine.get_last_shot_volume_ml(), 40.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 — temperature surfing
+// ---------------------------------------------------------------------------
+TEST(Orchestrator, TempSurfingSettingsAccepted) {
+  OrchestratorFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (no crash with surfing config set)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 — pre-infusion
+// ---------------------------------------------------------------------------
+TEST(Orchestrator, PreInfusionDisabledSkipsDirectlyToBrewing) {
+  OrchestratorFixture f;
+  // pre_infusion_enabled_ defaults to false
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (no PRE_INFUSION when disabled)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+}
+
+TEST(Orchestrator, PreInfusionEnabledEntersPreInfusionState) {
+  OrchestratorFixture f;
+  f.machine.set_pre_infusion_enabled(true);
+  f.machine.set_pre_infusion_volume_ml(5.0f);
+  f.machine.set_pre_infusion_hold_time_ms(500);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → PRE_INFUSION
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::PRE_INFUSION);
+  EXPECT_TRUE(f.brew_pump.running);
+  EXPECT_TRUE(f.brew_valve.open_state);
+}
+
+TEST(Orchestrator, PreInfusionFlowingStopsAtVolumeGoal) {
+  OrchestratorFixture f;
+  f.machine.set_pre_infusion_enabled(true);
+  f.machine.set_pre_infusion_volume_ml(5.0f);
+  f.machine.set_pre_infusion_hold_time_ms(500);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → PRE_INFUSION (pump on)
+  EXPECT_TRUE(f.brew_pump.running);
+
+  f.brew_pump.volume = 5.0f;
+  f.machine.loop();  // flowing → hold (pump off)
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::PRE_INFUSION);
+}
+
+TEST(Orchestrator, PreInfusionHoldExpiresTransitionsToBrewing) {
+  OrchestratorFixture f;
+  f.machine.set_pre_infusion_enabled(true);
+  f.machine.set_pre_infusion_volume_ml(5.0f);
+  f.machine.set_pre_infusion_hold_time_ms(500);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → PRE_INFUSION
+  f.brew_pump.volume = 5.0f;
+  f.machine.loop();  // flowing → hold phase; record hold_start_ms
+
+  // Advance time past hold duration
+  g_mock_millis += 600;
+  f.machine.loop();  // hold complete → BREWING
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  EXPECT_TRUE(f.brew_pump.running);
+}
+
+TEST(Orchestrator, PreInfusionResetsFlowBeforeBrewing) {
+  OrchestratorFixture f;
+  f.machine.set_pre_infusion_enabled(true);
+  f.machine.set_pre_infusion_volume_ml(5.0f);
+  f.machine.set_pre_infusion_hold_time_ms(0);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → PRE_INFUSION
+  f.brew_pump.volume = 5.0f;
+  int resets_before = f.brew_pump.reset_flow_count;
+  f.machine.loop();  // flowing → hold (volume reached)
+  f.machine.loop();  // hold complete → BREWING (resets flow)
+  EXPECT_GT(f.brew_pump.reset_flow_count, resets_before);
 }
