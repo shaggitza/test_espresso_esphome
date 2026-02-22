@@ -1,0 +1,36 @@
+# ESPHome / Python build artifacts
+.esphome/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ESPHome secrets (never commit these)
+secrets.yaml
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# PlatformIO (used internally by ESPHome)
+.pio/
+
+# Temporary files
+*.tmp
+*.bak
