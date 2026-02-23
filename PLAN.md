@@ -174,9 +174,13 @@ Tasks:
   `valve`, `purge_valve`, `target_temperature`, `flow_max`, `cool_down_to`, `cleanup_script`
 - [x] Steam state machine: `idle → heating → steaming → cooling → cleanup`
 - [x] `espresso_machine.steam_start` / `espresso_machine.steam_stop` actions
-- [ ] Heater setpoint raised to `target_temperature` on steam start (Phase 2 dependency)
-- [ ] Pump duty-cycle during steaming to maintain `flow_max` ml/s
-- [ ] Auto cool-down: set heater setpoint to `cool_down_to` after steam (Phase 2 dependency)
+- [x] Heater setpoint raised to `target_temperature` on steam start (via `IHeater` interface)
+- [x] Temperature-gated HEATING→STEAMING: waits until temperature reaches target
+- [x] Pump duty-cycle during steaming to maintain `flow_max` ml/s
+- [x] Purge valve opens immediately on steam stop to flush path during cool-down
+- [x] Auto cool-down: heater setpoint lowered to `cool_down_to` when steam stops
+- [x] Temperature-gated COOLING→CLEANUP: waits until temperature drops to cool_down_to
+- [ ] Production `IHeater` adapter for ESPHome `climate.pid` entity (Phase 2 wiring)
 
 Deliverables:
 - Steam wand usable from HA; machine automatically cools back to brew temperature.

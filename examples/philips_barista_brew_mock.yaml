@@ -325,6 +325,7 @@ espresso_machine:
 
   steam:
     heater: main_heater
+    heater_controller: mock_heater   # IHeater — enables temperature-gated transitions
     pump: main_pump
     valve: steam_valve
     purge_valve: purge_valve

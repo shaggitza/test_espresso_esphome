@@ -91,7 +91,9 @@ void EspressoMachine::steam_start() {
   if (steam_pump_)
     steam_pump_->turn_off();
 
-  // NOTE: heater setpoint raised to steam_target_temp_ in Phase 2
+  // Raise heater setpoint to steam temperature if a controller is wired
+  if (steam_heater_ctrl_)
+    steam_heater_ctrl_->set_target_temperature(steam_target_temp_);
 }
 
 void EspressoMachine::steam_stop() {
@@ -100,8 +102,10 @@ void EspressoMachine::steam_stop() {
     return;
   }
   if (steam_state_ == SteamState::HEATING) {
-    // Cancel before steaming began — no cool-down needed.
+    // Cancel before steaming began — lower setpoint and stop immediately.
     ESP_LOGI(TAG, "Steam STOP (cancelled during heat-up)");
+    if (steam_heater_ctrl_)
+      steam_heater_ctrl_->set_target_temperature(steam_cool_down_to_);
     safe_stop_all_();
     steam_state_ = SteamState::IDLE;
     mode_ = EspressoMode::IDLE;
@@ -114,13 +118,18 @@ void EspressoMachine::steam_stop() {
   ESP_LOGI(TAG, "Steam STOP — entering cool-down");
   if (steam_valve_)
     steam_valve_->close();
+  // Open purge valve immediately when steaming stops — this flushes the steam
+  // path and keeps it purging throughout the COOLING state while the thermoblock
+  // cools to steam_cool_down_to_.  The valve is closed in the CLEANUP state.
   if (steam_purge_valve_)
-    steam_purge_valve_->close();
+    steam_purge_valve_->open();
   if (steam_pump_)
     steam_pump_->turn_off();
   steam_state_ = SteamState::COOLING;
   state_entered_ms_ = millis();
-  // NOTE: heater setpoint lowered to steam_cool_down_to_ in Phase 2
+  // Lower heater setpoint to cool-down temperature
+  if (steam_heater_ctrl_)
+    steam_heater_ctrl_->set_target_temperature(steam_cool_down_to_);
 }
 
 // ---------------------------------------------------------------------------
@@ -228,9 +237,17 @@ void EspressoMachine::advance_brew_() {
 void EspressoMachine::advance_steam_() {
   switch (steam_state_) {
     case SteamState::HEATING:
-      // Phase 2: transition when temperature sensor reads >= steam_target_temp_.
-      // Phase 1 placeholder: transition immediately to STEAMING.
-      ESP_LOGI(TAG, "Steam: HEATING → STEAMING (temperature control wired in Phase 2)");
+      // If a heater controller is wired, wait until the thermoblock reaches
+      // steam temperature before opening the valve.  Without a controller the
+      // machine transitions immediately (backward-compatible placeholder).
+      if (steam_heater_ctrl_) {
+        if (steam_heater_ctrl_->get_current_temperature() < steam_target_temp_) {
+          break;  // Still heating — wait
+        }
+      }
+      ESP_LOGI(TAG, "Steam: HEATING → STEAMING (%.1f°C)",
+               steam_heater_ctrl_ ? steam_heater_ctrl_->get_current_temperature()
+                                  : steam_target_temp_);
       steam_state_ = SteamState::STEAMING;
       state_entered_ms_ = millis();
       if (steam_valve_)
@@ -257,18 +274,23 @@ void EspressoMachine::advance_steam_() {
     }
 
     case SteamState::COOLING:
-      // Phase 2: transition when temperature sensor reads <= steam_cool_down_to_.
-      // Phase 8 placeholder: proceed to cleanup immediately.
-      ESP_LOGI(TAG, "Steam: COOLING → CLEANUP");
+      // Purge valve was opened by steam_stop(); keep purging while the
+      // thermoblock cools.  If a controller is wired, wait for the temperature
+      // to drop to cool_down_to_ before proceeding to CLEANUP.
+      if (steam_heater_ctrl_) {
+        if (steam_heater_ctrl_->get_current_temperature() > steam_cool_down_to_) {
+          break;  // Still cooling — wait
+        }
+      }
+      ESP_LOGI(TAG, "Steam: COOLING → CLEANUP (%.1f°C)",
+               steam_heater_ctrl_ ? steam_heater_ctrl_->get_current_temperature()
+                                  : steam_cool_down_to_);
       steam_state_ = SteamState::CLEANUP;
       state_entered_ms_ = millis();
-      if (steam_purge_valve_)
-        steam_purge_valve_->open();
       break;
 
     case SteamState::CLEANUP:
-      // Phase 9: cleanup_script runs here.
-      // Phase 8 placeholder: close purge valve and return to idle.
+      // Close purge valve and return to idle.
       ESP_LOGI(TAG, "Steam: CLEANUP → IDLE");
       if (steam_purge_valve_)
         steam_purge_valve_->close();

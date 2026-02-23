@@ -54,6 +54,21 @@ class IFlowMeter {
 };
 
 // ---------------------------------------------------------------------------
+// IHeater — heater controller abstraction
+//
+// Allows the orchestrator to read current temperature and command a target
+// setpoint without depending on the concrete heater implementation (PID
+// climate, bang-bang, mock, etc.).  When no IHeater is wired the steam state
+// machine falls back to immediate transitions, preserving backward compat.
+// ---------------------------------------------------------------------------
+class IHeater {
+ public:
+  virtual float get_current_temperature() const = 0;
+  virtual void set_target_temperature(float t) = 0;
+  virtual ~IHeater() = default;
+};
+
+// ---------------------------------------------------------------------------
 // IFlowObserver — receives flow rate updates (used by mock heater to model
 // thermoblock cooling when water is flowing through the machine)
 // ---------------------------------------------------------------------------
