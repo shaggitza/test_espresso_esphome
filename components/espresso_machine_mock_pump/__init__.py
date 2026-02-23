@@ -43,11 +43,29 @@ Residual Pressure Decay Model (internal_volume_ml):
     Set internal_volume_ml = 0 to disable the model and revert to legacy
     instant-decay behaviour.
 
+Nozzle Flow Model:
+    The nozzle flow represents the water that exits the coffee puck into the cup,
+    which differs from the pump flow (water entering the puck) due to puck absorption.
+    
+    Coffee grounds absorb water during extraction (~2ml per gram of coffee).
+    A typical 18g dose absorbs ~36ml total, primarily during the wetting phase.
+    
+    The absorption follows the same wetting curve as flow breakthrough:
+        absorbed_total(t) = puck_absorption_ml × wetted_fraction(t)
+        absorption_rate   = d(absorbed_total)/dt
+                          = puck_absorption_ml × (1/τ_eff) × exp(-t/τ_eff)
+    
+    Nozzle flow = pump flow - absorption rate
+    
+    This means early in the shot, much of the water is absorbed by the puck
+    and little comes out the nozzle. As the puck saturates (approaches full
+    wetted_fraction), absorption rate drops toward zero and nozzle flow
+    approaches pump flow.
+
 Nozzle Flow Sensors:
     nozzle_rate_sensor and nozzle_total_sensor track the estimated flow out
-    of the group head nozzle (= current_flow_rate after puck restriction).
-    These should match the last_shot_yield_ml metric from the orchestrator
-    at the end of a shot.
+    of the group head nozzle after accounting for puck absorption.
+    These represent the actual espresso yield in the cup.
 
 All physics parameters are exposed as HA number entities — adjustable without
 reflashing.  Use entity_category: config in the number sub-schemas to keep
@@ -63,6 +81,7 @@ Example usage:
       puck_time_constant_s: 10.0
       puck_density: 50
       internal_volume_ml: 20.0
+      puck_absorption_ml: 36.0
       rate_sensor:
         name: "Brew Flow Rate"
       total_sensor:
@@ -75,6 +94,9 @@ Example usage:
         name: "Brew Pump Pressure"
       puck_density_number:
         name: "Mock Puck Density"
+        entity_category: config
+      puck_absorption_number:
+        name: "Mock Puck Absorption"
         entity_category: config
 """
 
@@ -107,6 +129,7 @@ CONF_PUMP_MAX_PRESSURE_BAR = "pump_max_pressure_bar"
 CONF_PUCK_TIME_CONSTANT_S = "puck_time_constant_s"
 CONF_PUCK_DENSITY = "puck_density"
 CONF_INTERNAL_VOLUME_ML = "internal_volume_ml"
+CONF_PUCK_ABSORPTION_ML = "puck_absorption_ml"
 CONF_MOCK_HEATER = "mock_heater"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
@@ -120,6 +143,7 @@ CONF_PUMP_MAX_PRESSURE_NUMBER = "pump_max_pressure_number"
 CONF_PUCK_TIME_CONSTANT_NUMBER = "puck_time_constant_number"
 CONF_PUCK_DENSITY_NUMBER = "puck_density_number"
 CONF_INTERNAL_VOLUME_NUMBER = "internal_volume_number"
+CONF_PUCK_ABSORPTION_NUMBER = "puck_absorption_number"
 
 CONFIG_SCHEMA = (
     switch.switch_schema(MockPump)
@@ -144,6 +168,11 @@ CONFIG_SCHEMA = (
             # τ_decay = internal_volume_ml / nominal_flow_ml_per_s  (e.g. 20mL/4mL·s⁻¹ = 5s)
             # Set to 0 to disable the model and use the legacy instant-decay behaviour.
             cv.Optional(CONF_INTERNAL_VOLUME_ML, default=20.0): cv.positive_float,
+            # Puck water absorption capacity [mL].
+            # Coffee grounds absorb water during extraction (~2ml per gram of coffee).
+            # A typical 18g dose absorbs ~36ml. This absorption happens primarily during
+            # the wetting phase and reduces nozzle output compared to pump input.
+            cv.Optional(CONF_PUCK_ABSORPTION_ML, default=36.0): cv.positive_float,
             # Optional link to mock heater — drives flow-based thermoblock cooling
             cv.Optional(CONF_MOCK_HEATER): cv.use_id(cg.Component),
             # Flow sensor sub-entities (same interface as espresso_machine_flow_meter)
@@ -189,6 +218,9 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_INTERNAL_VOLUME_NUMBER): number.number_schema(
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
+            cv.Optional(CONF_PUCK_ABSORPTION_NUMBER): number.number_schema(
+                MockPumpNumber
+            ).extend(cv.COMPONENT_SCHEMA),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -218,6 +250,7 @@ async def to_code(config):
     cg.add(var.set_puck_time_constant(config[CONF_PUCK_TIME_CONSTANT_S]))
     cg.add(var.set_puck_density(config[CONF_PUCK_DENSITY]))
     cg.add(var.set_internal_volume(config[CONF_INTERNAL_VOLUME_ML]))
+    cg.add(var.set_puck_absorption(config[CONF_PUCK_ABSORPTION_ML]))
 
     # Wire to mock heater for flow-based thermoblock cooling
     if CONF_MOCK_HEATER in config:
@@ -292,4 +325,13 @@ async def to_code(config):
         )
         await cg.register_component(num_var, num_conf)
         cg.add(var.set_internal_volume_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_PUCK_ABSORPTION_NUMBER in config:
+        num_conf = config[CONF_PUCK_ABSORPTION_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.0, max_value=100.0, step=1.0
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_puck_absorption_number(num_var))
         cg.add(num_var.set_parent(var))
