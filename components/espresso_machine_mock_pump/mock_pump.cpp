@@ -22,6 +22,9 @@ void MockPumpNumber::setup() {
     case ParamType::PUCK_TIME_CONSTANT:
       initial_value = parent_->get_puck_time_constant();
       break;
+    case ParamType::PUCK_PRESSURE:
+      initial_value = parent_->get_puck_pressure();
+      break;
   }
   this->publish_state(initial_value);
 }
@@ -38,6 +41,10 @@ void MockPumpNumber::control(float value) {
       parent_->update_puck_time_constant(value);
       ESP_LOGD(TAG, "Puck time constant updated to %.1f s", value);
       break;
+    case ParamType::PUCK_PRESSURE:
+      parent_->update_puck_pressure(value);
+      ESP_LOGD(TAG, "Puck pressure updated to %.1f bar", value);
+      break;
   }
   this->publish_state(value);
 }
@@ -50,6 +57,7 @@ void MockPump::setup() {
   ESP_LOGI(TAG, "Mock pump initialized:");
   ESP_LOGI(TAG, "  Nominal flow: %.1f mL/s", nominal_flow_);
   ESP_LOGI(TAG, "  Puck time constant: %.1f s", puck_time_constant_);
+  ESP_LOGI(TAG, "  Puck pressure: %.1f bar", puck_pressure_bar_);
 }
 
 void MockPump::loop() {
@@ -69,11 +77,21 @@ void MockPump::loop() {
 
     // Puck wetting model: Q(t) = Q_nom × (1 − exp(−t/τ))
     // Flow starts near zero and ramps exponentially to nominal
+    float wetted_flow;
     if (puck_time_constant_ > 0.0f) {
-      current_flow_rate_ = nominal_flow_ * (1.0f - std::exp(-run_time_ / puck_time_constant_));
+      wetted_flow = nominal_flow_ * (1.0f - std::exp(-run_time_ / puck_time_constant_));
     } else {
-      current_flow_rate_ = nominal_flow_;
+      wetted_flow = nominal_flow_;
     }
+
+    // Puck pressure resistance: higher back-pressure reduces flow.
+    // Reference is 9 bar (nominal espresso). Flow scales as min(1, 9/P).
+    // At ≤9 bar (easy puck): full flow. At 12 bar: 75%. At 18 bar: 50%.
+    static constexpr float REFERENCE_PRESSURE_BAR = 9.0f;
+    float pressure_factor = (puck_pressure_bar_ > 0.0f)
+        ? std::min(1.0f, REFERENCE_PRESSURE_BAR / puck_pressure_bar_)
+        : 1.0f;
+    current_flow_rate_ = wetted_flow * pressure_factor;
 
     // Accumulate volume: V += Q × dt
     total_volume_ += current_flow_rate_ * dt_s;
@@ -113,8 +131,9 @@ void MockPump::loop() {
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
     last_log_ms = now;
-    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, V=%.1f mL, t=%.1f s",
-             running_ ? "ON" : "OFF", current_flow_rate_, total_volume_, run_time_);
+    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, V=%.1f mL, t=%.1f s, P=%.1f bar",
+             running_ ? "ON" : "OFF", current_flow_rate_, total_volume_, run_time_,
+             puck_pressure_bar_);
   }
 }
 

@@ -18,7 +18,7 @@ class MockPump;
 // ---------------------------------------------------------------------------
 class MockPumpNumber : public number::Number, public Component {
  public:
-  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT };
+  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_PRESSURE };
 
   void set_parent(MockPump *parent) { parent_ = parent; }
   void set_param_type(ParamType type) { param_type_ = type; }
@@ -44,6 +44,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Configuration setters (called from generated code)
   void set_nominal_flow(float f) { nominal_flow_ = f; }
   void set_puck_time_constant(float t) { puck_time_constant_ = t; }
+  void set_puck_pressure(float p) { puck_pressure_bar_ = p; }
 
   // Link to mock heater so flow rate drives thermoblock cooling
   void set_heater(espresso_machine::IFlowObserver *h) { flow_observer_ = h; }
@@ -60,6 +61,10 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_puck_time_constant_number(MockPumpNumber *num) {
     puck_time_constant_number_ = num;
     if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_TIME_CONSTANT);
+  }
+  void set_puck_pressure_number(MockPumpNumber *num) {
+    puck_pressure_number_ = num;
+    if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_PRESSURE);
   }
 
   void setup() override;
@@ -78,16 +83,19 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Runtime parameter accessors/mutators
   float get_nominal_flow() const { return nominal_flow_; }
   float get_puck_time_constant() const { return puck_time_constant_; }
+  float get_puck_pressure() const { return puck_pressure_bar_; }
 
   void update_nominal_flow(float v) { nominal_flow_ = v; }
   void update_puck_time_constant(float v) { puck_time_constant_ = v; }
+  void update_puck_pressure(float v) { puck_pressure_bar_ = v; }
 
  protected:
   void write_state(bool state) override;
 
   // Physics parameters
-  float nominal_flow_{4.0f};         // Nominal flow rate [mL/s]
-  float puck_time_constant_{10.0f};  // Puck wetting time constant [s]
+  float nominal_flow_{4.0f};          // Nominal flow rate at 9 bar [mL/s]
+  float puck_time_constant_{10.0f};   // Puck wetting time constant [s]
+  float puck_pressure_bar_{9.0f};     // Simulated puck back-pressure [bar]
 
   // Simulation state
   bool running_{false};
@@ -100,6 +108,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   sensor::Sensor *total_sensor_{nullptr};
   MockPumpNumber *nominal_flow_number_{nullptr};
   MockPumpNumber *puck_time_constant_number_{nullptr};
+  MockPumpNumber *puck_pressure_number_{nullptr};
   espresso_machine::IFlowObserver *flow_observer_{nullptr};
 
   // Timing

@@ -83,7 +83,7 @@ void MockHeater::setup() {
   ESP_LOGI(TAG, "  Initial temp: %.1f °C", temperature_);
   ESP_LOGI(TAG, "  Ambient temp: %.1f °C", ambient_temp_);
   ESP_LOGI(TAG, "  Power: %.0f W", power_watts_);
-  ESP_LOGI(TAG, "  Thermal mass: %.0f J/°C", thermal_mass_);
+  ESP_LOGI(TAG, "  Thermal mass: %.0f J/°C (Al block + water)", thermal_mass_);
   ESP_LOGI(TAG, "  Heat loss: %.2f W/°C", heat_loss_);
   ESP_LOGI(TAG, "  Water inlet temp: %.1f °C", water_inlet_temp_);
 }
@@ -129,6 +129,15 @@ void MockHeater::loop() {
     last_log_ms = now;
     ESP_LOGD(TAG, "T=%.1f°C, duty=%.1f%%, Q=%.2f mL/s, dT/dt=%.2f°C/s",
              temperature_, duty * 100.0f, flow_rate_, dT_dt);
+  }
+
+  // Publish duty cycle sensor at ~4 Hz so HA can show SSR switching intensity
+  static uint32_t last_duty_publish_ms = 0;
+  if (now - last_duty_publish_ms > 250) {
+    last_duty_publish_ms = now;
+    if (duty_sensor_) {
+      duty_sensor_->publish_state(duty * 100.0f);
+    }
   }
 }
 

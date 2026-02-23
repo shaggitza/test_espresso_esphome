@@ -5,16 +5,18 @@ This component provides a fully simulated pump that replaces both the physical
 pump relay and flow meter. The orchestrator sees no difference — it controls
 the pump via IPump interface and reads flow data from the same interface.
 
-Puck Wetting Model:
-    Q(t) = Q_nom × (1 − exp(−t/τ))
+Puck Wetting + Pressure Model:
+    Q_wetted(t) = Q_nom × (1 − exp(−t/τ))
+    Q_effective = Q_wetted × min(1, 9 / pressure_bar)
 
-    Q_nom = nominal flow rate [mL/s]
-    τ     = puck time constant [s] (how quickly flow ramps after pump start)
-    t     = time since pump started [s]
+    Q_nom        = nominal flow rate [mL/s] at 9 bar reference pressure
+    τ            = puck time constant [s] (how quickly flow ramps after pump start)
+    pressure_bar = simulated puck back-pressure [bar] (default 9 bar)
+    t            = time since pump started [s]
 
-This models the physical behavior where flow starts near zero (dry puck
-compresses under pressure) and ramps exponentially to the nominal rate as
-channels form through the coffee bed.
+Flow ramps exponentially from zero (dry puck) to nominal. Higher puck pressure
+reduces flow proportionally — at 12 bar: 75% of nominal; at 9 bar: 100%;
+at ≤9 bar (easy puck): full nominal flow.
 
 All physics parameters are exposed as HA number entities — adjustable without
 reflashing.
@@ -26,6 +28,7 @@ Example usage:
       name: "Mock Pump"
       nominal_flow_ml_per_s: 4.0
       puck_time_constant_s: 10.0
+      puck_pressure_bar: 9.0
       rate_sensor:
         name: "Brew Flow Rate"
       total_sensor:
@@ -58,6 +61,7 @@ ResetAction = espresso_machine_mock_pump_ns.class_("ResetAction", automation.Act
 # Config keys
 CONF_NOMINAL_FLOW_ML_PER_S = "nominal_flow_ml_per_s"
 CONF_PUCK_TIME_CONSTANT_S = "puck_time_constant_s"
+CONF_PUCK_PRESSURE_BAR = "puck_pressure_bar"
 CONF_MOCK_HEATER = "mock_heater"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
@@ -65,6 +69,7 @@ CONF_TOTAL_SENSOR = "total_sensor"
 # Number entity config keys for runtime tuning
 CONF_NOMINAL_FLOW_NUMBER = "nominal_flow_number"
 CONF_PUCK_TIME_CONSTANT_NUMBER = "puck_time_constant_number"
+CONF_PUCK_PRESSURE_NUMBER = "puck_pressure_number"
 
 CONFIG_SCHEMA = (
     switch.switch_schema(MockPump)
@@ -73,6 +78,8 @@ CONFIG_SCHEMA = (
             # Physics parameters (defaults model a typical espresso extraction)
             cv.Optional(CONF_NOMINAL_FLOW_ML_PER_S, default=4.0): cv.positive_float,
             cv.Optional(CONF_PUCK_TIME_CONSTANT_S, default=10.0): cv.positive_float,
+            # Puck back-pressure (bar). At >9 bar, flow is reduced proportionally.
+            cv.Optional(CONF_PUCK_PRESSURE_BAR, default=9.0): cv.positive_float,
             # Optional link to mock heater — drives flow-based thermoblock cooling
             cv.Optional(CONF_MOCK_HEATER): cv.use_id(cg.Component),
             # Flow sensor sub-entities (same interface as espresso_machine_flow_meter)
@@ -91,6 +98,9 @@ CONFIG_SCHEMA = (
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
             cv.Optional(CONF_PUCK_TIME_CONSTANT_NUMBER): number.number_schema(
+                MockPumpNumber
+            ).extend(cv.COMPONENT_SCHEMA),
+            cv.Optional(CONF_PUCK_PRESSURE_NUMBER): number.number_schema(
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
         }
@@ -119,6 +129,7 @@ async def to_code(config):
     # Set physics parameters
     cg.add(var.set_nominal_flow(config[CONF_NOMINAL_FLOW_ML_PER_S]))
     cg.add(var.set_puck_time_constant(config[CONF_PUCK_TIME_CONSTANT_S]))
+    cg.add(var.set_puck_pressure(config[CONF_PUCK_PRESSURE_BAR]))
 
     # Wire to mock heater for flow-based thermoblock cooling
     if CONF_MOCK_HEATER in config:
@@ -152,4 +163,13 @@ async def to_code(config):
         )
         await cg.register_component(num_var, num_conf)
         cg.add(var.set_puck_time_constant_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_PUCK_PRESSURE_NUMBER in config:
+        num_conf = config[CONF_PUCK_PRESSURE_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.0, max_value=16.0, step=0.5
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_puck_pressure_number(num_var))
         cg.add(num_var.set_parent(var))

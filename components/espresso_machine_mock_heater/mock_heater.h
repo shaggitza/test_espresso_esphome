@@ -85,6 +85,7 @@ class MockHeater : public Component, public espresso_machine::IFlowObserver {
 
   void set_output(MockHeaterOutput *out) { output_ = out; }
   void set_temperature_sensor(MockHeaterTempSensor *sens) { temp_sensor_ = sens; }
+  void set_duty_sensor(sensor::Sensor *s) { duty_sensor_ = s; }
 
   // Runtime tuning number entities
   void set_power_number(MockHeaterNumber *num) {
@@ -126,10 +127,11 @@ class MockHeater : public Component, public espresso_machine::IFlowObserver {
 
  protected:
   // Physics parameters
+  // Default: 800g Al × 0.897 J/(g·°C) + 20mL water × 4.186 J/(mL·°C) ≈ 800 J/°C
   float temperature_{25.0f};       // Current simulated temperature [°C]
   float ambient_temp_{25.0f};      // Ambient temperature [°C]
   float power_watts_{1200.0f};     // Heater power [W]
-  float thermal_mass_{42.0f};      // Thermal mass [J/°C] (≈ 10 mL thermoblock)
+  float thermal_mass_{800.0f};     // Thermal mass [J/°C] (Al block + water)
   float heat_loss_{1.7f};          // Heat-loss coefficient [W/°C]
   float water_inlet_temp_{20.0f};  // Cold-water inlet temperature [°C]
 
@@ -139,6 +141,7 @@ class MockHeater : public Component, public espresso_machine::IFlowObserver {
   // Sub-entities
   MockHeaterOutput *output_{nullptr};
   MockHeaterTempSensor *temp_sensor_{nullptr};
+  sensor::Sensor *duty_sensor_{nullptr};
 
   // Runtime tuning numbers
   MockHeaterNumber *power_number_{nullptr};
