@@ -1,4 +1,5 @@
 #include "mock_pump.h"
+#include "esphome/core/hal.h"
 #include <cmath>
 
 namespace esphome {
@@ -21,6 +22,12 @@ void MockPumpNumber::setup() {
     case ParamType::PUCK_TIME_CONSTANT:
       initial_value = parent_->get_puck_time_constant();
       break;
+    case ParamType::PUCK_PRESSURE:
+      initial_value = parent_->get_puck_pressure();
+      break;
+    case ParamType::PUMP_MAX_PRESSURE:
+      initial_value = parent_->get_pump_max_pressure();
+      break;
   }
   this->publish_state(initial_value);
 }
@@ -37,6 +44,14 @@ void MockPumpNumber::control(float value) {
       parent_->update_puck_time_constant(value);
       ESP_LOGD(TAG, "Puck time constant updated to %.1f s", value);
       break;
+    case ParamType::PUCK_PRESSURE:
+      parent_->update_puck_pressure(value);
+      ESP_LOGD(TAG, "Puck pressure updated to %.1f bar", value);
+      break;
+    case ParamType::PUMP_MAX_PRESSURE:
+      parent_->update_pump_max_pressure(value);
+      ESP_LOGD(TAG, "Pump max pressure updated to %.1f bar", value);
+      break;
   }
   this->publish_state(value);
 }
@@ -47,8 +62,10 @@ void MockPumpNumber::control(float value) {
 void MockPump::setup() {
   last_update_ms_ = millis();
   ESP_LOGI(TAG, "Mock pump initialized:");
-  ESP_LOGI(TAG, "  Nominal flow: %.1f mL/s", nominal_flow_);
-  ESP_LOGI(TAG, "  Puck time constant: %.1f s", puck_time_constant_);
+  ESP_LOGI(TAG, "  Nominal flow: %.1f mL/s (at 9 bar rated)", nominal_flow_);
+  ESP_LOGI(TAG, "  Pump stall pressure: %.1f bar", pump_max_pressure_bar_);
+  ESP_LOGI(TAG, "  Puck pressure: %.1f bar", puck_pressure_bar_);
+  ESP_LOGI(TAG, "  Puck time constant: %.1f s (at 9 bar reference)", puck_time_constant_);
 }
 
 void MockPump::loop() {
@@ -66,12 +83,46 @@ void MockPump::loop() {
   if (running_) {
     run_time_ += dt_s;
 
-    // Puck wetting model: Q(t) = Q_nom × (1 − exp(−t/τ))
-    // Flow starts near zero and ramps exponentially to nominal
-    if (puck_time_constant_ > 0.0f) {
-      current_flow_rate_ = nominal_flow_ * (1.0f - std::exp(-run_time_ / puck_time_constant_));
+    // -----------------------------------------------------------------------
+    // Pump curve + pressure-weighted wetting model
+    //
+    // Vibration pumps have a linear pressure-flow curve:
+    //   Q_ss = Q_max × (1 − P_puck / P_stall)
+    // where Q_max is calibrated so Q_ss = nominal_flow at 9 bar.
+    //
+    // Puck wetting: the time constant scales with puck resistance so that
+    // a harder puck takes proportionally longer before flow breaks through.
+    //   effective_τ = puck_time_constant × (P_puck / 9 bar)
+    //   Q(t) = Q_ss × (1 − exp(−t / effective_τ))
+    // -----------------------------------------------------------------------
+
+    // Steady-state flow from pump curve (clamped to [0, Q_max])
+    static constexpr float PUMP_RATED_PRESSURE = 9.0f;
+    float puck_curve_factor = 1.0f - puck_pressure_bar_ / pump_max_pressure_bar_;
+    if (puck_curve_factor <= 0.0f) {
+      // Puck resistance ≥ pump stall pressure — no flow possible
+      current_flow_rate_ = 0.0f;
     } else {
-      current_flow_rate_ = nominal_flow_;
+      // Q_max calibrated: at puck_pressure = 9 bar, Q = nominal_flow
+      float Q_max = (pump_max_pressure_bar_ > PUMP_RATED_PRESSURE)
+          ? nominal_flow_ / (1.0f - PUMP_RATED_PRESSURE / pump_max_pressure_bar_)
+          : nominal_flow_ * 10.0f;  // Fallback when P_stall ≤ rated (unusual)
+      float Q_steady = Q_max * puck_curve_factor;
+
+      // Wetting factor: time constant scales with puck resistance.
+      // Harder puck (higher P_puck) → longer wetting before breakthrough.
+      float effective_tau = (puck_pressure_bar_ > 0.0f)
+          ? puck_time_constant_ * (puck_pressure_bar_ / PUMP_RATED_PRESSURE)
+          : 0.0f;
+
+      float wetted_fraction;
+      if (effective_tau <= 0.0f) {
+        wetted_fraction = 1.0f;  // Immediate full wetting (τ = 0 or no puck)
+      } else {
+        wetted_fraction = 1.0f - std::exp(-run_time_ / effective_tau);
+      }
+
+      current_flow_rate_ = Q_steady * wetted_fraction;
     }
 
     // Accumulate volume: V += Q × dt
@@ -103,12 +154,18 @@ void MockPump::loop() {
     run_time_ = 0.0f;  // Reset run time for next start
   }
 
+  // Push current flow rate to mock heater for thermoblock cooling simulation
+  if (flow_observer_) {
+    flow_observer_->set_flow_rate(current_flow_rate_);
+  }
+
   // Log periodically (every ~5 seconds for debugging)
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
     last_log_ms = now;
-    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, V=%.1f mL, t=%.1f s",
-             running_ ? "ON" : "OFF", current_flow_rate_, total_volume_, run_time_);
+    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, V=%.1f mL, t=%.1f s, P=%.1f bar",
+             running_ ? "ON" : "OFF", current_flow_rate_, total_volume_, run_time_,
+             puck_pressure_bar_);
   }
 }
 

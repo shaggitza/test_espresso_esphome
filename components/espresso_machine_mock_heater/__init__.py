@@ -7,13 +7,19 @@ between the mock and real hardware — it reads the same sensor ID and writes to
 the same output ID.
 
 Thermal Model:
-    dT/dt = (duty × P − h × (T − T_amb)) / C
+    dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × (T − T_inlet)) / C
 
-    duty   = 0.0–1.0 output from PID (heat_output)
-    P      = heater power [W]
-    C      = thermal mass [J/°C]  (≈ mass × specific_heat)
-    h      = heat-loss coefficient [W/°C]
-    T_amb  = ambient temperature [°C]
+    duty     = 0.0–1.0 output from PID (heat_output)
+    P        = heater power [W]
+    C        = thermal mass [J/°C]  default: 800g Al + 20mL water ≈ 800 J/°C
+    h        = heat-loss coefficient [W/°C]
+    T_amb    = ambient temperature [°C]
+    Q        = water flow rate [mL/s] from mock pump (IFlowObserver)
+    Cp       = 4.186 J/(mL·°C) (specific heat of water)
+    T_inlet  = water inlet temperature [°C]
+
+A duty_sensor can be wired to expose the SSR duty cycle (0–100%) to HA,
+showing how rapidly the SSR is switching during PID control.
 
 All physics parameters are exposed as HA number entities — adjustable without
 reflashing. The ODE is integrated in loop() every ~10 ms using forward Euler.
@@ -25,13 +31,16 @@ Example usage:
       initial_temperature: 25.0
       ambient_temperature: 25.0
       power_watts: 1200.0
-      thermal_mass_j_per_c: 1256.0
+      thermal_mass_j_per_c: 800.0
       heat_loss_w_per_c: 1.7
+      water_inlet_temp_c: 20.0
       temperature_sensor:
         id: thermoblock_temp
         name: "Thermoblock Temperature"
       output:
         id: heater_ssr
+      duty_sensor:
+        name: "Heater SSR Duty"
 """
 
 import esphome.codegen as cg
@@ -70,6 +79,8 @@ CONF_AMBIENT_TEMPERATURE = "ambient_temperature"
 CONF_POWER_WATTS = "power_watts"
 CONF_THERMAL_MASS_J_PER_C = "thermal_mass_j_per_c"
 CONF_HEAT_LOSS_W_PER_C = "heat_loss_w_per_c"
+CONF_WATER_INLET_TEMP_C = "water_inlet_temp_c"
+CONF_DUTY_SENSOR = "duty_sensor"
 
 # Number entity config keys for runtime tuning
 CONF_POWER_NUMBER = "power_number"
@@ -107,14 +118,21 @@ CONFIG_SCHEMA = cv.Schema(
         # Initial and ambient temperatures
         cv.Optional(CONF_INITIAL_TEMPERATURE, default=25.0): cv.float_,
         cv.Optional(CONF_AMBIENT_TEMPERATURE, default=25.0): cv.float_,
-        # Physics parameters (defaults model a ~300g thermoblock at 1.2kW)
+        # Physics parameters (defaults: 800g Al block + 20mL water at 1.2 kW)
         cv.Optional(CONF_POWER_WATTS, default=1200.0): cv.positive_float,
-        cv.Optional(CONF_THERMAL_MASS_J_PER_C, default=1256.0): cv.positive_float,
+        cv.Optional(CONF_THERMAL_MASS_J_PER_C, default=800.0): cv.positive_float,
         cv.Optional(CONF_HEAT_LOSS_W_PER_C, default=1.7): cv.positive_float,
+        cv.Optional(CONF_WATER_INLET_TEMP_C, default=20.0): cv.float_,
         # Output sub-entity (what the PID's heat_output references)
         cv.Required(CONF_OUTPUT): OUTPUT_SCHEMA,
         # Temperature sensor sub-entity (what the PID's sensor references)
         cv.Required(CONF_TEMPERATURE_SENSOR): TEMPERATURE_SENSOR_SCHEMA,
+        # Optional duty-cycle sensor — publishes SSR duty 0–100% at ~4 Hz
+        cv.Optional(CONF_DUTY_SENSOR): sensor.sensor_schema(
+            unit_of_measurement="%",
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
         # Optional HA number entities for runtime tuning
         cv.Optional(CONF_POWER_NUMBER): number.number_schema(MockHeaterNumber).extend(
             cv.COMPONENT_SCHEMA
@@ -142,6 +160,7 @@ async def to_code(config):
     cg.add(var.set_power_watts(config[CONF_POWER_WATTS]))
     cg.add(var.set_thermal_mass(config[CONF_THERMAL_MASS_J_PER_C]))
     cg.add(var.set_heat_loss(config[CONF_HEAT_LOSS_W_PER_C]))
+    cg.add(var.set_water_inlet_temp(config[CONF_WATER_INLET_TEMP_C]))
 
     # Create and register the output sub-entity
     out_conf = config[CONF_OUTPUT]
@@ -157,6 +176,11 @@ async def to_code(config):
     await cg.register_component(sens_var, sens_conf)
     cg.add(var.set_temperature_sensor(sens_var))
     cg.add(sens_var.set_parent(var))
+
+    # Optional duty-cycle sensor — shows SSR switching intensity in HA
+    if CONF_DUTY_SENSOR in config:
+        duty_sens = await sensor.new_sensor(config[CONF_DUTY_SENSOR])
+        cg.add(var.set_duty_sensor(duty_sens))
 
     # Optional runtime-tunable number entities
     if CONF_POWER_NUMBER in config:

@@ -53,5 +53,15 @@ class IFlowMeter {
   virtual ~IFlowMeter() = default;
 };
 
+// ---------------------------------------------------------------------------
+// IFlowObserver — receives flow rate updates (used by mock heater to model
+// thermoblock cooling when water is flowing through the machine)
+// ---------------------------------------------------------------------------
+class IFlowObserver {
+ public:
+  virtual void set_flow_rate(float flow_ml_s) = 0;
+  virtual ~IFlowObserver() = default;
+};
+
 }  // namespace espresso_machine
 }  // namespace esphome

@@ -23,6 +23,7 @@ class Grinder;  // forward declaration
 class GrinderTimeNumber : public number::Number {
  public:
   GrinderTimeNumber() = default;
+  explicit GrinderTimeNumber(Grinder *parent) : parent_(parent) {}
   void set_parent(Grinder *parent) { parent_ = parent; }
 
  protected:

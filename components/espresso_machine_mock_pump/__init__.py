@@ -5,16 +5,24 @@ This component provides a fully simulated pump that replaces both the physical
 pump relay and flow meter. The orchestrator sees no difference — it controls
 the pump via IPump interface and reads flow data from the same interface.
 
-Puck Wetting Model:
-    Q(t) = Q_nom × (1 − exp(−t/τ))
+Pump Curve + Pressure-Weighted Wetting Model:
+    Q_ss  = Q_max × (1 − P_puck / P_stall)           [linear pump curve]
+    Q_max = nominal_flow / (1 − 9 / pump_max_pressure_bar)  [calibrated at 9 bar]
+    Q(t)  = Q_ss × (1 − exp(−t / effective_τ))
 
-    Q_nom = nominal flow rate [mL/s]
-    τ     = puck time constant [s] (how quickly flow ramps after pump start)
-    t     = time since pump started [s]
+    Wetting time scales with puck resistance:
+    effective_τ = puck_time_constant × (P_puck / 9 bar)
 
-This models the physical behavior where flow starts near zero (dry puck
-compresses under pressure) and ramps exponentially to the nominal rate as
-channels form through the coffee bed.
+    nominal_flow          = flow at 9 bar rated pressure [mL/s]
+    pump_max_pressure_bar = pump stall pressure [bar]  (Ulka EP5 ≈ 15 bar)
+    puck_pressure_bar     = puck back-pressure resistance [bar]
+    puck_time_constant_s  = wetting time constant at 9 bar reference [s]
+
+Flow effects of different puck resistances (P_stall = 15 bar, Q_nom = 4 mL/s):
+    6 bar  (easy puck)  → Q_ss = 6.0 mL/s, wetting τ_eff = 6.7 s (shorter)
+    9 bar  (nominal)    → Q_ss = 4.0 mL/s, wetting τ_eff = 10 s
+    12 bar (hard puck)  → Q_ss = 2.0 mL/s, wetting τ_eff = 13.3 s (longer)
+    15 bar (stall)      → Q_ss = 0          (pump stalls, only wetting)
 
 All physics parameters are exposed as HA number entities — adjustable without
 reflashing.
@@ -25,7 +33,9 @@ Example usage:
       id: main_pump
       name: "Mock Pump"
       nominal_flow_ml_per_s: 4.0
+      pump_max_pressure_bar: 15.0
       puck_time_constant_s: 10.0
+      puck_pressure_bar: 9.0
       rate_sensor:
         name: "Brew Flow Rate"
       total_sensor:
@@ -38,7 +48,6 @@ from esphome import automation
 from esphome.components import switch, sensor, number
 from esphome.const import (
     CONF_ID,
-    CONF_NAME,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
 )
@@ -47,6 +56,7 @@ CODEOWNERS = ["@shaggitza"]
 AUTO_LOAD = ["switch", "sensor", "number"]
 
 espresso_machine_mock_pump_ns = cg.esphome_ns.namespace("espresso_machine_mock_pump")
+
 MockPump = espresso_machine_mock_pump_ns.class_(
     "MockPump", switch.Switch, cg.Component
 )
@@ -57,21 +67,36 @@ ResetAction = espresso_machine_mock_pump_ns.class_("ResetAction", automation.Act
 
 # Config keys
 CONF_NOMINAL_FLOW_ML_PER_S = "nominal_flow_ml_per_s"
+CONF_PUMP_MAX_PRESSURE_BAR = "pump_max_pressure_bar"
 CONF_PUCK_TIME_CONSTANT_S = "puck_time_constant_s"
+CONF_PUCK_PRESSURE_BAR = "puck_pressure_bar"
+CONF_MOCK_HEATER = "mock_heater"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
 
 # Number entity config keys for runtime tuning
 CONF_NOMINAL_FLOW_NUMBER = "nominal_flow_number"
+CONF_PUMP_MAX_PRESSURE_NUMBER = "pump_max_pressure_number"
 CONF_PUCK_TIME_CONSTANT_NUMBER = "puck_time_constant_number"
+CONF_PUCK_PRESSURE_NUMBER = "puck_pressure_number"
 
 CONFIG_SCHEMA = (
     switch.switch_schema(MockPump)
     .extend(
         {
-            # Physics parameters (defaults model a typical espresso extraction)
+            # Pump hardware: flow at 9 bar rated pressure
             cv.Optional(CONF_NOMINAL_FLOW_ML_PER_S, default=4.0): cv.positive_float,
+            # Pump stall pressure (Ulka EP5 ≈ 15 bar). All flow ceases above this.
+            # Must be strictly greater than the 9 bar rated pressure.
+            cv.Optional(CONF_PUMP_MAX_PRESSURE_BAR, default=15.0): cv.All(
+                cv.positive_float, cv.Range(min=9.01)
+            ),
+            # Puck wetting time constant at 9 bar (scales proportionally with pressure)
             cv.Optional(CONF_PUCK_TIME_CONSTANT_S, default=10.0): cv.positive_float,
+            # Puck back-pressure. Affects both steady-state flow and wetting duration.
+            cv.Optional(CONF_PUCK_PRESSURE_BAR, default=9.0): cv.positive_float,
+            # Optional link to mock heater — drives flow-based thermoblock cooling
+            cv.Optional(CONF_MOCK_HEATER): cv.use_id(cg.Component),
             # Flow sensor sub-entities (same interface as espresso_machine_flow_meter)
             cv.Optional(CONF_RATE_SENSOR): sensor.sensor_schema(
                 unit_of_measurement="mL/s",
@@ -87,7 +112,13 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_NOMINAL_FLOW_NUMBER): number.number_schema(
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
+            cv.Optional(CONF_PUMP_MAX_PRESSURE_NUMBER): number.number_schema(
+                MockPumpNumber
+            ).extend(cv.COMPONENT_SCHEMA),
             cv.Optional(CONF_PUCK_TIME_CONSTANT_NUMBER): number.number_schema(
+                MockPumpNumber
+            ).extend(cv.COMPONENT_SCHEMA),
+            cv.Optional(CONF_PUCK_PRESSURE_NUMBER): number.number_schema(
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
         }
@@ -115,7 +146,14 @@ async def to_code(config):
 
     # Set physics parameters
     cg.add(var.set_nominal_flow(config[CONF_NOMINAL_FLOW_ML_PER_S]))
+    cg.add(var.set_pump_max_pressure(config[CONF_PUMP_MAX_PRESSURE_BAR]))
     cg.add(var.set_puck_time_constant(config[CONF_PUCK_TIME_CONSTANT_S]))
+    cg.add(var.set_puck_pressure(config[CONF_PUCK_PRESSURE_BAR]))
+
+    # Wire to mock heater for flow-based thermoblock cooling
+    if CONF_MOCK_HEATER in config:
+        heater = await cg.get_variable(config[CONF_MOCK_HEATER])
+        cg.add(var.set_heater(heater))
 
     # Create and register flow rate sensor
     if CONF_RATE_SENSOR in config:
@@ -137,6 +175,15 @@ async def to_code(config):
         cg.add(var.set_nominal_flow_number(num_var))
         cg.add(num_var.set_parent(var))
 
+    if CONF_PUMP_MAX_PRESSURE_NUMBER in config:
+        num_conf = config[CONF_PUMP_MAX_PRESSURE_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=10.0, max_value=20.0, step=0.5
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_pump_max_pressure_number(num_var))
+        cg.add(num_var.set_parent(var))
+
     if CONF_PUCK_TIME_CONSTANT_NUMBER in config:
         num_conf = config[CONF_PUCK_TIME_CONSTANT_NUMBER]
         num_var = await number.new_number(
@@ -144,4 +191,13 @@ async def to_code(config):
         )
         await cg.register_component(num_var, num_conf)
         cg.add(var.set_puck_time_constant_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_PUCK_PRESSURE_NUMBER in config:
+        num_conf = config[CONF_PUCK_PRESSURE_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.0, max_value=16.0, step=0.5
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_puck_pressure_number(num_var))
         cg.add(num_var.set_parent(var))

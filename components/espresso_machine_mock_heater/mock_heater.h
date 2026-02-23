@@ -5,6 +5,7 @@
 #include "esphome/components/output/float_output.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/number/number.h"
+#include "../espresso_machine/interfaces.h"
 
 namespace esphome {
 namespace espresso_machine_mock_heater {
@@ -69,7 +70,7 @@ class MockHeaterNumber : public number::Number, public Component {
 // ---------------------------------------------------------------------------
 // MockHeater — main component managing thermal simulation
 // ---------------------------------------------------------------------------
-class MockHeater : public Component {
+class MockHeater : public Component, public espresso_machine::IFlowObserver {
  public:
   // Configuration setters (called from generated code)
   void set_initial_temperature(float t) { temperature_ = t; }
@@ -77,9 +78,14 @@ class MockHeater : public Component {
   void set_power_watts(float p) { power_watts_ = p; }
   void set_thermal_mass(float c) { thermal_mass_ = c; }
   void set_heat_loss(float h) { heat_loss_ = h; }
+  void set_water_inlet_temp(float t) { water_inlet_temp_ = t; }
+
+  // Called by MockPump each loop tick to drive flow-based cooling (IFlowObserver)
+  void set_flow_rate(float flow_rate_ml_s) override { flow_rate_ = flow_rate_ml_s; }
 
   void set_output(MockHeaterOutput *out) { output_ = out; }
   void set_temperature_sensor(MockHeaterTempSensor *sens) { temp_sensor_ = sens; }
+  void set_duty_sensor(sensor::Sensor *s) { duty_sensor_ = s; }
 
   // Runtime tuning number entities
   void set_power_number(MockHeaterNumber *num) {
@@ -111,6 +117,8 @@ class MockHeater : public Component {
   float get_thermal_mass() const { return thermal_mass_; }
   float get_heat_loss() const { return heat_loss_; }
   float get_ambient_temp() const { return ambient_temp_; }
+  float get_water_inlet_temp() const { return water_inlet_temp_; }
+  float get_flow_rate() const { return flow_rate_; }
 
   void update_power_watts(float v) { power_watts_ = v; }
   void update_thermal_mass(float v) { thermal_mass_ = v; }
@@ -119,15 +127,21 @@ class MockHeater : public Component {
 
  protected:
   // Physics parameters
+  // Default: 800g Al × 0.897 J/(g·°C) + 20mL water × 4.186 J/(mL·°C) ≈ 800 J/°C
   float temperature_{25.0f};       // Current simulated temperature [°C]
   float ambient_temp_{25.0f};      // Ambient temperature [°C]
   float power_watts_{1200.0f};     // Heater power [W]
-  float thermal_mass_{1256.0f};    // Thermal mass [J/°C]
+  float thermal_mass_{800.0f};     // Thermal mass [J/°C] (Al block + water)
   float heat_loss_{1.7f};          // Heat-loss coefficient [W/°C]
+  float water_inlet_temp_{20.0f};  // Cold-water inlet temperature [°C]
+
+  // Flow rate pushed by MockPump each tick [mL/s]
+  float flow_rate_{0.0f};
 
   // Sub-entities
   MockHeaterOutput *output_{nullptr};
   MockHeaterTempSensor *temp_sensor_{nullptr};
+  sensor::Sensor *duty_sensor_{nullptr};
 
   // Runtime tuning numbers
   MockHeaterNumber *power_number_{nullptr};
