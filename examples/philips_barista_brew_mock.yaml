@@ -323,16 +323,12 @@ espresso_machine:
     pump: main_pump
     valve: brew_valve
     purge_valve: purge_valve
-    target_temperature: 90°C
+    # target_temperature omitted — managed from HA directly (PID entity)
     temperature_profile:
       offset: 5°C
       ramp_time: 20s
     flow_max: 40ml
     flow_offset: 20ml
-    pre_infusion:
-      enabled: true
-      volume_ml: 5ml
-      hold_time: 5s
     # cleanup_script not yet implemented — commented out for now
 
   steam:
@@ -373,6 +369,26 @@ espresso_machine:
 #   - file: "gfonts://Roboto Mono"
 #     id: font_small
 #     size: 12
+
+# =============================================================================
+# POWER SWITCH — master on/off toggle (same as real config)
+# =============================================================================
+switch:
+  - platform: template
+    id: machine_power
+    name: "Espresso Machine Power"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: id(my_espresso).machine_on();
+      - climate.control:
+          id: main_heater
+          mode: heat
+    turn_off_action:
+      - lambda: id(my_espresso).machine_off();
+      - climate.control:
+          id: main_heater
+          mode: "off"
 
 # =============================================================================
 # BUTTONS — same as real config

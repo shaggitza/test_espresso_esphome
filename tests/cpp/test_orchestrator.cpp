@@ -78,6 +78,7 @@ struct OrchestratorFixture {
 
     g_mock_millis = 0;
     machine.setup();
+    machine.machine_on();  // power on so brew/steam actions are accepted
   }
 };
 
@@ -529,6 +530,7 @@ struct OrchestratorWithHeaterFixture {
 
     g_mock_millis = 0;
     machine.setup();
+    machine.machine_on();  // power on so brew/steam actions are accepted
   }
 };
 
@@ -630,4 +632,177 @@ TEST(Orchestrator, SteamStopDuringHeatingResetsHeaterSetpoint) {
   f.machine.steam_stop();
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
   EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);  // lowered to cool_down_to
+}
+
+// ---------------------------------------------------------------------------
+// Power on / off
+// ---------------------------------------------------------------------------
+
+// Dedicated fixture that does NOT call machine_on() — used to test the off state.
+struct OrchestratorOffFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  EspressoMachine machine;
+
+  OrchestratorOffFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    g_mock_millis = 0;
+    machine.setup();
+    // NOTE: machine_on() intentionally NOT called — machine starts off
+  }
+};
+
+TEST(Power, MachineStartsOffByDefault) {
+  OrchestratorOffFixture f;
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+TEST(Power, MachineOnSetsFlag) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  EXPECT_TRUE(f.machine.is_powered_on());
+}
+
+TEST(Power, MachineOffClearsFlag) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.machine_off();
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+TEST(Power, BrewStartIgnoredWhenOff) {
+  OrchestratorOffFixture f;
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Power, SteamStartIgnoredWhenOff) {
+  OrchestratorOffFixture f;
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Power, BrewStartAllowedAfterMachineOn) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+TEST(Power, SteamStartAllowedAfterMachineOn) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::STEAMING);
+}
+
+TEST(Power, MachineOffStopsActiveBrew) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (pump on, valve open)
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+
+  f.machine.machine_off();
+  // Must immediately return to IDLE with all hardware off
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+TEST(Power, MachineOffDuringSteamingInitiatesPurge) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (steam valve open, pump on)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+
+  f.machine.machine_off();
+  // steam_stop() was called internally — should now be in COOLING with purge valve open
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);
+  EXPECT_FALSE(f.steam_valve.open_state);
+  EXPECT_FALSE(f.steam_pump.running);
+  // Mode is still STEAMING (completing cooldown) but machine is marked off
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+TEST(Power, PurgeCompletesAfterMachineOffDuringSteaming) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.steam_start();
+  f.machine.loop();     // HEATING → STEAMING
+  f.machine.machine_off();   // STEAMING → COOLING (purge valve open)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  f.machine.loop();     // COOLING → CLEANUP
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::CLEANUP);
+  f.machine.loop();     // CLEANUP → IDLE (purge valve closes)
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+}
+
+TEST(Power, MachineOffDuringHeatUpCancelsImmediately) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.steam_start();
+  // Still in HEATING (no loop tick) → machine_off should cancel immediately
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  f.machine.machine_off();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+TEST(Power, MachineCanBeReusedAfterOffOnCycle) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.brew_start();
+  f.machine.machine_off();  // stop mid-brew
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+
+  // Turn machine back on and verify new brew works
+  f.machine.machine_on();
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+TEST(Power, MachineOnWhilePurgingAllowsNewOpsAfterIdle) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.steam_start();
+  f.machine.loop();          // HEATING → STEAMING
+  f.machine.machine_off();   // STEAMING → COOLING (purge starts)
+
+  // Turn back on mid-purge
+  f.machine.machine_on();
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  // Must NOT be able to start new operations while purge is still running
+  f.machine.brew_start();
+  EXPECT_NE(f.machine.get_mode(), EspressoMode::BREWING);  // still in STEAMING (COOLING)
+
+  // Complete the purge
+  f.machine.loop();   // COOLING → CLEANUP
+  f.machine.loop();   // CLEANUP → IDLE
+
+  // Now a new brew should work
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
 }

@@ -65,9 +65,13 @@ async def to_code(config):
 
     grinder_type = config[CONF_TYPE]
     if grinder_type == "relay":
-        cg.add(var.set_grinder_type(cg.RawExpression("espresso_machine_grinder::GrinderType::RELAY")))
+        cg.add(var.set_grinder_type(
+            cg.RawExpression("espresso_machine_grinder::GrinderType::RELAY")
+        ))
     else:
-        cg.add(var.set_grinder_type(cg.RawExpression("espresso_machine_grinder::GrinderType::NONE")))
+        cg.add(var.set_grinder_type(
+            cg.RawExpression("espresso_machine_grinder::GrinderType::NONE")
+        ))
 
     cg.add(
         var.set_default_grind_time(config[CONF_DEFAULT_GRIND_TIME].total_milliseconds)

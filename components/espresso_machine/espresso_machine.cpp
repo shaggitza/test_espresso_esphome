@@ -36,9 +36,62 @@ void EspressoMachine::loop() {
 }
 
 // ---------------------------------------------------------------------------
+// Power control
+// ---------------------------------------------------------------------------
+void EspressoMachine::machine_on() {
+  if (powered_on_) {
+    ESP_LOGD(TAG, "machine_on: already on");
+    return;
+  }
+  powered_on_ = true;
+  ESP_LOGI(TAG, "Machine ON");
+}
+
+void EspressoMachine::machine_off() {
+  if (!powered_on_) {
+    ESP_LOGD(TAG, "machine_off: already off");
+    return;
+  }
+  ESP_LOGI(TAG, "Machine OFF");
+  powered_on_ = false;
+
+  switch (mode_) {
+    case EspressoMode::BREWING:
+      // Stop brew immediately — it is safe to interrupt at any point.
+      ESP_LOGI(TAG, "Machine OFF: stopping active brew");
+      safe_stop_all_();
+      brew_state_ = BrewState::IDLE;
+      mode_ = EspressoMode::IDLE;
+      break;
+
+    case EspressoMode::STEAMING:
+      if (steam_state_ == SteamState::STEAMING || steam_state_ == SteamState::HEATING) {
+        // Initiate cool-down + purge before shutting down (safety: prevents steam burns
+        // if the user turns the machine off while steam pressure is still present).
+        ESP_LOGI(TAG, "Machine OFF: initiating steam cool-down + purge sequence");
+        steam_stop();  // enters COOLING (opens purge valve, lowers heater setpoint)
+      } else {
+        // Already in COOLING or CLEANUP — the state machine will reach IDLE on its own.
+        ESP_LOGI(TAG, "Machine OFF: steam purge already in progress — completing before shutdown");
+      }
+      // Do NOT force mode_ = IDLE here; the state machine loop must complete the purge.
+      break;
+
+    case EspressoMode::IDLE:
+    default:
+      // Nothing active — machine hardware is already safe.
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public actions
 // ---------------------------------------------------------------------------
 void EspressoMachine::brew_start() {
+  if (!powered_on_) {
+    ESP_LOGW(TAG, "brew_start ignored: machine is off");
+    return;
+  }
   if (mode_ != EspressoMode::IDLE) {
     ESP_LOGW(TAG, "brew_start ignored: machine is %s", mode_name());
     return;
@@ -74,6 +127,10 @@ void EspressoMachine::brew_stop() {
 }
 
 void EspressoMachine::steam_start() {
+  if (!powered_on_) {
+    ESP_LOGW(TAG, "steam_start ignored: machine is off");
+    return;
+  }
   if (mode_ != EspressoMode::IDLE) {
     ESP_LOGW(TAG, "steam_start ignored: machine is %s", mode_name());
     return;
