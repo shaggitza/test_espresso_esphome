@@ -1,0 +1,46 @@
+# =============================================================================
+# AppDaemon apps.yaml — Espresso Shot History configuration
+# =============================================================================
+#
+# Place this file in your AppDaemon `apps/` directory (or merge its contents
+# into your existing `apps.yaml`).
+#
+# Adjust `mode_entity`, `duration_entity`, `yield_entity`, and `temp_entity`
+# to match the actual entity IDs of your ESPHome device.
+#
+# Real hardware (philips_barista_brew.yaml):
+#   The entity IDs below use the `philips_barista_brew` device prefix.
+#
+# Mock simulation (philips_barista_brew_mock.yaml):
+#   Change `philips_barista_brew` → `philips_barista_brew_mock` in every entity.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Real hardware — uncomment this block when running philips_barista_brew.yaml
+# ---------------------------------------------------------------------------
+espresso_shot_history:
+  module: shot_history
+  class: ShotHistory
+  # Entity IDs for the real espresso machine
+  mode_entity: text_sensor.philips_barista_brew_machine_mode
+  duration_entity: sensor.philips_barista_brew_last_shot_duration
+  yield_entity: sensor.philips_barista_brew_last_shot_yield
+  temp_entity: sensor.philips_barista_brew_thermoblock_temperature
+  # How many shots to keep in the rolling log
+  max_shots: 20
+  # Seconds of padding added before/after each shot for the graph window
+  graph_padding_sec: 15
+
+# ---------------------------------------------------------------------------
+# Mock simulation — uncomment this block (and comment out the real block)
+# when running philips_barista_brew_mock.yaml instead.
+# ---------------------------------------------------------------------------
+# espresso_shot_history:
+#   module: shot_history
+#   class: ShotHistory
+#   mode_entity: text_sensor.philips_barista_brew_mock_machine_mode
+#   duration_entity: sensor.philips_barista_brew_mock_last_shot_duration
+#   yield_entity: sensor.philips_barista_brew_mock_last_shot_yield
+#   temp_entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+#   max_shots: 20
+#   graph_padding_sec: 15

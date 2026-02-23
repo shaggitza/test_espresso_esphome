@@ -1,0 +1,87 @@
+# =============================================================================
+# Home Assistant Template Sensors — Espresso Machine Shot Viewer
+# =============================================================================
+#
+# Add the contents below to your `configuration.yaml` (or as a package).
+# These sensors compute the graph span and time offsets needed by the shot
+# history cards in the dashboard, based on the two input_datetime helpers.
+#
+# All sensors update every 10 seconds; they only affect the graph display
+# and have negligible performance impact.
+# =============================================================================
+
+template:
+  - sensor:
+      # --- Shot span in seconds (used for apexcharts-card graph_span) ----------
+      - name: "espresso_selected_shot_span_sec"
+        unique_id: espresso_selected_shot_span_sec
+        unit_of_measurement: "s"
+        state_class: measurement
+        state: >-
+          {% set start = states('input_datetime.espresso_shot_view_start') %}
+          {% set end   = states('input_datetime.espresso_shot_view_end') %}
+          {% if start not in ('unknown','unavailable','') and
+                end   not in ('unknown','unavailable','') %}
+            {{ ([0, (as_timestamp(end) - as_timestamp(start)) | int] | max) + 60 }}
+          {% else %}
+            180
+          {% endif %}
+
+      # --- Seconds-ago offset for the shot's END (used in apexcharts span.end) -
+      # Returns how many seconds ago the selected shot ended (positive integer).
+      # apexcharts-card span.end accepts a template that returns "-Nsec".
+      - name: "espresso_selected_shot_end_offset"
+        unique_id: espresso_selected_shot_end_offset
+        state: >-
+          {% set end = states('input_datetime.espresso_shot_view_end') %}
+          {% if end not in ('unknown','unavailable','') %}
+            {% set secs = (as_timestamp(now()) - as_timestamp(end)) | int %}
+            -{{ [0, secs] | max }}sec
+          {% else %}
+            -0sec
+          {% endif %}
+
+      # --- Human-readable label for the currently selected shot ----------------
+      - name: "espresso_selected_shot_label"
+        unique_id: espresso_selected_shot_label
+        state: "{{ states('input_select.espresso_shot_viewer') }}"
+
+      # --- Shot counter (number of shots recorded) -----------------------------
+      - name: "espresso_shot_count"
+        unique_id: espresso_shot_count
+        unit_of_measurement: "shots"
+        state_class: total_increasing
+        state: >-
+          {% set log = states('input_text.espresso_shot_log') %}
+          {% if log not in ('unknown','unavailable','[]','') %}
+            {{ log | from_json | length }}
+          {% else %}
+            0
+          {% endif %}
+
+      # --- Last shot stats from JSON log (most recent entry) -------------------
+      - name: "espresso_last_logged_duration"
+        unique_id: espresso_last_logged_duration
+        unit_of_measurement: "s"
+        state_class: measurement
+        state: >-
+          {% set log = states('input_text.espresso_shot_log') %}
+          {% if log not in ('unknown','unavailable','[]','') %}
+            {% set shots = log | from_json %}
+            {{ shots[-1].duration_s | round(1) if shots else 0 }}
+          {% else %}
+            0
+          {% endif %}
+
+      - name: "espresso_last_logged_yield"
+        unique_id: espresso_last_logged_yield
+        unit_of_measurement: "mL"
+        state_class: measurement
+        state: >-
+          {% set log = states('input_text.espresso_shot_log') %}
+          {% if log not in ('unknown','unavailable','[]','') %}
+            {% set shots = log | from_json %}
+            {{ shots[-1].yield_ml | round(1) if shots else 0 }}
+          {% else %}
+            0
+          {% endif %}

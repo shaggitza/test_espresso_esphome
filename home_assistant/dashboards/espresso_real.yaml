@@ -1,0 +1,457 @@
+# =============================================================================
+# Lovelace Dashboard — Espresso Machine (Real Hardware)
+# Target device: philips_barista_brew.yaml
+# =============================================================================
+#
+# HOW TO ADD THIS DASHBOARD TO HOME ASSISTANT
+# -------------------------------------------
+# Option A — UI Editor (easiest):
+#   1. Settings → Dashboards → Add Dashboard → "Empty dashboard"
+#   2. Name it "Espresso Machine"
+#   3. Open the dashboard, click the three-dot menu → "Edit Dashboard"
+#   4. Click the three-dot menu again → "Raw configuration editor"
+#   5. Paste the YAML below (starting from `title:`) and click Save.
+#
+# Option B — File-based (recommended for version-controlled setups):
+#   1. In lovelace_dashboards: in configuration.yaml add:
+#        espresso:
+#          mode: yaml
+#          filename: espresso_dashboard.yaml
+#          title: "Espresso Machine"
+#          icon: mdi:coffee-maker
+#   2. Copy this file to your HA config directory as espresso_dashboard.yaml.
+#   3. Restart HA.
+#
+# REQUIRED HACS CUSTOM CARDS
+# --------------------------
+# Install these via HACS → Frontend:
+#   1. mushroom           — https://github.com/piitaya/lovelace-mushroom
+#   2. mini-graph-card    — https://github.com/kalkih/mini-graph-card
+#   3. apexcharts-card    — https://github.com/RomRider/apexcharts-card
+#   4. layout-card        — https://github.com/thomasloven/lovelace-layout-card (optional)
+#
+# ENTITY PREFIXES
+# ---------------
+# All entities below use the prefix: philips_barista_brew
+# If your ESPHome device has a different name, search-and-replace that prefix.
+#
+# SHOT HISTORY SETUP
+# ------------------
+# The shot history section requires the AppDaemon app and HA helpers from:
+#   home_assistant/appdaemon/shot_history.py
+#   home_assistant/helpers.yaml
+#   home_assistant/template_sensors.yaml
+# Follow CUSTOM_UI.md for step-by-step setup instructions.
+# =============================================================================
+
+title: ☕ Espresso Machine
+views:
+  # ===========================================================================
+  # VIEW 1 — Main Control
+  # ===========================================================================
+  - title: Control
+    icon: mdi:coffee-maker
+    path: control
+    type: custom:masonry-layout
+    cards:
+
+      # -----------------------------------------------------------------------
+      # STATUS HEADER — machine mode chip + temperature chip
+      # -----------------------------------------------------------------------
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            icon: mdi:coffee-maker-check
+            icon_color: >-
+              {% set mode = states('text_sensor.philips_barista_brew_machine_mode') %}
+              {% if mode == 'brewing' %} amber
+              {% elif mode == 'steaming' %} blue
+              {% else %} green
+              {% endif %}
+            content: >-
+              {% set mode = states('text_sensor.philips_barista_brew_machine_mode') | upper %}
+              {{ mode if mode not in ('UNKNOWN','UNAVAILABLE') else 'OFFLINE' }}
+            tap_action:
+              action: none
+          - type: template
+            icon: mdi:thermometer
+            icon_color: >-
+              {% set t = states('sensor.philips_barista_brew_thermoblock_temperature') | float(0) %}
+              {% if t >= 125 %} red
+              {% elif t >= 85 %} amber
+              {% else %} blue
+              {% endif %}
+            content: >-
+              {{ states('sensor.philips_barista_brew_thermoblock_temperature') | round(1) }} °C
+            tap_action:
+              action: none
+          - type: template
+            icon: mdi:water
+            icon_color: teal
+            content: >-
+              {{ states('sensor.philips_barista_brew_brew_flow_total') | round(1) }} mL
+            tap_action:
+              action: none
+
+      # -----------------------------------------------------------------------
+      # HEATER CLIMATE CARD — set brew/steam temperature
+      # -----------------------------------------------------------------------
+      - type: custom:mushroom-climate-card
+        entity: climate.philips_barista_brew_main_heater
+        name: Heater
+        show_temperature_control: true
+        hvac_modes:
+          - heat
+          - "off"
+        fill_container: false
+
+      # -----------------------------------------------------------------------
+      # TEMPERATURE MINI-GRAPH — last 30 minutes
+      # -----------------------------------------------------------------------
+      - type: custom:mini-graph-card
+        name: Thermoblock Temperature
+        icon: mdi:thermometer
+        entities:
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Temperature
+            color: "#e74c3c"
+        hours_to_show: 0.5
+        points_per_hour: 120
+        line_width: 2
+        animate: true
+        show:
+          labels: true
+          points: false
+          fill: true
+        color_thresholds:
+          - value: 80
+            color: "#27ae60"
+          - value: 100
+            color: "#f39c12"
+          - value: 130
+            color: "#e74c3c"
+
+      # -----------------------------------------------------------------------
+      # MAIN ACTION BUTTONS — brew and steam
+      # -----------------------------------------------------------------------
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-template-card
+            primary: Brew
+            secondary: Start
+            icon: mdi:play-circle
+            icon_color: green
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.philips_barista_brew_brew_start
+            hold_action:
+              action: none
+
+          - type: custom:mushroom-template-card
+            primary: Brew
+            secondary: Stop
+            icon: mdi:stop-circle
+            icon_color: red
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.philips_barista_brew_brew_stop
+            hold_action:
+              action: none
+
+          - type: custom:mushroom-template-card
+            primary: Steam
+            secondary: Start
+            icon: mdi:play-circle-outline
+            icon_color: blue
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.philips_barista_brew_steam_start
+            hold_action:
+              action: none
+
+          - type: custom:mushroom-template-card
+            primary: Steam
+            secondary: Stop
+            icon: mdi:stop-circle-outline
+            icon_color: orange
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.philips_barista_brew_steam_stop
+            hold_action:
+              action: none
+
+      # -----------------------------------------------------------------------
+      # GRINDER CONTROLS
+      # -----------------------------------------------------------------------
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-template-card
+            primary: Grinder
+            secondary: One-shot grind
+            icon: mdi:screw-machine-round-top
+            icon_color: brown
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.philips_barista_brew_grinder
+            hold_action:
+              action: none
+
+          - type: custom:mushroom-number-card
+            entity: number.philips_barista_brew_grind_time
+            name: Grind Time (ms)
+            display_mode: buttons
+            icon: mdi:timer-outline
+
+      # -----------------------------------------------------------------------
+      # LIVE SHOT FLOW GRAPH — flow rate + total volume
+      # -----------------------------------------------------------------------
+      - type: custom:mini-graph-card
+        name: Live Shot Flow
+        icon: mdi:water-pump
+        entities:
+          - entity: sensor.philips_barista_brew_brew_flow_rate
+            name: Flow Rate (mL/s)
+            color: "#3498db"
+          - entity: sensor.philips_barista_brew_brew_flow_total
+            name: Volume (mL)
+            color: "#2ecc71"
+            y_axis: secondary
+        hours_to_show: 0.083   # 5 minutes
+        points_per_hour: 720
+        line_width: 2
+        animate: true
+        show:
+          labels: true
+          points: false
+          legend: true
+          fill: false
+
+      # -----------------------------------------------------------------------
+      # LAST SHOT SUMMARY — glance card
+      # -----------------------------------------------------------------------
+      - type: glance
+        title: Last Shot
+        show_name: true
+        show_icon: true
+        show_state: true
+        entities:
+          - entity: sensor.philips_barista_brew_last_shot_duration
+            name: Duration (s)
+            icon: mdi:timer
+          - entity: sensor.philips_barista_brew_last_shot_yield
+            name: Yield (mL)
+            icon: mdi:cup
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Temp (°C)
+            icon: mdi:thermometer
+
+  # ===========================================================================
+  # VIEW 2 — Shot History
+  # ===========================================================================
+  - title: Shot History
+    icon: mdi:chart-timeline-variant
+    path: history
+    cards:
+
+      # -----------------------------------------------------------------------
+      # SHOT COUNT + TOTAL STATS
+      # -----------------------------------------------------------------------
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            icon: mdi:counter
+            icon_color: purple
+            content: "{{ states('sensor.espresso_shot_count') }} shots recorded"
+            tap_action:
+              action: none
+
+      # -----------------------------------------------------------------------
+      # SHOT LOG — scrollable markdown table
+      # -----------------------------------------------------------------------
+      - type: markdown
+        title: Shot Log
+        content: >-
+          {% set log = states('input_text.espresso_shot_log') %}
+          {% if log in ('unknown','unavailable','[]','') %}
+          _No shots recorded yet. Pull an espresso to start your history!_
+          {% else %}
+          {% set shots = log | from_json | reverse | list %}
+          | # | Date | Duration | Yield | Temp |
+          |---|------|----------|-------|------|
+          {% for s in shots %}
+          | {{ s.number }} | {{ as_datetime(s.start) | as_local | strftime('%m/%d %H:%M') }} | {{ s.duration_s | round(0) }}s | {{ s.yield_ml | round(1) }} mL | {{ s.temp_c | round(1) }} °C |
+          {% endfor %}
+          {% endif %}
+
+      # -----------------------------------------------------------------------
+      # SHOT SELECTOR — pick a shot to graph
+      # -----------------------------------------------------------------------
+      - type: entities
+        title: Inspect a Shot
+        entities:
+          - entity: input_select.espresso_shot_viewer
+            name: Select Shot
+            icon: mdi:magnify
+
+      # -----------------------------------------------------------------------
+      # TEMPERATURE DURING SELECTED SHOT
+      # -----------------------------------------------------------------------
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Temperature — Selected Shot
+          show_states: true
+          colorize_states: true
+        graph_span: "{{ states('sensor.espresso_selected_shot_span_sec') | int(180) }}sec"
+        span:
+          end: "{{ states('sensor.espresso_selected_shot_end_offset') }}"
+        series:
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Thermoblock (°C)
+            color: "#e74c3c"
+            stroke_width: 2
+            fill_raw: "last"
+            type: line
+        yaxis:
+          - id: temp
+            min: 50
+            max: 140
+            decimals: 1
+        apex_config:
+          chart:
+            animations:
+              enabled: false
+          stroke:
+            curve: smooth
+
+      # -----------------------------------------------------------------------
+      # FLOW RATE DURING SELECTED SHOT
+      # -----------------------------------------------------------------------
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Flow Rate — Selected Shot
+          show_states: true
+          colorize_states: true
+        graph_span: "{{ states('sensor.espresso_selected_shot_span_sec') | int(180) }}sec"
+        span:
+          end: "{{ states('sensor.espresso_selected_shot_end_offset') }}"
+        series:
+          - entity: sensor.philips_barista_brew_brew_flow_rate
+            name: Flow Rate (mL/s)
+            color: "#3498db"
+            stroke_width: 2
+            fill_raw: "last"
+            type: area
+          - entity: sensor.philips_barista_brew_brew_flow_total
+            name: Volume (mL)
+            color: "#2ecc71"
+            stroke_width: 2
+            fill_raw: "last"
+            type: line
+        apex_config:
+          chart:
+            animations:
+              enabled: false
+          stroke:
+            curve: stepline
+
+      # -----------------------------------------------------------------------
+      # SELECTED SHOT STATS — temperature history (full day context)
+      # -----------------------------------------------------------------------
+      - type: history-graph
+        title: Temperature — Last 2 Hours (context)
+        entities:
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Temperature
+        hours_to_show: 2
+        refresh_interval: 30
+
+  # ===========================================================================
+  # VIEW 3 — Advanced / Diagnostics
+  # ===========================================================================
+  - title: Advanced
+    icon: mdi:wrench
+    path: advanced
+    cards:
+
+      # -----------------------------------------------------------------------
+      # RAW VALVE SWITCHES
+      # -----------------------------------------------------------------------
+      - type: entities
+        title: Valves (Direct Control)
+        entities:
+          - entity: switch.philips_barista_brew_brew_valve
+            name: Brew Valve
+            icon: mdi:valve
+          - entity: switch.philips_barista_brew_steam_valve
+            name: Steam Valve
+            icon: mdi:valve
+          - entity: switch.philips_barista_brew_purge_valve
+            name: Purge / Drain Valve
+            icon: mdi:valve
+
+      # -----------------------------------------------------------------------
+      # PUMP DIRECT CONTROL
+      # -----------------------------------------------------------------------
+      - type: entities
+        title: Pump (Direct Control)
+        entities:
+          - entity: switch.philips_barista_brew_vibration_pump
+            name: Vibration Pump
+            icon: mdi:pump
+
+      # -----------------------------------------------------------------------
+      # DIAGNOSTIC SENSORS
+      # -----------------------------------------------------------------------
+      - type: glance
+        title: Diagnostics
+        entities:
+          - entity: sensor.philips_barista_brew_uptime
+            name: Uptime
+            icon: mdi:clock
+          - entity: sensor.philips_barista_brew_wi_fi_signal
+            name: Wi-Fi (dBm)
+            icon: mdi:wifi
+          - entity: sensor.philips_barista_brew_esp32_temperature
+            name: ESP32 (°C)
+            icon: mdi:chip
+
+      # -----------------------------------------------------------------------
+      # MAINTENANCE BUTTONS
+      # -----------------------------------------------------------------------
+      - type: entities
+        title: Maintenance
+        entities:
+          - entity: button.philips_barista_brew_pid_autotune
+            name: Run PID Autotune
+            icon: mdi:tune
+          - entity: button.philips_barista_brew_restart
+            name: Restart ESP32
+            icon: mdi:restart
+
+      # -----------------------------------------------------------------------
+      # TEMPERATURE HISTORY — last 24 hours
+      # -----------------------------------------------------------------------
+      - type: custom:mini-graph-card
+        name: Temperature — Last 24 Hours
+        entities:
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Thermoblock
+        hours_to_show: 24
+        points_per_hour: 60
+        line_width: 1
+        show:
+          labels: true
+          points: false
+          fill: true
