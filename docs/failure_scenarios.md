@@ -151,14 +151,14 @@ automatically.
 
 ## Scenarios Not Yet Covered
 
-| Scenario | Gap | Plan |
-|---|---|---|
-| HA/Wi-Fi disconnect during active brew | Brew continues until `flow_max`; no watchdog timeout | Planned: add timeout config |
-| HA/Wi-Fi disconnect during steam cool-down | Purge continues autonomously (correct) | ✅ Handled by state machine |
-| Thermocouple fault → PID drives 100% duty | Hard cutoff at 165 °C fires via `on_value_range` | ⚠️ Covered in YAML; C++ test planned |
-| Power ON with thermoblock already at steam temp | Brew actions allowed; caution expected from user | ⚠️ No interlock yet; future UX consideration |
-| Power OFF during pre-infusion hold | Pre-infusion is part of BREWING mode — stops immediately | ✅ Covered by "OFF during brew" scenario |
-| Grinder activated while machine is OFF | Grinder lockout not yet wired to `powered_on_` | ⚠️ Planned (grinder lockout Phase 6) |
+| Scenario | Gap | Plan | Priority |
+|---|---|---|---|
+| HA/Wi-Fi disconnect during active brew | Brew continues until `flow_max`; no watchdog timeout | Add timeout config | 🔴 P0 |
+| HA/Wi-Fi disconnect during steam cool-down | Purge continues autonomously (correct) | ✅ Handled by state machine | ✅ Done |
+| Thermocouple fault → PID drives 100% duty | Hard cutoff at 165 °C fires via `on_value_range` | Add C++ orchestrator test | 🔴 P0 |
+| Power ON with thermoblock already at steam temp | Brew actions allowed; caution expected from user | Future UX consideration | 🟡 P2 |
+| Power OFF during pre-infusion hold | Pre-infusion is part of BREWING mode — stops immediately | ✅ Covered by "OFF during brew" | ✅ Done |
+| Grinder activated during brew/steam | ✅ Allowed by design — operations are independent | No action needed | ✅ N/A |
 
 ---
 

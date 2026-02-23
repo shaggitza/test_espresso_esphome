@@ -128,22 +128,22 @@ Deliverables:
 
 ---
 
-### Phase 6 — `espresso_machine_grinder` Platform 🚧
+### Phase 6 — `espresso_machine_grinder` Platform ✅
 
-**Goal:** Timed relay grind with Home Assistant control and brew/steam lockout.
+**Goal:** Timed relay grind with Home Assistant control.
 
 Tasks:
 - [x] `espresso_machine_grinder/__init__.py` — schema: `id`, `name`, `type` (`relay`|`none`), `pin`, `default_grind_time`
 - [x] Registers as a **button platform** (one-shot timed grind) and **number platform** (grind time)
-- [ ] Lockout: refuses activation when orchestrator is in brew or steam state (orchestrator reference not yet wired)
 - [x] Action: `espresso_machine_grinder.grind` with optional `duration` override
+- [x] ~~Lockout~~ — **Design decision:** Grinder and brew/steam are independent operations; no lockout needed
 
 Deliverables:
-- Grinder is an independent HA entity with configurable time; lockout prevents unsafe use.
+- Grinder is an independent HA entity with configurable time.
 
 ---
 
-### Phase 7 — Brew Mode (Orchestrator) 🚧
+### Phase 7 — Brew Mode (Orchestrator) ✅ (mock) / 🚧 (production)
 
 **Goal:** Full automated espresso extraction sequence.
 
@@ -156,8 +156,8 @@ Tasks:
 - [x] Auto-terminate when `flow_max` ml reached
 - [x] `espresso_machine.brew_start` / `espresso_machine.brew_stop` actions
 - [x] Shot stats recorded on completion (`last_shot_time_s`, `last_shot_volume_ml`)
-- [ ] Temperature surfing: offset + ramp_time computed but climate setpoint call not yet wired (Phase 2 dependency)
-- [ ] Heater setpoint change on brew start (Phase 2 dependency — climate entity wiring)
+- [🚧] Temperature surfing: offset + ramp_time computed but climate setpoint call not yet wired (Phase 2 dependency)
+- [🚧] Heater setpoint change on brew start (Phase 2 dependency — climate entity wiring)
 - [ ] Publish shot stats (time, volume, temperature) as HA sensor entities
 
 Deliverables:
@@ -165,7 +165,7 @@ Deliverables:
 
 ---
 
-### Phase 8 — Steam Mode (Orchestrator) 🚧
+### Phase 8 — Steam Mode (Orchestrator) ✅ (mock) / 🚧 (production)
 
 **Goal:** Safe, controlled milk steaming.
 
@@ -176,7 +176,8 @@ Tasks:
 - [x] `espresso_machine.steam_start` / `espresso_machine.steam_stop` actions
 - [x] Heater setpoint raised to `target_temperature` on steam start (via `IHeater` interface)
 - [x] Temperature-gated HEATING→STEAMING: waits until temperature reaches target
-- [x] Pump duty-cycle during steaming to maintain `flow_max` ml/s
+- [x] Pump duty-cycle during steaming to maintain `flow_max` ml/s (bang-bang control)
+- [ ] Bang-bang pump control: add 2-second minimum on window to reduce pump wear
 - [x] Purge valve opens immediately on steam stop to flush path during cool-down
 - [x] Auto cool-down: heater setpoint lowered to `cool_down_to` when steam stops
 - [x] Temperature-gated COOLING→CLEANUP: waits until temperature drops to cool_down_to

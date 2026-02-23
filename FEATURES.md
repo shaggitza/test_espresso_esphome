@@ -107,7 +107,7 @@ configuration and documented in the example YAML.
 | Gaggiuino/GaggiaMate profile import | Phase 12 | Python CLI converter planned |
 | Shot stats as HA sensor entities | Phase 7 finish | time, volume, yield per shot |
 | Cleanup scripts execution | Phase 9 | `cleanup_script:` blocks wired to ESPHome action lists |
-| Steam flow-rate control (pump duty cycle) | Phase 8 | Pulse-width modulation of pump to maintain ml/s target |
-| Grinder lockout via orchestrator | Phase 6 finish | Pass `EspressoMachine*` reference to grinder |
+| Production `IHeater` adapter | Phase 2/8 finish | Wire `climate.pid` entity to orchestrator |
 | Weight-based shot exit (scale) | Future | Requires HX711 / NAU7802 scale platform |
 | Pressure transducer | Future | Requires ADC + transducer hardware |
+| Brew timeout on Wi-Fi disconnect | Future | Safety feature — **P0 SAFETY** |

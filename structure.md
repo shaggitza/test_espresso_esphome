@@ -7,6 +7,8 @@ test_espresso_esphome/
 │
 ├── README.md                        # Project overview, quick-start, YAML reference
 ├── PLAN.md                          # Phased development plan and roadmap
+├── TODO.md                          # Consolidated TODO list with priorities
+├── FEATURES.md                      # Feature status tracking (authoritative)
 ├── structure.md                     # This file — repository layout documentation
 ├── CONTRIBUTING.md                  # How to contribute to the project
 ├── CHANGELOG.md                     # Version history
