@@ -18,7 +18,7 @@ class MockPump;
 // ---------------------------------------------------------------------------
 class MockPumpNumber : public number::Number, public Component {
  public:
-  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_DENSITY, PUMP_MAX_PRESSURE, INTERNAL_VOLUME, PUCK_ABSORPTION_ML };
+  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_DENSITY, PUMP_MAX_PRESSURE, INTERNAL_VOLUME, PUCK_ABSORPTION_ML, PUCK_EXTRACTION_TAU };
 
   void set_parent(MockPump *parent) { parent_ = parent; }
   void set_param_type(ParamType type) { param_type_ = type; }
@@ -48,6 +48,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_pump_max_pressure(float p) { pump_max_pressure_bar_ = p; }
   void set_internal_volume(float v) { internal_volume_ml_ = v; }
   void set_puck_absorption(float v) { puck_absorption_ml_ = v; }
+  void set_puck_extraction_tau(float t) { puck_extraction_tau_ = t; }
 
   // Link to mock heater so flow rate drives thermoblock cooling
   void set_heater(espresso_machine::IFlowObserver *h) { flow_observer_ = h; }
@@ -84,6 +85,10 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
     puck_absorption_number_ = num;
     if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_ABSORPTION_ML);
   }
+  void set_puck_extraction_tau_number(MockPumpNumber *num) {
+    puck_extraction_tau_number_ = num;
+    if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_EXTRACTION_TAU);
+  }
 
   void setup() override;
   void loop() override;
@@ -108,6 +113,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   float get_pump_max_pressure() const { return pump_max_pressure_bar_; }
   float get_internal_volume() const { return internal_volume_ml_; }
   float get_puck_absorption() const { return puck_absorption_ml_; }
+  float get_puck_extraction_tau() const { return puck_extraction_tau_; }
 
   void update_nominal_flow(float v) { nominal_flow_ = v; }
   void update_puck_time_constant(float v) { puck_time_constant_ = v; }
@@ -115,6 +121,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void update_pump_max_pressure(float v) { pump_max_pressure_bar_ = v; }
   void update_internal_volume(float v) { internal_volume_ml_ = v; }
   void update_puck_absorption(float v) { puck_absorption_ml_ = v; }
+  void update_puck_extraction_tau(float v) { puck_extraction_tau_ = v; }
 
   // Nozzle flow accessors (flow exiting the puck into the cup)
   float get_nozzle_flow_rate() const { return nozzle_flow_rate_; }
@@ -138,6 +145,17 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   //   wetted_fraction(t) = 1 − exp(−t / effective_τ)
   //   Q(t) = Q_ss × wetted_fraction(t)
   //
+  // Puck extraction/degradation model: coffee solubles dissolve and the
+  // puck structure weakens as the shot progresses, gradually reducing puck
+  // resistance. The effective puck density decreases from its initial value
+  // toward 1 (fully open) with time constant puck_extraction_tau_.
+  //   effective_D(t) = 1 + (puck_density − 1) × exp(−t / τ_extract)
+  //   → at t=0: effective_D = puck_density (initial resistance)
+  //   → at t→∞: effective_D → 1 (fully extracted, no resistance)
+  //   Both Q_ss and P_equilibrium are computed from effective_D, so flow
+  //   increases monotonically throughout the shot. Set puck_extraction_tau_
+  //   to 0 to disable this model and keep constant puck resistance.
+  //
   // Pressure model: fast first-order rise toward P_equilibrium (τ = 1.5 s).
   //   This makes pressure build quickly as observed in a real machine,
   //   then stabilise at the puck back-pressure.  At D=100 pressure climbs
@@ -158,6 +176,13 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // the wetting phase and reduces nozzle output compared to pump input.
   // The absorption follows an exponential saturation model tied to puck wetting.
   float puck_absorption_ml_{36.0f};
+  // Puck extraction time constant [s].
+  // As coffee solubles dissolve and the puck structure weakens, puck resistance
+  // decreases over the shot. Typical shots (25–35 s) show significant flow
+  // increase. A default of 45 s gives a realistic profile where effective density
+  // drops to ~50% of initial by the end of a 30 s shot.
+  // Set to 0 to disable degradation (constant puck density throughout the shot).
+  float puck_extraction_tau_{45.0f};
 
   // Simulation state
   bool running_{false};
@@ -181,6 +206,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   MockPumpNumber *pump_max_pressure_number_{nullptr};
   MockPumpNumber *internal_volume_number_{nullptr};
   MockPumpNumber *puck_absorption_number_{nullptr};
+  MockPumpNumber *puck_extraction_tau_number_{nullptr};
   espresso_machine::IFlowObserver *flow_observer_{nullptr};
 
   // Timing

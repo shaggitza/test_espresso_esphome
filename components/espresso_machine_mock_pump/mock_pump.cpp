@@ -34,6 +34,9 @@ void MockPumpNumber::setup() {
     case ParamType::PUCK_ABSORPTION_ML:
       initial_value = parent_->get_puck_absorption();
       break;
+    case ParamType::PUCK_EXTRACTION_TAU:
+      initial_value = parent_->get_puck_extraction_tau();
+      break;
   }
   this->publish_state(initial_value);
 }
@@ -66,6 +69,10 @@ void MockPumpNumber::control(float value) {
       parent_->update_puck_absorption(value);
       ESP_LOGD(TAG, "Puck absorption updated to %.1f mL", value);
       break;
+    case ParamType::PUCK_EXTRACTION_TAU:
+      parent_->update_puck_extraction_tau(value);
+      ESP_LOGD(TAG, "Puck extraction tau updated to %.1f s", value);
+      break;
   }
   this->publish_state(value);
 }
@@ -84,6 +91,11 @@ void MockPump::setup() {
            internal_volume_ml_,
            (nominal_flow_ > 0.0f) ? internal_volume_ml_ / nominal_flow_ : 0.0f);
   ESP_LOGI(TAG, "  Puck absorption capacity: %.1f mL", puck_absorption_ml_);
+  if (puck_extraction_tau_ > 0.0f) {
+    ESP_LOGI(TAG, "  Puck extraction tau: %.1f s (flow increases as puck degrades)", puck_extraction_tau_);
+  } else {
+    ESP_LOGI(TAG, "  Puck extraction tau: disabled (constant puck density)");
+  }
 }
 
 void MockPump::loop() {
@@ -104,9 +116,19 @@ void MockPump::loop() {
   //   Q_ss          = nominal_flow × flow_fraction
   //   P_equilibrium = pump_max_pressure × (D − 1) / 100
   //                   →  0 bar at D=1 (no restriction),  ~P_max at D=100 (blocked)
-  float flow_fraction = (101.0f - puck_density_) / 100.0f;
+  //
+  // Puck extraction degradation: effective density decreases from puck_density_
+  // toward 1 with time constant puck_extraction_tau_. This represents coffee
+  // solubles dissolving and the puck structure weakening over the shot, causing
+  // flow to increase monotonically as time progresses. Disabled when tau = 0.
+  float effective_density = puck_density_;
+  if (running_ && puck_extraction_tau_ > 0.0f) {
+    effective_density = 1.0f + (puck_density_ - 1.0f) * std::exp(-run_time_ / puck_extraction_tau_);
+  }
+
+  float flow_fraction = (101.0f - effective_density) / 100.0f;
   float Q_ss = nominal_flow_ * flow_fraction;
-  float p_equilibrium = pump_max_pressure_bar_ * (puck_density_ - 1.0f) / 100.0f;
+  float p_equilibrium = pump_max_pressure_bar_ * (effective_density - 1.0f) / 100.0f;
 
   if (running_) {
     run_time_ += dt_s;
@@ -115,12 +137,14 @@ void MockPump::loop() {
     // Puck wetting model
     //
     // Wetting time constant scales linearly with density so a denser puck
-    // takes proportionally longer before flow breaks through.
-    //   effective_τ = puck_time_constant × (D / 100)
+    // takes proportionally longer before flow breaks through. The effective
+    // density (which decreases over time due to extraction) is used here so
+    // that wetting also speeds up as the puck degrades.
+    //   effective_τ = puck_time_constant × (D_eff / 100)
     //   wetted_fraction(t) = 1 − exp(−t / effective_τ)
     //   Q(t) = Q_ss × wetted_fraction(t)
     // -----------------------------------------------------------------------
-    float effective_tau = puck_time_constant_ * (puck_density_ / 100.0f);
+    float effective_tau = puck_time_constant_ * (effective_density / 100.0f);
 
     float wetted_fraction;
     if (effective_tau <= 0.0f) {
@@ -275,8 +299,8 @@ void MockPump::loop() {
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
     last_log_ms = now;
-    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, Qnoz=%.2f mL/s, V=%.1f mL, Nozzle=%.1f mL, Absorbed=%.1f mL, t=%.1f s, P_sys=%.2f bar",
-             running_ ? "ON" : "OFF", current_flow_rate_, nozzle_flow_rate_, total_volume_,
+    ESP_LOGD(TAG, "Pump %s, D_eff=%.1f, Q=%.2f mL/s, Qnoz=%.2f mL/s, V=%.1f mL, Nozzle=%.1f mL, Absorbed=%.1f mL, t=%.1f s, P_sys=%.2f bar",
+             running_ ? "ON" : "OFF", effective_density, current_flow_rate_, nozzle_flow_rate_, total_volume_,
              nozzle_total_volume_, absorbed_volume_, run_time_, system_pressure_bar_);
   }
 }
