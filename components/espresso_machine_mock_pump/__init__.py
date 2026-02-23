@@ -5,24 +5,30 @@ This component provides a fully simulated pump that replaces both the physical
 pump relay and flow meter. The orchestrator sees no difference — it controls
 the pump via IPump interface and reads flow data from the same interface.
 
-Pump Curve + Pressure-Weighted Wetting Model:
-    Q_ss  = Q_max × (1 − P_puck / P_stall)           [linear pump curve]
-    Q_max = nominal_flow / (1 − 9 / pump_max_pressure_bar)  [calibrated at 9 bar]
-    Q(t)  = Q_ss × (1 − exp(−t / effective_τ))
+Puck Density Model:
+    puck_density   = 1..100 (dimensionless scale)
+    flow_fraction  = (101 − D) / 100         →  1.0 at D=1,  0.01 at D=100
+    Q_ss           = nominal_flow × flow_fraction
+    P_equilibrium  = pump_max_pressure × (D − 1) / 100
+                     →  0 bar at D=1 (open puck),  ~P_max at D=100 (blocked)
 
-    Wetting time scales with puck resistance:
-    effective_τ = puck_time_constant × (P_puck / 9 bar)
+    Examples with nominal_flow = 4 mL/s, pump_max_pressure = 15 bar:
+        D=1   (open puck)   → Q = 4.0 mL/s, P_eq = 0.0 bar
+        D=25  (soft puck)   → Q = 3.0 mL/s, P_eq = 3.6 bar
+        D=50  (medium puck) → Q = 2.0 mL/s, P_eq = 7.35 bar
+        D=75  (hard puck)   → Q = 1.04 mL/s, P_eq = 11.1 bar
+        D=100 (blocked)     → Q = 0.04 mL/s, P_eq = 14.85 bar
 
-    nominal_flow          = flow at 9 bar rated pressure [mL/s]
-    pump_max_pressure_bar = pump stall pressure [bar]  (Ulka EP5 ≈ 15 bar)
-    puck_pressure_bar     = puck back-pressure resistance [bar]
-    puck_time_constant_s  = wetting time constant at 9 bar reference [s]
+Pressure Model:
+    When the pump starts, system pressure rises quickly toward P_equilibrium
+    using a first-order response with τ_rise = 1.5 s (~95% reached in 4.5 s).
+    This replaces the old slow wetting-based pressure buildup with physically
+    realistic fast pressure build-up followed by stabilisation at puck resistance.
 
-Flow effects of different puck resistances (P_stall = 15 bar, Q_nom = 4 mL/s):
-    6 bar  (easy puck)  → Q_ss = 6.0 mL/s, wetting τ_eff = 6.7 s (shorter)
-    9 bar  (nominal)    → Q_ss = 4.0 mL/s, wetting τ_eff = 10 s
-    12 bar (hard puck)  → Q_ss = 2.0 mL/s, wetting τ_eff = 13.3 s (longer)
-    15 bar (stall)      → Q_ss = 0          (pump stalls, only wetting)
+Wetting Model:
+    effective_τ = puck_time_constant × (D / 100)
+    wetted_fraction(t) = 1 − exp(−t / effective_τ)
+    Q(t) = Q_ss × wetted_fraction(t)
 
 Residual Pressure Decay Model (internal_volume_ml):
     When the pump stops, the pressurised water trapped inside the machine's
@@ -31,18 +37,21 @@ Residual Pressure Decay Model (internal_volume_ml):
     decay rather than an instant drop to zero.
 
     system_pressure(t) = P_stop × exp(−t / τ_decay)
-    Q_residual(t)      = Q_ss × (system_pressure(t) / P_puck)
+    Q_residual(t)      = Q_ss × (system_pressure(t) / P_equilibrium)
     τ_decay            = internal_volume_ml / nominal_flow   [s]
-
-    Example with internal_volume_ml = 20 mL, nominal_flow = 4 mL/s:
-        τ_decay = 5 s  → flow is at ~37 % of Q_ss after 5 s
-        flow is effectively zero after ~25 s (5 × τ)
 
     Set internal_volume_ml = 0 to disable the model and revert to legacy
     instant-decay behaviour.
 
+Nozzle Flow Sensors:
+    nozzle_rate_sensor and nozzle_total_sensor track the estimated flow out
+    of the group head nozzle (= current_flow_rate after puck restriction).
+    These should match the last_shot_yield_ml metric from the orchestrator
+    at the end of a shot.
+
 All physics parameters are exposed as HA number entities — adjustable without
-reflashing.
+reflashing.  Use entity_category: config in the number sub-schemas to keep
+tuning controls separate from primary sensors in the HA device page.
 
 Example usage:
 
@@ -52,12 +61,21 @@ Example usage:
       nominal_flow_ml_per_s: 4.0
       pump_max_pressure_bar: 15.0
       puck_time_constant_s: 10.0
-      puck_pressure_bar: 9.0
+      puck_density: 50
       internal_volume_ml: 20.0
       rate_sensor:
         name: "Brew Flow Rate"
       total_sensor:
         name: "Brew Flow Total"
+      nozzle_rate_sensor:
+        name: "Nozzle Flow Rate"
+      nozzle_total_sensor:
+        name: "Nozzle Flow Total"
+      pressure_sensor:
+        name: "Brew Pump Pressure"
+      puck_density_number:
+        name: "Mock Puck Density"
+        entity_category: config
 """
 
 import esphome.codegen as cg
@@ -87,35 +105,40 @@ ResetAction = espresso_machine_mock_pump_ns.class_("ResetAction", automation.Act
 CONF_NOMINAL_FLOW_ML_PER_S = "nominal_flow_ml_per_s"
 CONF_PUMP_MAX_PRESSURE_BAR = "pump_max_pressure_bar"
 CONF_PUCK_TIME_CONSTANT_S = "puck_time_constant_s"
-CONF_PUCK_PRESSURE_BAR = "puck_pressure_bar"
+CONF_PUCK_DENSITY = "puck_density"
 CONF_INTERNAL_VOLUME_ML = "internal_volume_ml"
 CONF_MOCK_HEATER = "mock_heater"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
 CONF_PRESSURE_SENSOR = "pressure_sensor"
+CONF_NOZZLE_RATE_SENSOR = "nozzle_rate_sensor"
+CONF_NOZZLE_TOTAL_SENSOR = "nozzle_total_sensor"
 
 # Number entity config keys for runtime tuning
 CONF_NOMINAL_FLOW_NUMBER = "nominal_flow_number"
 CONF_PUMP_MAX_PRESSURE_NUMBER = "pump_max_pressure_number"
 CONF_PUCK_TIME_CONSTANT_NUMBER = "puck_time_constant_number"
-CONF_PUCK_PRESSURE_NUMBER = "puck_pressure_number"
+CONF_PUCK_DENSITY_NUMBER = "puck_density_number"
 CONF_INTERNAL_VOLUME_NUMBER = "internal_volume_number"
 
 CONFIG_SCHEMA = (
     switch.switch_schema(MockPump)
     .extend(
         {
-            # Pump hardware: flow at 9 bar rated pressure
+            # Max unimpeded flow with no puck resistance (D=1) [mL/s]
             cv.Optional(CONF_NOMINAL_FLOW_ML_PER_S, default=4.0): cv.positive_float,
             # Pump stall pressure (Ulka EP5 ≈ 15 bar). All flow ceases above this.
-            # Must be strictly greater than the 9 bar rated pressure.
+            # Must be strictly greater than 9 bar.
             cv.Optional(CONF_PUMP_MAX_PRESSURE_BAR, default=15.0): cv.All(
                 cv.positive_float, cv.Range(min=9.01)
             ),
-            # Puck wetting time constant at 9 bar (scales proportionally with pressure)
+            # Puck wetting time constant at D=100 (scales down with density)
             cv.Optional(CONF_PUCK_TIME_CONSTANT_S, default=10.0): cv.positive_float,
-            # Puck back-pressure. Affects both steady-state flow and wetting duration.
-            cv.Optional(CONF_PUCK_PRESSURE_BAR, default=9.0): cv.positive_float,
+            # Puck density: 1=fully open (max flow), 100=fully blocked (~0 flow).
+            # Drives both steady-state flow (Q_ss) and equilibrium pressure (P_eq).
+            cv.Optional(CONF_PUCK_DENSITY, default=50.0): cv.All(
+                cv.positive_float, cv.Range(min=1.0, max=100.0)
+            ),
             # Internal volume of tubing and piping [mL].
             # Governs how long residual pressure drives flow after the pump stops.
             # τ_decay = internal_volume_ml / nominal_flow_ml_per_s  (e.g. 20mL/4mL·s⁻¹ = 5s)
@@ -139,6 +162,17 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=2,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+            # Nozzle flow sensors — estimated output from the group head nozzle
+            cv.Optional(CONF_NOZZLE_RATE_SENSOR): sensor.sensor_schema(
+                unit_of_measurement="mL/s",
+                accuracy_decimals=1,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_NOZZLE_TOTAL_SENSOR): sensor.sensor_schema(
+                unit_of_measurement="mL",
+                accuracy_decimals=1,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+            ),
             # Optional HA number entities for runtime tuning
             cv.Optional(CONF_NOMINAL_FLOW_NUMBER): number.number_schema(
                 MockPumpNumber
@@ -149,7 +183,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_PUCK_TIME_CONSTANT_NUMBER): number.number_schema(
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
-            cv.Optional(CONF_PUCK_PRESSURE_NUMBER): number.number_schema(
+            cv.Optional(CONF_PUCK_DENSITY_NUMBER): number.number_schema(
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
             cv.Optional(CONF_INTERNAL_VOLUME_NUMBER): number.number_schema(
@@ -182,7 +216,7 @@ async def to_code(config):
     cg.add(var.set_nominal_flow(config[CONF_NOMINAL_FLOW_ML_PER_S]))
     cg.add(var.set_pump_max_pressure(config[CONF_PUMP_MAX_PRESSURE_BAR]))
     cg.add(var.set_puck_time_constant(config[CONF_PUCK_TIME_CONSTANT_S]))
-    cg.add(var.set_puck_pressure(config[CONF_PUCK_PRESSURE_BAR]))
+    cg.add(var.set_puck_density(config[CONF_PUCK_DENSITY]))
     cg.add(var.set_internal_volume(config[CONF_INTERNAL_VOLUME_ML]))
 
     # Wire to mock heater for flow-based thermoblock cooling
@@ -204,6 +238,15 @@ async def to_code(config):
     if CONF_PRESSURE_SENSOR in config:
         sens = await sensor.new_sensor(config[CONF_PRESSURE_SENSOR])
         cg.add(var.set_pressure_sensor(sens))
+
+    # Create and register nozzle flow sensors
+    if CONF_NOZZLE_RATE_SENSOR in config:
+        sens = await sensor.new_sensor(config[CONF_NOZZLE_RATE_SENSOR])
+        cg.add(var.set_nozzle_rate_sensor(sens))
+
+    if CONF_NOZZLE_TOTAL_SENSOR in config:
+        sens = await sensor.new_sensor(config[CONF_NOZZLE_TOTAL_SENSOR])
+        cg.add(var.set_nozzle_total_sensor(sens))
 
     # Optional runtime-tunable number entities
     if CONF_NOMINAL_FLOW_NUMBER in config:
@@ -233,13 +276,13 @@ async def to_code(config):
         cg.add(var.set_puck_time_constant_number(num_var))
         cg.add(num_var.set_parent(var))
 
-    if CONF_PUCK_PRESSURE_NUMBER in config:
-        num_conf = config[CONF_PUCK_PRESSURE_NUMBER]
+    if CONF_PUCK_DENSITY_NUMBER in config:
+        num_conf = config[CONF_PUCK_DENSITY_NUMBER]
         num_var = await number.new_number(
-            num_conf, min_value=0.0, max_value=16.0, step=0.5
+            num_conf, min_value=1.0, max_value=100.0, step=1.0
         )
         await cg.register_component(num_var, num_conf)
-        cg.add(var.set_puck_pressure_number(num_var))
+        cg.add(var.set_puck_density_number(num_var))
         cg.add(num_var.set_parent(var))
 
     if CONF_INTERNAL_VOLUME_NUMBER in config:

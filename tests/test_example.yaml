@@ -64,9 +64,9 @@ climate:
     default_target_temperature: 90
     heat_output: heater_ssr
     control_parameters:
-      kp: 2.5
-      ki: 0.05
-      kd: 15.0
+      kp: 0.55901
+      ki: 0.11624
+      kd: 0.67209
     deadband_parameters:
       threshold_high: 0.3
       threshold_low: -0.3

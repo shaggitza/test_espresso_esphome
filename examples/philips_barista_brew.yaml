@@ -320,9 +320,9 @@ climate:
     default_target_temperature: 90   # °C — brew temperature default (ESPHome PID uses plain number in Celsius)
     heat_output: heater_ssr
     control_parameters:
-      kp: 2.5     # proportional gain — increase for faster response, decrease if overshooting
-      ki: 0.05    # integral gain — eliminates steady-state error; increase if slow to settle
-      kd: 15.0    # derivative gain — damps overshoot; thermoblocks benefit from high kd
+      kp: 0.55901  # proportional gain — from PID autotune
+      ki: 0.11624  # integral gain — eliminates steady-state error
+      kd: 0.67209  # derivative gain — damps overshoot
       output_averaging_samples: 5       # smooth output to SSR (reduces relay wear)
       derivative_averaging_samples: 5  # smooth derivative term (reduces sensor noise impact)
     # Deadband: stop integrating when within ±0.3 °C of setpoint (prevents integral windup)

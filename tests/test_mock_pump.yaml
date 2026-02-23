@@ -24,6 +24,7 @@ espresso_machine_mock_pump:
   name: "Mock Pump"
   nominal_flow_ml_per_s: 4.0
   puck_time_constant_s: 10.0
+  puck_density: 50
   internal_volume_ml: 20.0
 
   rate_sensor:
@@ -32,12 +33,22 @@ espresso_machine_mock_pump:
     name: "Brew Flow Total"
   pressure_sensor:
     name: "Brew Pump Pressure"
+  nozzle_rate_sensor:
+    name: "Nozzle Flow Rate"
+  nozzle_total_sensor:
+    name: "Nozzle Flow Total"
 
   # Optional runtime tuning numbers
   nominal_flow_number:
     name: "Mock Nominal Flow"
+    entity_category: config
   puck_time_constant_number:
     name: "Mock Puck Time Constant"
+    entity_category: config
+  puck_density_number:
+    id: main_pump_puck_density
+    name: "Mock Puck Density"
+    entity_category: config
 
 # --- Valves (required by orchestrator) ---
 espresso_machine_valve:
@@ -75,9 +86,9 @@ climate:
     default_target_temperature: 90
     heat_output: heater_ssr
     control_parameters:
-      kp: 2.5
-      ki: 0.05
-      kd: 15.0
+      kp: 0.55901
+      ki: 0.11624
+      kd: 0.67209
 
 # --- Test: orchestrator can use mock pump ---
 espresso_machine:
@@ -105,3 +116,25 @@ button:
     name: "Reset Flow"
     on_press:
       - espresso_machine_mock_pump.reset: main_pump
+
+  # Test puck density preset buttons
+  - platform: template
+    name: "Puck: Open (D=1)"
+    on_press:
+      - number.set:
+          id: main_pump_puck_density
+          value: 1
+
+  - platform: template
+    name: "Puck: Medium (D=50)"
+    on_press:
+      - number.set:
+          id: main_pump_puck_density
+          value: 50
+
+  - platform: template
+    name: "Puck: Blocked (D=100)"
+    on_press:
+      - number.set:
+          id: main_pump_puck_density
+          value: 100

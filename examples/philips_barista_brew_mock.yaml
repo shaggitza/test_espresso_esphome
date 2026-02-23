@@ -19,7 +19,7 @@
 #   spi: + sensor: max31855 + output:       espresso_machine_mock_heater:
 #     slow_pwm                                (thermal ODE simulation)
 #   espresso_machine_flow_meter: +          espresso_machine_mock_pump:
-#     espresso_machine_pump:                  (puck wetting + pressure model)
+#     espresso_machine_pump:                  (puck density + pressure model)
 #
 # WHAT'S IDENTICAL TO THE REAL CONFIG:
 #   - climate: pid block (same gains, deadband, sensor/heat_output IDs)
@@ -40,23 +40,35 @@
 #     Cp     = 4.186 J/(mL·°C), specific heat of water
 #     T_inlet = water_inlet_temp_c
 #
-# PUCK WETTING + PUMP CURVE MODEL (mock pump):
-#   Q_ss  = Q_max × (1 − P_puck / P_stall)        [linear pump curve]
-#   Q_max = nominal_flow / (1 − 9 / pump_max_pressure_bar)  [calibrated at 9 bar]
-#   Q(t)  = Q_ss × (1 − exp(−t / effective_τ))
-#   effective_τ = puck_time_constant × (P_puck / 9)  [scales with puck resistance]
+# PUCK DENSITY MODEL (mock pump):
+#   puck_density = 1..100  (1 = open, 100 = fully blocked)
+#   flow_fraction = (101 − D) / 100
+#   Q_ss          = nominal_flow × flow_fraction
+#   P_equilibrium = pump_max_pressure × (D − 1) / 100
 #
-#   Flow effects with pump_max_pressure_bar = 15 bar, nominal_flow = 4 mL/s:
-#     6 bar  (easy puck)  → Q_ss = 6.0 mL/s, τ_eff = 6.7 s
-#     9 bar  (nominal)    → Q_ss = 4.0 mL/s, τ_eff = 10 s
-#     12 bar (hard puck)  → Q_ss = 2.0 mL/s, τ_eff = 13.3 s
-#     15 bar (stall)      → Q_ss = 0  (pump stalls)
+#   Examples with nominal_flow=4 mL/s, pump_max_pressure=15 bar:
+#     D=1   (open)   → Q ≈ 4.0 mL/s, P_eq ≈ 0 bar
+#     D=25  (soft)   → Q ≈ 3.0 mL/s, P_eq ≈ 3.6 bar
+#     D=50  (medium) → Q ≈ 2.0 mL/s, P_eq ≈ 7.35 bar
+#     D=75  (hard)   → Q ≈ 1.04 mL/s, P_eq ≈ 11.1 bar
+#     D=100 (blocked)→ Q ≈ 0.04 mL/s, P_eq ≈ 14.85 bar
+#
+# PRESSURE MODEL:
+#   Pressure builds quickly (τ_rise = 1.5 s) toward P_equilibrium.
+#   At D=100 it climbs to near pump stall pressure (no water can escape).
+#
+# WETTING MODEL:
+#   effective_τ = puck_time_constant × (D / 100)
+#   Q(t) = Q_ss × (1 − exp(−t / effective_τ))
 #
 # RESIDUAL PRESSURE DECAY MODEL (mock pump):
 #   When the pump stops, trapped pressurised water continues to drive flow:
 #   τ_decay = internal_volume_ml / nominal_flow  (e.g. 20 mL / 4 mL·s⁻¹ = 5 s)
-#   Flow decays as: Q(t) = Q_ss × (P_system(t) / P_puck)
 #   Set internal_volume_ml = 0 to disable (legacy instant-decay behaviour).
+#
+# HA ENTITY CATEGORIES:
+#   Tuning number entities use entity_category: config so they appear in the
+#   "Configuration" section of the HA device page, separate from primary sensors.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -164,12 +176,16 @@ espresso_machine_mock_heater:
   # HA number entities for runtime tuning of physics parameters
   power_number:
     name: "Mock Heater Power"
+    entity_category: config
   thermal_mass_number:
     name: "Mock Thermal Mass"
+    entity_category: config
   heat_loss_number:
     name: "Mock Heat Loss"
+    entity_category: config
   ambient_number:
     name: "Mock Ambient Temperature"
+    entity_category: config
 
   # Duty-cycle sensor — shows SSR switching intensity in HA (0–100%)
   duty_sensor:
@@ -185,13 +201,14 @@ espresso_machine_mock_heater:
 # Flow data is provided through the IPump interface — no separate flow meter
 # component needed. The orchestrator's pump->get_flow_total() works unchanged.
 #
-# Pump curve + pressure-weighted wetting model (physically motivated):
-#   - nominal_flow_ml_per_s: 4.0  — flow at 9 bar rated pressure (Ulka EP5)
-#   - pump_max_pressure_bar: 15.0 — pump stall pressure (Ulka EP5 spec)
-#   - puck_pressure_bar: 9.0      — puck resistance in bar
-#   - puck_time_constant_s: 10.0  — wetting τ at 9 bar (scales with pressure)
+# Puck density model:
+#   puck_density: 50  → medium puck (Q ≈ 2 mL/s, P_eq ≈ 7.4 bar at these settings)
+#   Use the puck density preset buttons or the HA number entity to simulate
+#   different coffee pucks from fully open (D=1) to completely blocked (D=100).
 #
-# Use the "Puck Pressure" buttons below to simulate different coffee pucks.
+# Pressure model:
+#   System pressure rises quickly (τ_rise=1.5s) to P_eq = pump_max×(D-1)/100.
+#   At D=100 pressure climbs toward pump stall pressure (blocked puck).
 # =============================================================================
 espresso_machine_mock_pump:
   id: main_pump
@@ -199,14 +216,14 @@ espresso_machine_mock_pump:
   nominal_flow_ml_per_s: 4.0
   pump_max_pressure_bar: 15.0    # Ulka EP5 stall pressure
   puck_time_constant_s: 10.0
-  puck_pressure_bar: 9.0
+  puck_density: 50               # 1=open (max flow), 100=blocked (~0 flow)
   # Internal volume of tubing + piping [mL]. Residual pressure after pump stops
   # continues to drive flow with τ_decay = internal_volume / nominal_flow = 5 s.
   # Increase to slow down post-stop flow; set to 0 to revert to instant-decay.
   internal_volume_ml: 20.0
   mock_heater: mock_heater
 
-  # Flow sensors — same as espresso_machine_flow_meter sensors
+  # Pump-side flow sensors — water volume through the pump
   rate_sensor:
     name: "Brew Flow Rate"
   total_sensor:
@@ -214,18 +231,30 @@ espresso_machine_mock_pump:
   pressure_sensor:
     name: "Brew Pump Pressure"
 
-  # HA number entities for runtime tuning
+  # Nozzle flow sensors — estimated output from the group head
+  nozzle_rate_sensor:
+    name: "Nozzle Flow Rate"
+  nozzle_total_sensor:
+    name: "Nozzle Flow Total"
+
+  # HA number entities for runtime tuning (entity_category: config keeps
+  # them separate from primary sensors on the HA device page)
   nominal_flow_number:
     name: "Mock Nominal Flow"
+    entity_category: config
   pump_max_pressure_number:
     name: "Mock Pump Max Pressure"
+    entity_category: config
   puck_time_constant_number:
     name: "Mock Puck Time Constant"
-  puck_pressure_number:
-    id: main_pump_puck_pressure
-    name: "Mock Puck Pressure"
+    entity_category: config
+  puck_density_number:
+    id: main_pump_puck_density
+    name: "Mock Puck Density"
+    entity_category: config
   internal_volume_number:
     name: "Mock Internal Volume"
+    entity_category: config
 
 # =============================================================================
 # ADDITIONAL SENSORS — same as real config
@@ -272,9 +301,9 @@ climate:
     default_target_temperature: 90
     heat_output: heater_ssr            # ← writes to MockHeaterOutput
     control_parameters:
-      kp: 2.5
-      ki: 0.05
-      kd: 15.0
+      kp: 0.55901
+      ki: 0.11624
+      kd: 0.67209
       output_averaging_samples: 5
       derivative_averaging_samples: 5
     deadband_parameters:
@@ -432,31 +461,47 @@ button:
     on_press:
       - espresso_machine_mock_pump.reset: main_pump
 
-  # Puck pressure presets — simulate different puck resistances.
-  # With pump_max_pressure=15 bar and nominal_flow=4 mL/s:
-  #   6 bar  (easy puck)  → Q_ss ≈ 6.0 mL/s, wetting τ_eff ≈ 6.7 s
-  #   9 bar  (nominal)    → Q_ss ≈ 4.0 mL/s, wetting τ_eff ≈ 10 s
-  #   12 bar (hard puck)  → Q_ss ≈ 2.0 mL/s, wetting τ_eff ≈ 13.3 s
+  # Puck density presets — simulate different coffee pucks.
+  # With nominal_flow=4 mL/s and pump_max_pressure=15 bar:
+  #   D=1   (open)    → Q ≈ 4.0 mL/s, P_eq ≈ 0 bar
+  #   D=25  (soft)    → Q ≈ 3.0 mL/s, P_eq ≈ 3.6 bar
+  #   D=50  (medium)  → Q ≈ 2.0 mL/s, P_eq ≈ 7.4 bar
+  #   D=75  (hard)    → Q ≈ 1.0 mL/s, P_eq ≈ 11.1 bar
+  #   D=100 (blocked) → Q ≈ 0.04 mL/s, P_eq ≈ 15 bar
   - platform: template
-    name: "Puck: Easy (6 bar)"
+    name: "Puck: Open (D=1)"
     on_press:
       - number.set:
-          id: main_pump_puck_pressure
-          value: 6.0
+          id: main_pump_puck_density
+          value: 1
 
   - platform: template
-    name: "Puck: Nominal (9 bar)"
+    name: "Puck: Soft (D=25)"
     on_press:
       - number.set:
-          id: main_pump_puck_pressure
-          value: 9.0
+          id: main_pump_puck_density
+          value: 25
 
   - platform: template
-    name: "Puck: Hard (12 bar)"
+    name: "Puck: Medium (D=50)"
     on_press:
       - number.set:
-          id: main_pump_puck_pressure
-          value: 12.0
+          id: main_pump_puck_density
+          value: 50
+
+  - platform: template
+    name: "Puck: Hard (D=75)"
+    on_press:
+      - number.set:
+          id: main_pump_puck_density
+          value: 75
+
+  - platform: template
+    name: "Puck: Blocked (D=100)"
+    on_press:
+      - number.set:
+          id: main_pump_puck_density
+          value: 100
 
 # =============================================================================
 # NUMBER ENTITIES — adjustable parameters exposed to HA
