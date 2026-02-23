@@ -1,0 +1,44 @@
+# =============================================================================
+# Home Assistant Helper Entities — Espresso Machine Shot History
+# =============================================================================
+#
+# Add the contents below to your Home Assistant `configuration.yaml`, or if you
+# use split configuration, create a `helpers.yaml` file and include it with:
+#
+#   homeassistant:
+#     packages:
+#       espresso: !include helpers.yaml
+#
+# These helpers are required by the shot history feature:
+#   - input_text.espresso_shot_log         stores the JSON shot log (up to 20 shots)
+#   - input_select.espresso_shot_viewer    lets the user pick a shot to inspect
+#   - input_datetime.espresso_shot_view_start  set by AppDaemon to the selected shot's start
+#   - input_datetime.espresso_shot_view_end    set by AppDaemon to the selected shot's end
+#
+# After adding these and restarting HA, configure the AppDaemon app in
+# home_assistant/appdaemon/apps.yaml to finish the setup.
+# =============================================================================
+
+input_text:
+  espresso_shot_log:
+    name: "Espresso Shot Log"
+    max: 10000          # JSON array of up to 20 shots; ~500 chars each
+    initial: "[]"
+
+input_select:
+  espresso_shot_viewer:
+    name: "Espresso Shot Viewer"
+    options:
+      - "No shots recorded yet"
+    initial: "No shots recorded yet"
+
+input_datetime:
+  espresso_shot_view_start:
+    name: "Shot View — Start"
+    has_date: true
+    has_time: true
+
+  espresso_shot_view_end:
+    name: "Shot View — End"
+    has_date: true
+    has_time: true
