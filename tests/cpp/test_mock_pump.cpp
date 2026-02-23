@@ -276,6 +276,13 @@ TEST(MockPump, VolumeStopsAccumulatingWhenOffAndNoPressureModel) {
 
 // ---------------------------------------------------------------------------
 // Nozzle flow sensor tests
+//
+// The nozzle flow model accounts for puck water absorption:
+//   absorption_rate = (puck_absorption_ml / τ_eff) × exp(-t/τ_eff)
+//   nozzle_flow = pump_flow - absorption_rate
+//
+// Early in the shot, absorption rate is high, so nozzle flow < pump flow.
+// As the puck saturates, absorption rate → 0 and nozzle flow → pump flow.
 // ---------------------------------------------------------------------------
 
 TEST(MockPump, NozzleFlowZeroWhenPumpOff) {
@@ -283,11 +290,12 @@ TEST(MockPump, NozzleFlowZeroWhenPumpOff) {
   EXPECT_FLOAT_EQ(f.nozzle_rate_sensor.state, 0.0f);
 }
 
-TEST(MockPump, NozzleFlowMatchesFlowRateWhileRunning) {
+TEST(MockPump, NozzleFlowLessThanPumpFlowDuringWetting) {
+  // During the wetting phase, puck absorbs water so nozzle flow < pump flow
   MockPumpFixture f(4.0f, 10.0f);
   f.pump.turn_on();
 
-  // Run for 2s to accumulate some nozzle flow
+  // Run for 2s (early in wetting phase)
   for (int i = 0; i < 200; ++i) {
     f.advance_time_ms(10);
   }
@@ -296,11 +304,33 @@ TEST(MockPump, NozzleFlowMatchesFlowRateWhileRunning) {
   g_mock_millis += 300;
   f.pump.loop();
 
-  // Nozzle rate should match pump flow rate
-  EXPECT_NEAR(f.nozzle_rate_sensor.state, f.pump.get_flow_rate(), 0.01f);
+  // Nozzle rate should be less than pump flow rate due to absorption
+  EXPECT_LT(f.pump.get_nozzle_flow_rate(), f.pump.get_flow_rate());
+  // But nozzle flow should still be >= 0
+  EXPECT_GE(f.pump.get_nozzle_flow_rate(), 0.0f);
 }
 
-TEST(MockPump, NozzleTotalAccumulatesSamePumpTotal) {
+TEST(MockPump, NozzleFlowApproachesPumpFlowAfterSaturation) {
+  // After the puck is saturated (many τ), nozzle flow ≈ pump flow
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_puck_absorption(10.0f);  // Smaller absorption for faster saturation
+  f.pump.turn_on();
+
+  // Run for 25 seconds (5× τ_eff = 5 × 5s = 25s for D=50)
+  for (int i = 0; i < 2500; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  // Advance past the 250ms sensor publish window
+  g_mock_millis += 300;
+  f.pump.loop();
+
+  // After saturation, nozzle flow should be very close to pump flow
+  // Absorption rate = (absorption / τ) × exp(-t/τ) ≈ 0 when t >> τ
+  EXPECT_NEAR(f.pump.get_nozzle_flow_rate(), f.pump.get_flow_rate(), 0.05f);
+}
+
+TEST(MockPump, NozzleTotalLessThanPumpTotalDueToAbsorption) {
   MockPumpFixture f(4.0f, 10.0f);
   f.pump.set_internal_volume(0.0f);  // No residual flow
   f.pump.turn_on();
@@ -310,15 +340,49 @@ TEST(MockPump, NozzleTotalAccumulatesSamePumpTotal) {
     f.advance_time_ms(10);
   }
 
-  // Nozzle total should equal pump total (same flow accumulates in both)
-  EXPECT_NEAR(f.pump.get_flow_total(), f.nozzle_total_sensor.state, 0.5f);
+  // Nozzle total should be less than pump total due to absorption
+  // The difference should be approximately the absorbed volume
+  EXPECT_LT(f.nozzle_total_sensor.state, f.pump.get_flow_total());
+  
+  // Pump total - Nozzle total ≈ absorbed volume
+  // The absorbed volume depends on the integral of absorption rate over time.
+  // With puck_absorption = 36ml, τ_eff = 5s, after 10s:
+  // ∫₀^10 (36/5) × exp(-t/5) dt = 36 × [1 - exp(-2)] ≈ 31 ml theoretically
+  // But nozzle flow = max(0, pump_flow - absorption_rate), which clips negative values
+  // and the integration is discrete, so actual absorbed is less.
+  float pump_total = f.pump.get_flow_total();
+  float nozzle_total = f.nozzle_total_sensor.state;
+  float absorbed_estimate = pump_total - nozzle_total;
+  
+  // Absorbed should be a significant fraction of what was pumped
+  EXPECT_GT(absorbed_estimate, 5.0f);  // Significant absorption occurred
+  EXPECT_LT(absorbed_estimate, pump_total);  // But not more than was pumped
+}
+
+TEST(MockPump, ZeroAbsorptionMakesNozzleEqualPump) {
+  // When puck_absorption = 0, nozzle flow should equal pump flow
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_puck_absorption(0.0f);
+  f.pump.set_internal_volume(0.0f);
+  f.pump.turn_on();
+
+  // Run for 5 seconds
+  for (int i = 0; i < 500; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  // Nozzle total should equal pump total when no absorption
+  EXPECT_NEAR(f.pump.get_flow_total(), f.nozzle_total_sensor.state, 0.1f);
+  EXPECT_NEAR(f.pump.get_nozzle_flow_rate(), f.pump.get_flow_rate(), 0.01f);
 }
 
 TEST(MockPump, NozzleFlowResetOnResetFlow) {
   MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_puck_absorption(5.0f);  // Low absorption so nozzle flow is positive
   f.pump.turn_on();
 
-  for (int i = 0; i < 500; ++i) {
+  // Run long enough for nozzle flow to be positive
+  for (int i = 0; i < 1000; ++i) {
     f.advance_time_ms(10);
   }
 

@@ -31,6 +31,9 @@ void MockPumpNumber::setup() {
     case ParamType::INTERNAL_VOLUME:
       initial_value = parent_->get_internal_volume();
       break;
+    case ParamType::PUCK_ABSORPTION_ML:
+      initial_value = parent_->get_puck_absorption();
+      break;
   }
   this->publish_state(initial_value);
 }
@@ -59,6 +62,10 @@ void MockPumpNumber::control(float value) {
       parent_->update_internal_volume(value);
       ESP_LOGD(TAG, "Internal volume updated to %.1f mL", value);
       break;
+    case ParamType::PUCK_ABSORPTION_ML:
+      parent_->update_puck_absorption(value);
+      ESP_LOGD(TAG, "Puck absorption updated to %.1f mL", value);
+      break;
   }
   this->publish_state(value);
 }
@@ -76,6 +83,7 @@ void MockPump::setup() {
   ESP_LOGI(TAG, "  Internal volume: %.1f mL (τ_decay = %.1f s)",
            internal_volume_ml_,
            (nominal_flow_ > 0.0f) ? internal_volume_ml_ / nominal_flow_ : 0.0f);
+  ESP_LOGI(TAG, "  Puck absorption capacity: %.1f mL", puck_absorption_ml_);
 }
 
 void MockPump::loop() {
@@ -123,9 +131,41 @@ void MockPump::loop() {
 
     current_flow_rate_ = Q_ss * wetted_fraction;
 
+    // -----------------------------------------------------------------------
+    // Puck absorption model (realistic nozzle flow)
+    //
+    // Coffee grounds absorb water during extraction. The absorption follows
+    // the same wetting curve — water is absorbed as it penetrates the puck.
+    //
+    //   absorbed_total(t) = puck_absorption_ml × wetted_fraction(t)
+    //   absorption_rate   = d(absorbed_total)/dt
+    //                     = puck_absorption_ml × d(wetted_fraction)/dt
+    //                     = puck_absorption_ml × (1/τ_eff) × exp(-t/τ_eff)
+    //
+    // Nozzle flow = pump flow - absorption rate
+    //             = Q(t) - absorption_rate
+    //
+    // This means early in the shot, much of the water is absorbed by the puck
+    // and little comes out the nozzle. As the puck saturates, nozzle flow
+    // approaches pump flow.
+    // -----------------------------------------------------------------------
+    float absorption_rate = 0.0f;
+    if (puck_absorption_ml_ > 0.0f && effective_tau > 0.0f) {
+      // Derivative of wetted_fraction: d/dt(1 - exp(-t/τ)) = (1/τ) × exp(-t/τ)
+      float exp_term = std::exp(-run_time_ / effective_tau);
+      absorption_rate = (puck_absorption_ml_ / effective_tau) * exp_term;
+      
+      // Update absorbed volume
+      absorbed_volume_ = puck_absorption_ml_ * wetted_fraction;
+    }
+    
+    // Nozzle flow is pump flow minus what's being absorbed by the puck
+    // Cannot be negative (absorption rate can exceed pump flow briefly at start)
+    nozzle_flow_rate_ = std::max(0.0f, current_flow_rate_ - absorption_rate);
+
     // Accumulate volumes
     total_volume_ += current_flow_rate_ * dt_s;
-    nozzle_total_volume_ += current_flow_rate_ * dt_s;
+    nozzle_total_volume_ += nozzle_flow_rate_ * dt_s;
 
     // -----------------------------------------------------------------------
     // Pressure model: fast first-order rise toward P_equilibrium.
@@ -153,7 +193,7 @@ void MockPump::loop() {
         pressure_sensor_->publish_state(system_pressure_bar_);
       }
       if (nozzle_rate_sensor_) {
-        nozzle_rate_sensor_->publish_state(current_flow_rate_);
+        nozzle_rate_sensor_->publish_state(nozzle_flow_rate_);
       }
       if (nozzle_total_sensor_) {
         nozzle_total_sensor_->publish_state(nozzle_total_volume_);
@@ -180,10 +220,13 @@ void MockPump::loop() {
         p_equilibrium > 0.1f) {
       // Residual flow proportional to remaining system pressure
       current_flow_rate_ = Q_ss * (system_pressure_bar_ / p_equilibrium);
+      
+      // When pump is off, puck is fully saturated, so nozzle flow equals pump flow
+      nozzle_flow_rate_ = current_flow_rate_;
 
       // Accumulate residual volume
       total_volume_ += current_flow_rate_ * dt_s;
-      nozzle_total_volume_ += current_flow_rate_ * dt_s;
+      nozzle_total_volume_ += nozzle_flow_rate_ * dt_s;
 
       // Pressure decays exponentially: τ = internal_volume / nominal_flow
       float tau_decay = (nominal_flow_ > 0.0f) ? internal_volume_ml_ / nominal_flow_ : 1.0f;
@@ -192,6 +235,7 @@ void MockPump::loop() {
       if (system_pressure_bar_ < 0.01f) {
         system_pressure_bar_ = 0.0f;
         current_flow_rate_ = 0.0f;
+        nozzle_flow_rate_ = 0.0f;
         if (rate_sensor_) {
           rate_sensor_->publish_state(0.0f);
         }
@@ -206,8 +250,10 @@ void MockPump::loop() {
       // No internal volume (or pressure already gone) — quick decay
       if (current_flow_rate_ > 0.0f) {
         current_flow_rate_ *= 0.9f;
+        nozzle_flow_rate_ *= 0.9f;
         if (current_flow_rate_ < 0.01f) {
           current_flow_rate_ = 0.0f;
+          nozzle_flow_rate_ = 0.0f;
           if (rate_sensor_) {
             rate_sensor_->publish_state(0.0f);
           }
@@ -229,9 +275,9 @@ void MockPump::loop() {
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
     last_log_ms = now;
-    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, V=%.1f mL, Nozzle=%.1f mL, t=%.1f s, P_sys=%.2f bar",
-             running_ ? "ON" : "OFF", current_flow_rate_, total_volume_,
-             nozzle_total_volume_, run_time_, system_pressure_bar_);
+    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, Qnoz=%.2f mL/s, V=%.1f mL, Nozzle=%.1f mL, Absorbed=%.1f mL, t=%.1f s, P_sys=%.2f bar",
+             running_ ? "ON" : "OFF", current_flow_rate_, nozzle_flow_rate_, total_volume_,
+             nozzle_total_volume_, absorbed_volume_, run_time_, system_pressure_bar_);
   }
 }
 
@@ -255,6 +301,8 @@ void MockPump::reset_flow() {
   total_volume_ = 0.0f;
   nozzle_total_volume_ = 0.0f;
   current_flow_rate_ = 0.0f;
+  nozzle_flow_rate_ = 0.0f;
+  absorbed_volume_ = 0.0f;
   run_time_ = 0.0f;
   system_pressure_bar_ = 0.0f;
 

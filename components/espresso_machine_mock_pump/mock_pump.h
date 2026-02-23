@@ -18,7 +18,7 @@ class MockPump;
 // ---------------------------------------------------------------------------
 class MockPumpNumber : public number::Number, public Component {
  public:
-  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_DENSITY, PUMP_MAX_PRESSURE, INTERNAL_VOLUME };
+  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_DENSITY, PUMP_MAX_PRESSURE, INTERNAL_VOLUME, PUCK_ABSORPTION_ML };
 
   void set_parent(MockPump *parent) { parent_ = parent; }
   void set_param_type(ParamType type) { param_type_ = type; }
@@ -47,6 +47,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_puck_density(float d) { puck_density_ = d; }
   void set_pump_max_pressure(float p) { pump_max_pressure_bar_ = p; }
   void set_internal_volume(float v) { internal_volume_ml_ = v; }
+  void set_puck_absorption(float v) { puck_absorption_ml_ = v; }
 
   // Link to mock heater so flow rate drives thermoblock cooling
   void set_heater(espresso_machine::IFlowObserver *h) { flow_observer_ = h; }
@@ -79,6 +80,10 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
     internal_volume_number_ = num;
     if (num) num->set_param_type(MockPumpNumber::ParamType::INTERNAL_VOLUME);
   }
+  void set_puck_absorption_number(MockPumpNumber *num) {
+    puck_absorption_number_ = num;
+    if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_ABSORPTION_ML);
+  }
 
   void setup() override;
   void loop() override;
@@ -102,12 +107,18 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   float get_puck_density() const { return puck_density_; }
   float get_pump_max_pressure() const { return pump_max_pressure_bar_; }
   float get_internal_volume() const { return internal_volume_ml_; }
+  float get_puck_absorption() const { return puck_absorption_ml_; }
 
   void update_nominal_flow(float v) { nominal_flow_ = v; }
   void update_puck_time_constant(float v) { puck_time_constant_ = v; }
   void update_puck_density(float v) { puck_density_ = v; }
   void update_pump_max_pressure(float v) { pump_max_pressure_bar_ = v; }
   void update_internal_volume(float v) { internal_volume_ml_ = v; }
+  void update_puck_absorption(float v) { puck_absorption_ml_ = v; }
+
+  // Nozzle flow accessors (flow exiting the puck into the cup)
+  float get_nozzle_flow_rate() const { return nozzle_flow_rate_; }
+  float get_nozzle_flow_total() const { return nozzle_total_volume_; }
 
  protected:
   void write_state(bool state) override;
@@ -141,6 +152,12 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // τ_decay = internal_volume_ml / nominal_flow  (e.g. 20mL / 4mL·s⁻¹ = 5 s)
   // Set to 0 to disable this model and revert to the legacy instant-decay behaviour.
   float internal_volume_ml_{20.0f};
+  // Puck absorption capacity [mL].
+  // Coffee grounds absorb water during extraction (~2ml per gram of coffee).
+  // A typical 18g dose absorbs ~36ml. This absorption happens primarily during
+  // the wetting phase and reduces nozzle output compared to pump input.
+  // The absorption follows an exponential saturation model tied to puck wetting.
+  float puck_absorption_ml_{36.0f};
 
   // Simulation state
   bool running_{false};
@@ -148,6 +165,8 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   float current_flow_rate_{0.0f};     // Instantaneous flow rate [mL/s]
   float total_volume_{0.0f};          // Accumulated pump volume [mL]
   float nozzle_total_volume_{0.0f};   // Accumulated nozzle output volume [mL]
+  float nozzle_flow_rate_{0.0f};      // Instantaneous nozzle flow rate [mL/s]
+  float absorbed_volume_{0.0f};       // Water absorbed by puck so far [mL]
   float system_pressure_bar_{0.0f};   // System pressure [bar]; tracks puck back-pressure
 
   // Sub-entities
@@ -161,6 +180,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   MockPumpNumber *puck_density_number_{nullptr};
   MockPumpNumber *pump_max_pressure_number_{nullptr};
   MockPumpNumber *internal_volume_number_{nullptr};
+  MockPumpNumber *puck_absorption_number_{nullptr};
   espresso_machine::IFlowObserver *flow_observer_{nullptr};
 
   // Timing
