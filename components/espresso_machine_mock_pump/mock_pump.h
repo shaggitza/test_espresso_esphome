@@ -18,7 +18,7 @@ class MockPump;
 // ---------------------------------------------------------------------------
 class MockPumpNumber : public number::Number, public Component {
  public:
-  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_PRESSURE, PUMP_MAX_PRESSURE, INTERNAL_VOLUME };
+  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_DENSITY, PUMP_MAX_PRESSURE, INTERNAL_VOLUME };
 
   void set_parent(MockPump *parent) { parent_ = parent; }
   void set_param_type(ParamType type) { param_type_ = type; }
@@ -44,7 +44,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Configuration setters (called from generated code)
   void set_nominal_flow(float f) { nominal_flow_ = f; }
   void set_puck_time_constant(float t) { puck_time_constant_ = t; }
-  void set_puck_pressure(float p) { puck_pressure_bar_ = p; }
+  void set_puck_density(float d) { puck_density_ = d; }
   void set_pump_max_pressure(float p) { pump_max_pressure_bar_ = p; }
   void set_internal_volume(float v) { internal_volume_ml_ = v; }
 
@@ -55,6 +55,8 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_rate_sensor(sensor::Sensor *s) { rate_sensor_ = s; }
   void set_total_sensor(sensor::Sensor *s) { total_sensor_ = s; }
   void set_pressure_sensor(sensor::Sensor *s) { pressure_sensor_ = s; }
+  void set_nozzle_rate_sensor(sensor::Sensor *s) { nozzle_rate_sensor_ = s; }
+  void set_nozzle_total_sensor(sensor::Sensor *s) { nozzle_total_sensor_ = s; }
 
   // Runtime tuning number entities
   void set_nominal_flow_number(MockPumpNumber *num) {
@@ -65,9 +67,9 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
     puck_time_constant_number_ = num;
     if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_TIME_CONSTANT);
   }
-  void set_puck_pressure_number(MockPumpNumber *num) {
-    puck_pressure_number_ = num;
-    if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_PRESSURE);
+  void set_puck_density_number(MockPumpNumber *num) {
+    puck_density_number_ = num;
+    if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_DENSITY);
   }
   void set_pump_max_pressure_number(MockPumpNumber *num) {
     pump_max_pressure_number_ = num;
@@ -97,13 +99,13 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Runtime parameter accessors/mutators
   float get_nominal_flow() const { return nominal_flow_; }
   float get_puck_time_constant() const { return puck_time_constant_; }
-  float get_puck_pressure() const { return puck_pressure_bar_; }
+  float get_puck_density() const { return puck_density_; }
   float get_pump_max_pressure() const { return pump_max_pressure_bar_; }
   float get_internal_volume() const { return internal_volume_ml_; }
 
   void update_nominal_flow(float v) { nominal_flow_ = v; }
   void update_puck_time_constant(float v) { puck_time_constant_ = v; }
-  void update_puck_pressure(float v) { puck_pressure_bar_ = v; }
+  void update_puck_density(float v) { puck_density_ = v; }
   void update_pump_max_pressure(float v) { pump_max_pressure_bar_ = v; }
   void update_internal_volume(float v) { internal_volume_ml_ = v; }
 
@@ -112,18 +114,26 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
 
   // Physics parameters
   //
-  // Pump curve model (replaces naive pressure_factor):
-  //   Q_ss = Q_max × (1 − P_puck / P_stall)     [linear pump curve]
-  //   Q_max = nominal_flow / (1 − 9 / pump_max_pressure)  [calibrated at 9 bar]
+  // Puck density model (replaces bar-based puck pressure):
+  //   puck_density = 1..100 dimensionless scale
+  //   flow_fraction = (101 − D) / 100     → 1.0 at D=1, 0.01 at D=100
+  //   Q_ss          = nominal_flow × flow_fraction
+  //   P_equilibrium = pump_max_pressure × (D − 1) / 100
+  //                   → 0 bar at D=1 (no resistance), ~P_max at D=100 (stall)
   //
-  // Wetting model: effective wetting time scales with puck resistance so that
-  // a harder puck takes proportionally longer to wet before flow breaks through.
-  //   effective_τ = puck_time_constant × (puck_pressure / 9 bar)
+  // Wetting model: time constant scales with density so a denser puck
+  // takes proportionally longer to wet before flow breaks through.
+  //   effective_τ = puck_time_constant × (D / 100)
   //   wetted_fraction(t) = 1 − exp(−t / effective_τ)
   //   Q(t) = Q_ss × wetted_fraction(t)
-  float nominal_flow_{4.0f};          // Target flow at 9 bar rated pressure [mL/s]
-  float puck_time_constant_{10.0f};   // Wetting time constant at 9 bar reference [s]
-  float puck_pressure_bar_{9.0f};     // Puck back-pressure resistance [bar]
+  //
+  // Pressure model: fast first-order rise toward P_equilibrium (τ = 1.5 s).
+  //   This makes pressure build quickly as observed in a real machine,
+  //   then stabilise at the puck back-pressure.  At D=100 pressure climbs
+  //   to near the pump stall pressure since no water can escape.
+  float nominal_flow_{4.0f};           // Max unimpeded flow (D=1) [mL/s]
+  float puck_time_constant_{10.0f};    // Wetting time constant at D=100 [s]
+  float puck_density_{50.0f};          // Puck density: 1=open, 100=blocked
   float pump_max_pressure_bar_{15.0f}; // Pump stall pressure [bar] (Ulka EP5 ≈ 15 bar)
   // Internal volume of tubing and piping inside the machine [mL].
   // When the pump stops, this trapped pressurized volume continues to drive
@@ -134,18 +144,21 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
 
   // Simulation state
   bool running_{false};
-  float run_time_{0.0f};             // Time since pump started [s]
-  float current_flow_rate_{0.0f};    // Instantaneous flow rate [mL/s]
-  float total_volume_{0.0f};         // Accumulated volume [mL]
-  float system_pressure_bar_{0.0f};  // Trapped system pressure [bar]; decays after pump stops
+  float run_time_{0.0f};              // Time since pump started [s]
+  float current_flow_rate_{0.0f};     // Instantaneous flow rate [mL/s]
+  float total_volume_{0.0f};          // Accumulated pump volume [mL]
+  float nozzle_total_volume_{0.0f};   // Accumulated nozzle output volume [mL]
+  float system_pressure_bar_{0.0f};   // System pressure [bar]; tracks puck back-pressure
 
   // Sub-entities
   sensor::Sensor *rate_sensor_{nullptr};
   sensor::Sensor *total_sensor_{nullptr};
   sensor::Sensor *pressure_sensor_{nullptr};
+  sensor::Sensor *nozzle_rate_sensor_{nullptr};
+  sensor::Sensor *nozzle_total_sensor_{nullptr};
   MockPumpNumber *nominal_flow_number_{nullptr};
   MockPumpNumber *puck_time_constant_number_{nullptr};
-  MockPumpNumber *puck_pressure_number_{nullptr};
+  MockPumpNumber *puck_density_number_{nullptr};
   MockPumpNumber *pump_max_pressure_number_{nullptr};
   MockPumpNumber *internal_volume_number_{nullptr};
   espresso_machine::IFlowObserver *flow_observer_{nullptr};
