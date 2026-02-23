@@ -211,6 +211,8 @@ espresso_machine_mock_pump:
     name: "Brew Flow Rate"
   total_sensor:
     name: "Brew Flow Total"
+  pressure_sensor:
+    name: "Brew Pump Pressure"
 
   # HA number entities for runtime tuning
   nominal_flow_number:

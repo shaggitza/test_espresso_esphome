@@ -54,6 +54,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Sensor setters
   void set_rate_sensor(sensor::Sensor *s) { rate_sensor_ = s; }
   void set_total_sensor(sensor::Sensor *s) { total_sensor_ = s; }
+  void set_pressure_sensor(sensor::Sensor *s) { pressure_sensor_ = s; }
 
   // Runtime tuning number entities
   void set_nominal_flow_number(MockPumpNumber *num) {
@@ -89,6 +90,9 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   float get_flow_rate() const override { return current_flow_rate_; }
   float get_flow_total() const override { return total_volume_; }
   void reset_flow() override;
+
+  // Pressure accessor — instantaneous system pressure [bar]
+  float get_system_pressure() const { return system_pressure_bar_; }
 
   // Runtime parameter accessors/mutators
   float get_nominal_flow() const { return nominal_flow_; }
@@ -138,6 +142,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Sub-entities
   sensor::Sensor *rate_sensor_{nullptr};
   sensor::Sensor *total_sensor_{nullptr};
+  sensor::Sensor *pressure_sensor_{nullptr};
   MockPumpNumber *nominal_flow_number_{nullptr};
   MockPumpNumber *puck_time_constant_number_{nullptr};
   MockPumpNumber *puck_pressure_number_{nullptr};

@@ -516,6 +516,130 @@ TEST(MockPump, ChangingNominalFlowAffectsFutureRate) {
 // Pump restart behavior
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Pressure sensor tests
+//
+// system_pressure_bar_ is computed during simulation and exposed via
+// get_system_pressure() and the optional pressure_sensor_.
+// ---------------------------------------------------------------------------
+
+TEST(MockPump, PressureIsZeroWhenPumpOff) {
+  MockPumpFixture f;
+  // No pump activity — pressure should be zero at start
+  EXPECT_FLOAT_EQ(f.pump.get_system_pressure(), 0.0f);
+}
+
+TEST(MockPump, PressureBuildsWhilePumping) {
+  // With default params (9 bar puck, τ=10s, P_stall=15 bar):
+  // system_pressure = puck_pressure × wetted_fraction
+  // After 5τ (≈50s), wetted_fraction ≈ 1.0 → pressure ≈ puck_pressure (9 bar)
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_puck_pressure(9.0f);
+  f.pump.set_pump_max_pressure(15.0f);
+  f.pump.turn_on();
+
+  // Run for 5τ = 50 seconds
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  // Pressure should be near puck_pressure (9 bar) at steady state
+  EXPECT_NEAR(f.pump.get_system_pressure(), 9.0f, 0.5f);
+}
+
+TEST(MockPump, PressureStartsNearZeroOnPumpStart) {
+  // At pump start, wetted_fraction = 0 so system_pressure should be near 0
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.turn_on();
+  f.advance_time_ms(10);  // Very first tick
+
+  // At t=0.01s: wetted_fraction ≈ 1 - exp(-0.01/10) ≈ 0.001
+  EXPECT_NEAR(f.pump.get_system_pressure(), 0.0f, 0.1f);
+}
+
+TEST(MockPump, PressureDecaysAfterPumpStops) {
+  // Pump at steady state then stopped — pressure should decay
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_internal_volume(20.0f);  // τ_decay = 5 s
+  f.pump.turn_on();
+
+  // Run to steady state (5τ = 50 s)
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+  float peak_pressure = f.pump.get_system_pressure();
+  ASSERT_NEAR(peak_pressure, 9.0f, 0.5f);  // Sanity check
+
+  f.pump.turn_off();
+
+  // Run for 2× τ_decay (10 s) — pressure should have decayed significantly
+  for (int i = 0; i < 1000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  EXPECT_LT(f.pump.get_system_pressure(), peak_pressure * 0.5f);
+}
+
+TEST(MockPump, PressureIsZeroAfterReset) {
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.turn_on();
+
+  // Accumulate some pressure
+  for (int i = 0; i < 1000; ++i) {
+    f.advance_time_ms(10);
+  }
+  EXPECT_GT(f.pump.get_system_pressure(), 0.0f);
+
+  f.pump.reset_flow();
+  EXPECT_FLOAT_EQ(f.pump.get_system_pressure(), 0.0f);
+}
+
+TEST(MockPump, PressureSensorPublished) {
+  MockPump pump;
+  Sensor rate_sensor, total_sensor, pressure_sensor;
+  pump.set_nominal_flow(4.0f);
+  pump.set_puck_time_constant(0.0f);  // immediate wetting for quick test
+  pump.set_pump_max_pressure(15.0f);
+  pump.set_puck_pressure(9.0f);
+  pump.set_internal_volume(0.0f);
+  pump.set_rate_sensor(&rate_sensor);
+  pump.set_total_sensor(&total_sensor);
+  pump.set_pressure_sensor(&pressure_sensor);
+
+  g_mock_millis = 0;
+  pump.setup();
+  pump.turn_on();
+
+  // Advance past the 250ms sensor publish threshold
+  g_mock_millis = 300;
+  pump.loop();
+
+  // With τ=0 (immediate wetting), pressure at steady state = puck_pressure
+  EXPECT_NEAR(pressure_sensor.state, 9.0f, 0.5f);
+}
+
+TEST(MockPump, PressureSensorPublishesZeroOnReset) {
+  MockPump pump;
+  Sensor pressure_sensor;
+  pump.set_nominal_flow(4.0f);
+  pump.set_puck_time_constant(0.0f);
+  pump.set_pump_max_pressure(15.0f);
+  pump.set_puck_pressure(9.0f);
+  pump.set_pressure_sensor(&pressure_sensor);
+
+  g_mock_millis = 0;
+  pump.setup();
+  pump.turn_on();
+
+  // Use a timestamp well past the 250ms threshold AND beyond the previous test's publish time
+  g_mock_millis = 1000;
+  pump.loop();
+  EXPECT_GT(pressure_sensor.state, 0.0f);  // confirm it was published
+
+  pump.reset_flow();
+  EXPECT_FLOAT_EQ(pressure_sensor.state, 0.0f);
+}
+
 TEST(MockPump, RestartResetsRunTimeButNotVolume) {
   MockPumpFixture f(4.0f, 10.0f);
   f.pump.turn_on();

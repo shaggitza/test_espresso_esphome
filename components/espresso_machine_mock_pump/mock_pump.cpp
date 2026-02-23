@@ -154,6 +154,9 @@ void MockPump::loop() {
       if (total_sensor_) {
         total_sensor_->publish_state(total_volume_);
       }
+      if (pressure_sensor_) {
+        pressure_sensor_->publish_state(system_pressure_bar_);
+      }
     }
   } else {
     // -----------------------------------------------------------------------
@@ -197,6 +200,9 @@ void MockPump::loop() {
         current_flow_rate_ = 0.0f;
         if (rate_sensor_) {
           rate_sensor_->publish_state(0.0f);
+        }
+        if (pressure_sensor_) {
+          pressure_sensor_->publish_state(0.0f);
         }
       }
     } else {
@@ -256,6 +262,9 @@ void MockPump::reset_flow() {
   }
   if (total_sensor_) {
     total_sensor_->publish_state(0.0f);
+  }
+  if (pressure_sensor_) {
+    pressure_sensor_->publish_state(0.0f);
   }
 
   ESP_LOGD(TAG, "Flow counters reset");

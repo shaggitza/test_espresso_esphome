@@ -259,6 +259,10 @@ views:
             name: Volume (mL)
             color: "#2ecc71"
             y_axis: secondary
+          - entity: sensor.philips_barista_brew_mock_brew_pump_pressure
+            name: Pressure (bar)
+            color: "#e67e22"
+            y_axis: secondary
         hours_to_show: 0.083
         points_per_hour: 720
         line_width: 2
@@ -370,7 +374,7 @@ views:
       - type: custom:apexcharts-card
         header:
           show: true
-          title: Flow Rate — Selected Shot
+          title: Flow Rate & Pressure — Selected Shot
           show_states: true
           colorize_states: true
         graph_span: "{{ states('sensor.espresso_selected_shot_span_sec') | int(180) }}sec"
@@ -386,6 +390,12 @@ views:
           - entity: sensor.philips_barista_brew_mock_brew_flow_total
             name: Volume (mL)
             color: "#2ecc71"
+            stroke_width: 2
+            fill_raw: "last"
+            type: line
+          - entity: sensor.philips_barista_brew_mock_brew_pump_pressure
+            name: Pressure (bar)
+            color: "#e67e22"
             stroke_width: 2
             fill_raw: "last"
             type: line
@@ -487,7 +497,7 @@ views:
       # FLOW GRAPH — observe pump curve changes live
       # -----------------------------------------------------------------------
       - type: custom:mini-graph-card
-        name: Flow Rate + Volume
+        name: Flow Rate + Volume + Pressure
         entities:
           - entity: sensor.philips_barista_brew_mock_brew_flow_rate
             name: Flow Rate (mL/s)
@@ -495,6 +505,10 @@ views:
           - entity: sensor.philips_barista_brew_mock_brew_flow_total
             name: Volume (mL)
             color: "#2ecc71"
+            y_axis: secondary
+          - entity: sensor.philips_barista_brew_mock_brew_pump_pressure
+            name: Pressure (bar)
+            color: "#e67e22"
             y_axis: secondary
         hours_to_show: 0.083
         points_per_hour: 720
