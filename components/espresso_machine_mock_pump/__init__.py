@@ -24,6 +24,23 @@ Flow effects of different puck resistances (P_stall = 15 bar, Q_nom = 4 mL/s):
     12 bar (hard puck)  → Q_ss = 2.0 mL/s, wetting τ_eff = 13.3 s (longer)
     15 bar (stall)      → Q_ss = 0          (pump stalls, only wetting)
 
+Residual Pressure Decay Model (internal_volume_ml):
+    When the pump stops, the pressurised water trapped inside the machine's
+    tubing and piping continues to drive flow through the puck/valve path
+    until the pressure bleeds off.  This produces a realistic gradual flow
+    decay rather than an instant drop to zero.
+
+    system_pressure(t) = P_stop × exp(−t / τ_decay)
+    Q_residual(t)      = Q_ss × (system_pressure(t) / P_puck)
+    τ_decay            = internal_volume_ml / nominal_flow   [s]
+
+    Example with internal_volume_ml = 20 mL, nominal_flow = 4 mL/s:
+        τ_decay = 5 s  → flow is at ~37 % of Q_ss after 5 s
+        flow is effectively zero after ~25 s (5 × τ)
+
+    Set internal_volume_ml = 0 to disable the model and revert to legacy
+    instant-decay behaviour.
+
 All physics parameters are exposed as HA number entities — adjustable without
 reflashing.
 
@@ -36,6 +53,7 @@ Example usage:
       pump_max_pressure_bar: 15.0
       puck_time_constant_s: 10.0
       puck_pressure_bar: 9.0
+      internal_volume_ml: 20.0
       rate_sensor:
         name: "Brew Flow Rate"
       total_sensor:
@@ -70,6 +88,7 @@ CONF_NOMINAL_FLOW_ML_PER_S = "nominal_flow_ml_per_s"
 CONF_PUMP_MAX_PRESSURE_BAR = "pump_max_pressure_bar"
 CONF_PUCK_TIME_CONSTANT_S = "puck_time_constant_s"
 CONF_PUCK_PRESSURE_BAR = "puck_pressure_bar"
+CONF_INTERNAL_VOLUME_ML = "internal_volume_ml"
 CONF_MOCK_HEATER = "mock_heater"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
@@ -79,6 +98,7 @@ CONF_NOMINAL_FLOW_NUMBER = "nominal_flow_number"
 CONF_PUMP_MAX_PRESSURE_NUMBER = "pump_max_pressure_number"
 CONF_PUCK_TIME_CONSTANT_NUMBER = "puck_time_constant_number"
 CONF_PUCK_PRESSURE_NUMBER = "puck_pressure_number"
+CONF_INTERNAL_VOLUME_NUMBER = "internal_volume_number"
 
 CONFIG_SCHEMA = (
     switch.switch_schema(MockPump)
@@ -95,6 +115,11 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_PUCK_TIME_CONSTANT_S, default=10.0): cv.positive_float,
             # Puck back-pressure. Affects both steady-state flow and wetting duration.
             cv.Optional(CONF_PUCK_PRESSURE_BAR, default=9.0): cv.positive_float,
+            # Internal volume of tubing and piping [mL].
+            # Governs how long residual pressure drives flow after the pump stops.
+            # τ_decay = internal_volume_ml / nominal_flow_ml_per_s  (e.g. 20mL/4mL·s⁻¹ = 5s)
+            # Set to 0 to disable the model and use the legacy instant-decay behaviour.
+            cv.Optional(CONF_INTERNAL_VOLUME_ML, default=20.0): cv.positive_float,
             # Optional link to mock heater — drives flow-based thermoblock cooling
             cv.Optional(CONF_MOCK_HEATER): cv.use_id(cg.Component),
             # Flow sensor sub-entities (same interface as espresso_machine_flow_meter)
@@ -119,6 +144,9 @@ CONFIG_SCHEMA = (
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
             cv.Optional(CONF_PUCK_PRESSURE_NUMBER): number.number_schema(
+                MockPumpNumber
+            ).extend(cv.COMPONENT_SCHEMA),
+            cv.Optional(CONF_INTERNAL_VOLUME_NUMBER): number.number_schema(
                 MockPumpNumber
             ).extend(cv.COMPONENT_SCHEMA),
         }
@@ -149,6 +177,7 @@ async def to_code(config):
     cg.add(var.set_pump_max_pressure(config[CONF_PUMP_MAX_PRESSURE_BAR]))
     cg.add(var.set_puck_time_constant(config[CONF_PUCK_TIME_CONSTANT_S]))
     cg.add(var.set_puck_pressure(config[CONF_PUCK_PRESSURE_BAR]))
+    cg.add(var.set_internal_volume(config[CONF_INTERNAL_VOLUME_ML]))
 
     # Wire to mock heater for flow-based thermoblock cooling
     if CONF_MOCK_HEATER in config:
@@ -200,4 +229,13 @@ async def to_code(config):
         )
         await cg.register_component(num_var, num_conf)
         cg.add(var.set_puck_pressure_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_INTERNAL_VOLUME_NUMBER in config:
+        num_conf = config[CONF_INTERNAL_VOLUME_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.0, max_value=200.0, step=1.0
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_internal_volume_number(num_var))
         cg.add(num_var.set_parent(var))

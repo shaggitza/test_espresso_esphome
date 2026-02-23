@@ -24,6 +24,7 @@ espresso_machine_mock_pump:
   name: "Mock Pump"
   nominal_flow_ml_per_s: 4.0
   puck_time_constant_s: 10.0
+  internal_volume_ml: 20.0
 
   rate_sensor:
     name: "Brew Flow Rate"

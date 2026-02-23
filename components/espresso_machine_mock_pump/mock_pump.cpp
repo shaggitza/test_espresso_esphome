@@ -28,6 +28,9 @@ void MockPumpNumber::setup() {
     case ParamType::PUMP_MAX_PRESSURE:
       initial_value = parent_->get_pump_max_pressure();
       break;
+    case ParamType::INTERNAL_VOLUME:
+      initial_value = parent_->get_internal_volume();
+      break;
   }
   this->publish_state(initial_value);
 }
@@ -52,6 +55,10 @@ void MockPumpNumber::control(float value) {
       parent_->update_pump_max_pressure(value);
       ESP_LOGD(TAG, "Pump max pressure updated to %.1f bar", value);
       break;
+    case ParamType::INTERNAL_VOLUME:
+      parent_->update_internal_volume(value);
+      ESP_LOGD(TAG, "Internal volume updated to %.1f mL", value);
+      break;
   }
   this->publish_state(value);
 }
@@ -66,6 +73,9 @@ void MockPump::setup() {
   ESP_LOGI(TAG, "  Pump stall pressure: %.1f bar", pump_max_pressure_bar_);
   ESP_LOGI(TAG, "  Puck pressure: %.1f bar", puck_pressure_bar_);
   ESP_LOGI(TAG, "  Puck time constant: %.1f s (at 9 bar reference)", puck_time_constant_);
+  ESP_LOGI(TAG, "  Internal volume: %.1f mL (τ_decay = %.1f s)",
+           internal_volume_ml_,
+           (nominal_flow_ > 0.0f) ? internal_volume_ml_ / nominal_flow_ : 0.0f);
 }
 
 void MockPump::loop() {
@@ -73,6 +83,7 @@ void MockPump::loop() {
   uint32_t dt_ms = now - last_update_ms_;
 
   // Update every ~10 ms for smooth simulation (same rate as mock heater)
+  static constexpr float PUMP_RATED_PRESSURE = 9.0f;
   if (dt_ms < 10) {
     return;
   }
@@ -97,11 +108,11 @@ void MockPump::loop() {
     // -----------------------------------------------------------------------
 
     // Steady-state flow from pump curve (clamped to [0, Q_max])
-    static constexpr float PUMP_RATED_PRESSURE = 9.0f;
     float puck_curve_factor = 1.0f - puck_pressure_bar_ / pump_max_pressure_bar_;
     if (puck_curve_factor <= 0.0f) {
       // Puck resistance ≥ pump stall pressure — no flow possible
       current_flow_rate_ = 0.0f;
+      system_pressure_bar_ = 0.0f;
     } else {
       // Q_max calibrated: at puck_pressure = 9 bar, Q = nominal_flow
       float Q_max = (pump_max_pressure_bar_ > PUMP_RATED_PRESSURE)
@@ -123,6 +134,11 @@ void MockPump::loop() {
       }
 
       current_flow_rate_ = Q_steady * wetted_fraction;
+
+      // Track system pressure: pressure builds as puck wets and flow establishes.
+      // This represents the trapped pressure in internal piping/tubing that will
+      // drive residual flow after the pump stops.
+      system_pressure_bar_ = puck_pressure_bar_ * wetted_fraction;
     }
 
     // Accumulate volume: V += Q × dt
@@ -140,14 +156,58 @@ void MockPump::loop() {
       }
     }
   } else {
-    // Pump is off — flow decays to zero
-    if (current_flow_rate_ > 0.0f) {
-      // Quick decay when pump stops
-      current_flow_rate_ *= 0.9f;
-      if (current_flow_rate_ < 0.01f) {
+    // -----------------------------------------------------------------------
+    // Pump is off — model residual-pressure-driven flow
+    //
+    // When the pump stops, the internal volume of tubing and piping remains
+    // pressurised. This trapped pressure continues to drive water through the
+    // puck/valve until it bleeds off, causing a gradual flow decay instead of
+    // an instant drop to zero.
+    //
+    // Model:
+    //   Q_residual(t) = Q_ss × (P_system / P_puck)
+    //   P_system decays: dP/dt = −P / τ_decay
+    //   τ_decay = internal_volume_ml / nominal_flow    [s]
+    //
+    // With internal_volume_ml = 0 the model is disabled and flow decays
+    // immediately (legacy behaviour preserved).
+    // -----------------------------------------------------------------------
+    if (internal_volume_ml_ > 0.0f && system_pressure_bar_ > 0.01f &&
+        puck_pressure_bar_ > 0.0f) {
+      // Steady-state flow this pump would produce at full puck pressure
+      float puck_curve_factor = 1.0f - puck_pressure_bar_ / pump_max_pressure_bar_;
+      float Q_ss = 0.0f;
+      if (puck_curve_factor > 0.0f && pump_max_pressure_bar_ > PUMP_RATED_PRESSURE) {
+        float Q_max = nominal_flow_ / (1.0f - PUMP_RATED_PRESSURE / pump_max_pressure_bar_);
+        Q_ss = Q_max * puck_curve_factor;
+      }
+
+      // Residual flow proportional to remaining system pressure
+      current_flow_rate_ = Q_ss * (system_pressure_bar_ / puck_pressure_bar_);
+
+      // Accumulate residual volume
+      total_volume_ += current_flow_rate_ * dt_s;
+
+      // Pressure decays exponentially: τ = internal_volume / nominal_flow
+      float tau_decay = (nominal_flow_ > 0.0f) ? internal_volume_ml_ / nominal_flow_ : 1.0f;
+      system_pressure_bar_ *= std::exp(-dt_s / tau_decay);
+
+      if (system_pressure_bar_ < 0.01f) {
+        system_pressure_bar_ = 0.0f;
         current_flow_rate_ = 0.0f;
         if (rate_sensor_) {
           rate_sensor_->publish_state(0.0f);
+        }
+      }
+    } else {
+      // No internal volume (or pressure already gone) — quick decay
+      if (current_flow_rate_ > 0.0f) {
+        current_flow_rate_ *= 0.9f;
+        if (current_flow_rate_ < 0.01f) {
+          current_flow_rate_ = 0.0f;
+          if (rate_sensor_) {
+            rate_sensor_->publish_state(0.0f);
+          }
         }
       }
     }
@@ -163,9 +223,9 @@ void MockPump::loop() {
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
     last_log_ms = now;
-    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, V=%.1f mL, t=%.1f s, P=%.1f bar",
+    ESP_LOGD(TAG, "Pump %s, Q=%.2f mL/s, V=%.1f mL, t=%.1f s, P_sys=%.2f bar",
              running_ ? "ON" : "OFF", current_flow_rate_, total_volume_, run_time_,
-             puck_pressure_bar_);
+             system_pressure_bar_);
   }
 }
 
@@ -174,12 +234,14 @@ void MockPump::write_state(bool state) {
   this->publish_state(state);
 
   if (state) {
-    // Pump starting — reset run time, but NOT total volume
+    // Pump starting — reset run time and system pressure, but NOT total volume
     // (total volume is only reset by explicit reset_flow() call)
     run_time_ = 0.0f;
+    system_pressure_bar_ = 0.0f;
     ESP_LOGI(TAG, "Mock pump started");
   } else {
-    ESP_LOGI(TAG, "Mock pump stopped (total: %.1f mL)", total_volume_);
+    ESP_LOGI(TAG, "Mock pump stopped (total: %.1f mL, residual pressure: %.2f bar)",
+             total_volume_, system_pressure_bar_);
   }
 }
 
@@ -187,6 +249,7 @@ void MockPump::reset_flow() {
   total_volume_ = 0.0f;
   current_flow_rate_ = 0.0f;
   run_time_ = 0.0f;
+  system_pressure_bar_ = 0.0f;
 
   if (rate_sensor_) {
     rate_sensor_->publish_state(0.0f);
