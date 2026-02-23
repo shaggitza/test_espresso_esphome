@@ -79,6 +79,18 @@ jobs:
       - name: Compile all components (host platform)
         run: esphome compile tests/test_compile.yaml
 
+  addon-build:
+    name: Build addon Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build espresso_shot_history addon image
+        run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12 \
+            addons/espresso_shot_history/
+
   cpp-test:
     name: C++ unit tests (GoogleTest)
     runs-on: ubuntu-latest
