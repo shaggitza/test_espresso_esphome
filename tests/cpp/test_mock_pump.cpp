@@ -235,8 +235,11 @@ TEST(MockPump, VolumeAccumulatesWhileRunning) {
   EXPECT_LT(f.pump.get_flow_total(), 20.0f);
 }
 
-TEST(MockPump, VolumeStopsAccumulatingWhenOff) {
+TEST(MockPump, VolumeStopsAccumulatingWhenOffAndNoPressureModel) {
+  // Verify that with internal_volume = 0 (pressure model disabled), volume
+  // stops accumulating as soon as the pump is off (legacy behaviour).
   MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_internal_volume(0.0f);  // Disable pressure-decay model
   f.pump.turn_on();
 
   // Run for 5 seconds
@@ -282,6 +285,194 @@ TEST(MockPump, ResetDoesNotStopPump) {
   f.pump.turn_on();
   f.pump.reset_flow();
   EXPECT_TRUE(f.pump.is_running());
+}
+
+// ---------------------------------------------------------------------------
+// Pressure buildup / residual-flow tests
+//
+// When internal_volume_ml > 0 the mock simulates the trapped pressure in
+// tubing/piping continuing to drive flow after the pump stops.
+// τ_decay = internal_volume_ml / nominal_flow
+// ---------------------------------------------------------------------------
+
+TEST(MockPump, ResidualFlowDecreasesGraduallyWithInternalVolume) {
+  // With internal_volume_ml = 20, τ = 20/4 = 5 s.
+  // After pump stops at steady state, flow should still be measurable
+  // at 1 τ (i.e. 37% of steady-state) rather than snapping to zero.
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_internal_volume(20.0f);
+  f.pump.turn_on();
+
+  // Run to steady state (5τ of wetting = 50 s)
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+  float steady_flow = f.pump.get_flow_rate();
+  ASSERT_NEAR(steady_flow, 4.0f, 0.1f);  // Sanity-check steady state
+
+  // Stop pump
+  f.pump.turn_off();
+
+  // Immediately after stop, flow should still be positive (not zero)
+  f.advance_time_ms(10);
+  EXPECT_GT(f.pump.get_flow_rate(), 0.0f);
+
+  // After 1 τ (5 s), flow should be significantly above zero (≥ 30% of steady)
+  for (int i = 0; i < 499; ++i) {  // 499 × 10ms = 4.99 s (already did 1 step)
+    f.advance_time_ms(10);
+  }
+  EXPECT_GT(f.pump.get_flow_rate(), steady_flow * 0.25f);
+}
+
+TEST(MockPump, ResidualFlowEventuallyReachesZero) {
+  // After many decay time constants, flow must be essentially zero.
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_internal_volume(20.0f);
+  f.pump.turn_on();
+
+  // Run to steady state
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  f.pump.turn_off();
+
+  // Run for 10 τ (= 50 s at τ = 5 s): expect flow < 1% of steady state
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  EXPECT_NEAR(f.pump.get_flow_rate(), 0.0f, 0.05f);
+}
+
+TEST(MockPump, LargerInternalVolumeSlowsDecay) {
+  // Larger internal_volume → longer τ_decay → higher flow after equal elapsed time.
+  MockPumpFixture f_small(4.0f, 10.0f);
+  f_small.pump.set_internal_volume(10.0f);  // τ = 2.5 s
+
+  MockPumpFixture f_large(4.0f, 10.0f);
+  f_large.pump.set_internal_volume(40.0f);  // τ = 10 s
+
+  f_small.pump.turn_on();
+  f_large.pump.turn_on();
+
+  // Run both to steady state
+  for (int i = 0; i < 5000; ++i) {
+    f_small.advance_time_ms(10);
+    f_large.advance_time_ms(10);
+  }
+
+  f_small.pump.turn_off();
+  f_large.pump.turn_off();
+
+  // Advance 5 s: small volume should have decayed much more
+  for (int i = 0; i < 500; ++i) {
+    f_small.advance_time_ms(10);
+    f_large.advance_time_ms(10);
+  }
+
+  EXPECT_LT(f_small.pump.get_flow_rate(), f_large.pump.get_flow_rate());
+}
+
+TEST(MockPump, ZeroInternalVolumeGivesQuickDecay) {
+  // Disabling pressure model (internal_volume = 0) gives the legacy quick decay.
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_internal_volume(0.0f);
+  f.pump.turn_on();
+
+  // Run to steady state
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  f.pump.turn_off();
+
+  // After 2 s (200 × 10ms steps) with no internal volume, flow should be < 1% of steady.
+  // Each step multiplies flow by 0.9, so after 200 steps: 0.9^200 ≈ 7e-10 ≈ 0.
+  for (int i = 0; i < 200; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  EXPECT_NEAR(f.pump.get_flow_rate(), 0.0f, 0.01f);
+}
+
+TEST(MockPump, ResidualFlowAccumulatesVolume) {
+  // Volume should keep accumulating after pump stops while pressure decays.
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_internal_volume(20.0f);
+  f.pump.turn_on();
+
+  // Run to steady state
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  f.pump.turn_off();
+  float volume_at_stop = f.pump.get_flow_total();
+
+  // Run for 1 decay time constant
+  for (int i = 0; i < 500; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  // Volume should have increased (residual flow delivered extra water)
+  EXPECT_GT(f.pump.get_flow_total(), volume_at_stop);
+}
+
+TEST(MockPump, ResidualFlowResetClearsSystemPressure) {
+  // reset_flow() should clear system pressure so no residual flow after reset.
+  MockPumpFixture f(4.0f, 10.0f);
+  f.pump.set_internal_volume(20.0f);
+  f.pump.turn_on();
+
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  f.pump.turn_off();
+  f.advance_time_ms(10);  // Let one tick run (residual flow active)
+  EXPECT_GT(f.pump.get_flow_rate(), 0.0f);  // Confirm residual flow
+
+  f.pump.reset_flow();  // Clear everything
+  EXPECT_FLOAT_EQ(f.pump.get_flow_rate(), 0.0f);
+  EXPECT_FLOAT_EQ(f.pump.get_flow_total(), 0.0f);
+
+  // Another loop tick should not restart residual flow
+  f.advance_time_ms(10);
+  EXPECT_FLOAT_EQ(f.pump.get_flow_rate(), 0.0f);
+}
+
+TEST(MockPump, EarlyStopYieldsLessResidualPressure) {
+  // Stopping during wetting phase (before steady state) should yield less
+  // residual flow than stopping after steady state, because system_pressure
+  // tracks wetted_fraction.
+  MockPumpFixture f_early(4.0f, 10.0f);
+  f_early.pump.set_internal_volume(20.0f);
+
+  MockPumpFixture f_late(4.0f, 10.0f);
+  f_late.pump.set_internal_volume(20.0f);
+
+  f_early.pump.turn_on();
+  f_late.pump.turn_on();
+
+  // Early: stop after 1 s (well within wetting phase, wetted_fraction ≈ 0.095)
+  for (int i = 0; i < 100; ++i) {
+    f_early.advance_time_ms(10);
+  }
+  f_early.pump.turn_off();
+
+  // Late: stop after 50 s (5τ, near steady state)
+  for (int i = 0; i < 5000; ++i) {
+    f_late.advance_time_ms(10);
+  }
+  f_late.pump.turn_off();
+
+  // Advance one tick to get the first residual reading
+  f_early.advance_time_ms(10);
+  f_late.advance_time_ms(10);
+
+  // Early stop should produce less residual flow than late stop
+  EXPECT_LT(f_early.pump.get_flow_rate(), f_late.pump.get_flow_rate());
 }
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,12 @@
 #     9 bar  (nominal)    → Q_ss = 4.0 mL/s, τ_eff = 10 s
 #     12 bar (hard puck)  → Q_ss = 2.0 mL/s, τ_eff = 13.3 s
 #     15 bar (stall)      → Q_ss = 0  (pump stalls)
+#
+# RESIDUAL PRESSURE DECAY MODEL (mock pump):
+#   When the pump stops, trapped pressurised water continues to drive flow:
+#   τ_decay = internal_volume_ml / nominal_flow  (e.g. 20 mL / 4 mL·s⁻¹ = 5 s)
+#   Flow decays as: Q(t) = Q_ss × (P_system(t) / P_puck)
+#   Set internal_volume_ml = 0 to disable (legacy instant-decay behaviour).
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -194,6 +200,10 @@ espresso_machine_mock_pump:
   pump_max_pressure_bar: 15.0    # Ulka EP5 stall pressure
   puck_time_constant_s: 10.0
   puck_pressure_bar: 9.0
+  # Internal volume of tubing + piping [mL]. Residual pressure after pump stops
+  # continues to drive flow with τ_decay = internal_volume / nominal_flow = 5 s.
+  # Increase to slow down post-stop flow; set to 0 to revert to instant-decay.
+  internal_volume_ml: 20.0
   mock_heater: mock_heater
 
   # Flow sensors — same as espresso_machine_flow_meter sensors
@@ -212,6 +222,8 @@ espresso_machine_mock_pump:
   puck_pressure_number:
     id: main_pump_puck_pressure
     name: "Mock Puck Pressure"
+  internal_volume_number:
+    name: "Mock Internal Volume"
 
 # =============================================================================
 # ADDITIONAL SENSORS — same as real config
