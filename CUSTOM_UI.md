@@ -1,9 +1,13 @@
 # Custom Home Assistant UI — Espresso Machine
 
 This document explains how to install and use the two ready-made Home Assistant
-Lovelace dashboards included in this repository, as well as the AppDaemon-powered
-**per-shot history graphs** that let you scroll through every espresso shot you have
-ever pulled and inspect its temperature curve and flow profile.
+Lovelace dashboards included in this repository, as well as the
+**per-shot history graphs** that let you scroll through every espresso shot you
+have ever pulled and inspect its temperature curve and flow profile.
+
+> **No SSH, no terminal, no AppDaemon required.**  
+> The primary installation path uses a custom add-on from this repository —
+> install it in HA in three clicks, configure it in the UI, done.
 
 ---
 
@@ -23,73 +27,130 @@ can explore how the PID and flow model behave without touching real hardware.
 
 ---
 
-## Prerequisites
+## Quick Start — Add-on Installation (recommended)
 
-### 1 — Required HACS custom cards
+### Step 1 — Install HACS custom cards
 
-Install the following cards via **HACS → Frontend** (`Settings → HACS → Frontend → Explore & Download Repositories`):
+Install the following cards via **HACS → Frontend**
+(`Settings → HACS → Frontend → Explore & Download Repositories`):
 
 | Card | Repository | Purpose |
 |---|---|---|
-| **Mushroom** | `piitaya/lovelace-mushroom` | Modern Material Design 3 entity cards and chips |
-| **Mini Graph Card** | `kalkih/mini-graph-card` | Compact, real-time sparkline graphs |
-| **ApexCharts Card** | `RomRider/apexcharts-card` | Full-featured chart card used for per-shot history graphs |
+| **Mushroom** | `piitaya/lovelace-mushroom` | Modern Material Design 3 entity cards |
+| **Mini Graph Card** | `kalkih/mini-graph-card` | Compact real-time sparkline graphs |
+| **ApexCharts Card** | `RomRider/apexcharts-card` | Full-featured shot history graphs |
 
-After installing each card, click **Reload** in the HACS UI and then hard-refresh
-your browser (`Ctrl+Shift+R` / `Cmd+Shift+R`).
-
-### 2 — AppDaemon
-
-The shot history feature uses an **AppDaemon** app to watch the ESPHome
-`machine_mode` sensor, record each completed shot, and synchronise the
-dashboard graph windows.
-
-Install AppDaemon via the Home Assistant Add-on Store:
-
-1. **Settings → Add-ons → Add-on Store → search "AppDaemon"**
-2. Install **AppDaemon 4**
-3. Enable **Auto-start** and **Watchdog**
-4. Start the add-on
-
-### 3 — HA Helper Entities
-
-The shot history requires four HA helper entities.  
-Add the contents of `home_assistant/helpers.yaml` to your `configuration.yaml`
-(or as a package — see comments inside the file):
-
-```yaml
-# In configuration.yaml:
-homeassistant:
-  packages:
-    espresso: !include home_assistant/helpers.yaml
-```
-
-Then restart Home Assistant.
-
-### 4 — Template Sensors
-
-Add the template sensors from `home_assistant/template_sensors.yaml`
-to your `configuration.yaml` in the same way:
-
-```yaml
-homeassistant:
-  packages:
-    espresso_templates: !include home_assistant/template_sensors.yaml
-```
-
-These sensors compute the graph span and time offsets needed by the
-per-shot ApexCharts cards.
+After installing each card click **Reload** in HACS, then hard-refresh your
+browser (`Ctrl+Shift+R` / `Cmd+Shift+R`).
 
 ---
 
-## Installation — Step by Step
+### Step 2 — Add the HA helper entities (one-time)
 
-### Step 1 — Add helpers and template sensors
+The shot history feature needs four HA helper entities.  Install the **File
+Editor** add-on (Settings → Add-ons → Add-on Store → "File Editor"), then:
 
-Copy `home_assistant/helpers.yaml` and `home_assistant/template_sensors.yaml`
-into your HA config directory (the folder that contains `configuration.yaml`).
+1. Open File Editor, navigate to your HA config root (the folder with
+   `configuration.yaml`).
+2. Create a new file named `espresso_package.yaml` and paste the full contents
+   of [`home_assistant/espresso_package.yaml`](home_assistant/espresso_package.yaml)
+   into it.  Save.
+3. Open `configuration.yaml` in File Editor and add:
 
-Add these lines to `configuration.yaml`:
+   ```yaml
+   homeassistant:
+     packages:
+       espresso: !include espresso_package.yaml
+   ```
+
+   (Use the same indentation as the rest of your file — YAML is whitespace-sensitive.)
+
+4. Restart Home Assistant (`Developer Tools → YAML → Restart`).
+
+After the restart you will see four new helpers under
+**Settings → Devices & Services → Helpers**:
+`espresso_shot_log`, `espresso_shot_viewer`, `espresso_shot_view_start`,
+`espresso_shot_view_end`.
+
+---
+
+### Step 3 — Add this repository as a custom add-on repository
+
+1. In HA go to **Settings → Add-ons → Add-on Store**
+2. Click the **⋮ three-dot menu** (top right) → **Repositories**
+3. Paste this URL and click **Add**:
+
+   ```
+   https://github.com/shaggitza/test_espresso_esphome
+   ```
+
+4. Close the dialog — the **Espresso Machine** repository now appears at the
+   bottom of the Add-on Store.
+
+---
+
+### Step 4 — Install the Espresso Shot History add-on
+
+1. In the Add-on Store, find **Espresso Shot History** under the
+   *Espresso Machine* section.
+2. Click it → **Install**.
+3. After installation, go to the **Configuration** tab and set the entity IDs
+   to match your ESPHome device:
+
+   | Option | Real hardware | Mock simulation |
+   |---|---|---|
+   | `mode_entity` | `text_sensor.philips_barista_brew_machine_mode` | `text_sensor.philips_barista_brew_mock_machine_mode` |
+   | `duration_entity` | `sensor.philips_barista_brew_last_shot_duration` | `sensor.philips_barista_brew_mock_last_shot_duration` |
+   | `yield_entity` | `sensor.philips_barista_brew_last_shot_yield` | `sensor.philips_barista_brew_mock_last_shot_yield` |
+   | `temp_entity` | `sensor.philips_barista_brew_thermoblock_temperature` | `sensor.philips_barista_brew_mock_thermoblock_temperature` |
+
+4. Go to the **Info** tab, enable **Auto-start** and **Watchdog**, then click
+   **Start**.
+
+---
+
+### Step 5 — Add the dashboard
+
+1. In HA go to **Settings → Dashboards → Add Dashboard**
+2. Choose "Empty dashboard", name it **☕ Espresso Machine** (or **☕ Espresso Sim**)
+3. Open the new dashboard, click the ✏️ **Edit Dashboard** icon (top right)
+4. Click the **⋮ three-dot menu → Raw configuration editor**
+5. Select all, delete, then paste the YAML from the appropriate file:
+   - Real hardware → [`home_assistant/dashboards/espresso_real.yaml`](home_assistant/dashboards/espresso_real.yaml)
+   - Mock simulation → [`home_assistant/dashboards/espresso_mock.yaml`](home_assistant/dashboards/espresso_mock.yaml)
+6. Click **Save**
+
+That's it — pull an espresso shot and it will appear automatically in the
+**Shot History** view.
+
+---
+
+## Alternative: File-based Dashboard (version-controlled)
+
+If you prefer to keep your dashboard in a YAML file (so it is tracked by git
+or other tools), use the File Editor to copy the dashboard YAML into your HA
+config directory, then add to `configuration.yaml`:
+
+```yaml
+lovelace:
+  dashboards:
+    espresso-machine:
+      mode: yaml
+      filename: espresso_dashboard.yaml
+      title: "☕ Espresso Machine"
+      icon: mdi:coffee-maker
+      show_in_sidebar: true
+```
+
+Restart HA after saving.
+
+---
+
+## Alternative: Manual helpers installation (split across two files)
+
+If you already have a split `configuration.yaml` setup and prefer keeping
+helpers and template sensors in separate files, you can use the original
+individual files instead of the combined package:
 
 ```yaml
 homeassistant:
@@ -98,75 +159,9 @@ homeassistant:
     espresso_templates: !include template_sensors.yaml
 ```
 
-Restart Home Assistant (`Developer Tools → Restart`).
-
-### Step 2 — Install AppDaemon app
-
-1. Copy `home_assistant/appdaemon/shot_history.py` to your AppDaemon `apps/` directory.
-   With the HA add-on, this is usually:  
-   `/addon_configs/a0d7b954_appdaemon/apps/shot_history.py`
-
-2. Copy (or merge) `home_assistant/appdaemon/apps.yaml` into your AppDaemon `apps/` directory.
-
-3. Edit `apps.yaml` to pick **real** or **mock** entity names:
-
-   **Real hardware:**
-   ```yaml
-   espresso_shot_history:
-     module: shot_history
-     class: ShotHistory
-     mode_entity: text_sensor.philips_barista_brew_machine_mode
-     duration_entity: sensor.philips_barista_brew_last_shot_duration
-     yield_entity: sensor.philips_barista_brew_last_shot_yield
-     temp_entity: sensor.philips_barista_brew_thermoblock_temperature
-     max_shots: 20
-     graph_padding_sec: 15
-   ```
-
-   **Mock simulation:**
-   ```yaml
-   espresso_shot_history:
-     module: shot_history
-     class: ShotHistory
-     mode_entity: text_sensor.philips_barista_brew_mock_machine_mode
-     duration_entity: sensor.philips_barista_brew_mock_last_shot_duration
-     yield_entity: sensor.philips_barista_brew_mock_last_shot_yield
-     temp_entity: sensor.philips_barista_brew_mock_thermoblock_temperature
-     max_shots: 20
-     graph_padding_sec: 15
-   ```
-
-4. Restart AppDaemon (add-on restart in HA).
-
-### Step 3 — Add the dashboard
-
-**Option A — UI editor (easiest):**
-
-1. In HA, go to **Settings → Dashboards → Add Dashboard**
-2. Choose "Empty dashboard", name it "☕ Espresso Machine" (or "☕ Espresso Sim")
-3. Open the new dashboard, click the ✏️ **Edit Dashboard** icon (top right)
-4. Click the three-dot menu → **Raw configuration editor**
-5. Clear the existing content, paste the YAML from the appropriate dashboard file, click **Save**
-
-**Option B — File-based (version-controlled):**
-
-1. Copy the dashboard YAML to your HA config directory:
-   - Real: `espresso_dashboard.yaml`
-   - Mock: `espresso_mock_dashboard.yaml`
-
-2. Add to `configuration.yaml`:
-   ```yaml
-   lovelace:
-     dashboards:
-       espresso-machine:
-         mode: yaml
-         filename: espresso_dashboard.yaml
-         title: "☕ Espresso Machine"
-         icon: mdi:coffee-maker
-         show_in_sidebar: true
-   ```
-
-3. Restart HA.
+Copy `home_assistant/helpers.yaml` and `home_assistant/template_sensors.yaml`
+to your HA config directory via the File Editor, then add the lines above to
+`configuration.yaml` and restart HA.
 
 ---
 
