@@ -7,6 +7,18 @@ namespace espresso_machine {
 static const char *const TAG = "espresso_machine";
 
 // ---------------------------------------------------------------------------
+// BrewFlowMaxNumber
+// ---------------------------------------------------------------------------
+
+void BrewFlowMaxNumber::control(float value) {
+  if (parent_ != nullptr) {
+    parent_->set_brew_flow_max(value);
+    publish_state(value);
+    ESP_LOGI(TAG, "Brew flow max updated to %.0f mL", value);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 void EspressoMachine::setup() {
@@ -15,6 +27,8 @@ void EspressoMachine::setup() {
            brew_target_temp_, brew_flow_max_ml_, brew_flow_offset_ml_);
   ESP_LOGI(TAG, "  steam: target=%.1f°C  cool_down_to=%.1f°C  flow_max=%.2fml/s",
            steam_target_temp_, steam_cool_down_to_, steam_flow_max_ml_per_s_);
+  if (brew_flow_max_number_ != nullptr)
+    brew_flow_max_number_->publish_state(brew_flow_max_ml_);
   safe_stop_all_();
 }
 
