@@ -88,7 +88,7 @@ jobs:
       - name: Build espresso_shot_history addon image
         run: |
           docker build \
-            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12 \
+            --build-arg BUILD_FROM=python:3.12-alpine \
             addons/espresso_shot_history/
 
   cpp-test:
