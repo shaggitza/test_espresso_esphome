@@ -92,6 +92,7 @@ CONF_INTERNAL_VOLUME_ML = "internal_volume_ml"
 CONF_MOCK_HEATER = "mock_heater"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
+CONF_PRESSURE_SENSOR = "pressure_sensor"
 
 # Number entity config keys for runtime tuning
 CONF_NOMINAL_FLOW_NUMBER = "nominal_flow_number"
@@ -132,6 +133,11 @@ CONFIG_SCHEMA = (
                 unit_of_measurement="mL",
                 accuracy_decimals=1,
                 state_class=STATE_CLASS_TOTAL_INCREASING,
+            ),
+            cv.Optional(CONF_PRESSURE_SENSOR): sensor.sensor_schema(
+                unit_of_measurement="bar",
+                accuracy_decimals=2,
+                state_class=STATE_CLASS_MEASUREMENT,
             ),
             # Optional HA number entities for runtime tuning
             cv.Optional(CONF_NOMINAL_FLOW_NUMBER): number.number_schema(
@@ -193,6 +199,11 @@ async def to_code(config):
     if CONF_TOTAL_SENSOR in config:
         sens = await sensor.new_sensor(config[CONF_TOTAL_SENSOR])
         cg.add(var.set_total_sensor(sens))
+
+    # Create and register pressure sensor
+    if CONF_PRESSURE_SENSOR in config:
+        sens = await sensor.new_sensor(config[CONF_PRESSURE_SENSOR])
+        cg.add(var.set_pressure_sensor(sens))
 
     # Optional runtime-tunable number entities
     if CONF_NOMINAL_FLOW_NUMBER in config:
