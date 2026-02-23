@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -106,6 +107,21 @@ class EspressoMachine : public Component {
   void set_steam_flow_max(float ml_per_s) { steam_flow_max_ml_per_s_ = ml_per_s; }
   void set_steam_cool_down_to(float t) { steam_cool_down_to_ = t; }
 
+  // ----- Safety: hard over-temperature cutoff (P0-1) -----------------------
+  // When a temperature sensor exceeds the cutoff limit the orchestrator
+  // immediately stops all activity and latches a safety flag.  Cleared only
+  // by a device reboot (i.e. it is a true hard interlock, not auto-reset).
+  void set_over_temp_sensor(IHeater *h) { over_temp_sensor_ = h; }
+  void set_over_temp_cutoff_limit(float limit) { over_temp_limit_ = limit; }
+  bool is_over_temp_cutoff_triggered() const { return over_temp_cutoff_triggered_; }
+
+  // ----- Safety: brew timeout (P0-4) ---------------------------------------
+  // If the brew sequence has not completed within this many milliseconds the
+  // orchestrator stops the shot.  0 = disabled (default).  Covers the case
+  // where a Wi-Fi / HA disconnect prevents a manual stop and the flow sensor
+  // returns 0 so flow_max is never reached.
+  void set_brew_timeout_ms(uint32_t ms) { brew_timeout_ms_ = ms; }
+
   // ----- ESPHome lifecycle --------------------------------------------------
   void setup() override;
   void loop() override;
@@ -195,11 +211,23 @@ class EspressoMachine : public Component {
   float last_shot_time_s_{0.0f};
   float last_shot_volume_ml_{0.0f};
 
+  // -- Safety: over-temperature cutoff (P0-1 / P0-3) ------------------------
+  IHeater *over_temp_sensor_{nullptr};       // sensor to monitor for cutoff
+  float over_temp_limit_{165.0f};            // °C — hard cutoff threshold
+  bool over_temp_cutoff_triggered_{false};   // latched; cleared only by reboot
+
+  // -- Safety: brew timeout (P0-4) ------------------------------------------
+  uint32_t brew_timeout_ms_{0};   // 0 = disabled
+  uint32_t brew_start_ms_{0};     // millis() when brew_start() was called
+
   // -- Internal helpers ------------------------------------------------------
   void advance_brew_();
   void advance_steam_();
   void enter_brewing_();
   void safe_stop_all_();
+  // Returns true if an over-temperature or sensor-fault cutoff was triggered.
+  // Called at the top of loop() before advancing any state machine.
+  bool check_over_temp_safety_();
 };
 
 }  // namespace espresso_machine

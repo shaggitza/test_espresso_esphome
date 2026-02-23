@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <limits>
 #include "esphome/core/hal.h"
 #include "espresso_machine/espresso_machine.h"
 #include "espresso_machine/interfaces.h"
@@ -804,5 +805,256 @@ TEST(Power, MachineOnWhilePurgingAllowsNewOpsAfterIdle) {
 
   // Now a new brew should work
   f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+// ---------------------------------------------------------------------------
+// 🔴 P0-1 / P0-3 — Hard over-temperature cutoff and sensor fault handling
+// ---------------------------------------------------------------------------
+
+// MockHeaterCtrl that can be configured to return a specific temperature
+// (or NaN to simulate a sensor fault).  Also records if force_off() is called.
+struct SafetyMockHeaterCtrl : public IHeater {
+  float current_temp{25.0f};
+  float target_temp{0.0f};
+  int force_off_count{0};
+
+  float get_current_temperature() const override { return current_temp; }
+  void set_target_temperature(float t) override { target_temp = t; }
+  void force_off() override { force_off_count++; }
+};
+
+// Fixture with an over-temp sensor wired to the orchestrator.
+struct SafetyFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  SafetyMockHeaterCtrl over_temp_sensor;
+  EspressoMachine machine;
+
+  SafetyFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    machine.set_over_temp_sensor(&over_temp_sensor);
+    machine.set_over_temp_cutoff_limit(165.0f);
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// P0-1: Temperature at the limit triggers cutoff within one loop tick.
+TEST(Safety, OverTempCutoffFiredWhenSensorExceedsLimit) {
+  SafetyFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  f.over_temp_sensor.current_temp = 166.0f;  // above 165 °C limit
+  f.machine.loop();  // cutoff should fire
+
+  EXPECT_TRUE(f.machine.is_over_temp_cutoff_triggered());
+}
+
+// P0-1: After cutoff the pump is off and valves are closed.
+TEST(Safety, OverTempCutoffStopsAllHardware) {
+  SafetyFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (pump on, valve open)
+  EXPECT_TRUE(f.brew_pump.running);
+
+  f.over_temp_sensor.current_temp = 166.0f;
+  f.machine.loop();  // cutoff fires
+
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+}
+
+// P0-1: After cutoff force_off() is called on the heater sensor.
+TEST(Safety, OverTempCutoffCallsForceOff) {
+  SafetyFixture f;
+  f.over_temp_sensor.current_temp = 166.0f;
+  f.machine.loop();  // cutoff fires immediately
+
+  EXPECT_GE(f.over_temp_sensor.force_off_count, 1);
+}
+
+// P0-1: The cutoff is a latch — once triggered brew/steam cannot restart.
+// "Safety_PIDNotResumeAfterCutoff" from mock_scenarios.md.
+TEST(Safety, PIDNotResumeAfterCutoff) {
+  SafetyFixture f;
+  f.over_temp_sensor.current_temp = 166.0f;
+  f.machine.loop();  // cutoff fires
+  EXPECT_TRUE(f.machine.is_over_temp_cutoff_triggered());
+
+  // Bring temperature back to normal — cutoff must remain latched.
+  f.over_temp_sensor.current_temp = 90.0f;
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);  // still blocked
+
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);  // still blocked
+}
+
+// P0-1: Loop returns early after cutoff — no new actions taken on hardware.
+TEST(Safety, OverTempCutoffBlocksSubsequentLoopTicks) {
+  SafetyFixture f;
+  f.over_temp_sensor.current_temp = 166.0f;
+  f.machine.loop();  // cutoff fires
+  int off_count = f.brew_pump.off_count;
+
+  // Additional loop ticks must not call turn_off() again
+  f.machine.loop();
+  f.machine.loop();
+  EXPECT_EQ(f.brew_pump.off_count, off_count);
+}
+
+// P0-1: Cutoff also fires correctly when machine is in IDLE (no active shot).
+TEST(Safety, OverTempCutoffFiredDuringIdle) {
+  SafetyFixture f;
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  f.over_temp_sensor.current_temp = 170.0f;
+  f.machine.loop();
+  EXPECT_TRUE(f.machine.is_over_temp_cutoff_triggered());
+}
+
+// P0-3: NaN temperature (sensor fault) triggers the safety cutoff.
+TEST(Safety, SensorNaNForcesHeaterOff) {
+  SafetyFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  f.over_temp_sensor.current_temp = std::numeric_limits<float>::quiet_NaN();
+  f.machine.loop();  // sensor fault detected
+
+  EXPECT_TRUE(f.machine.is_over_temp_cutoff_triggered());
+  EXPECT_GE(f.over_temp_sensor.force_off_count, 1);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+}
+
+// P0-3: NaN triggers cutoff even when machine is idle.
+TEST(Safety, SensorNaNCutoffFiredDuringIdle) {
+  SafetyFixture f;
+  f.over_temp_sensor.current_temp = std::numeric_limits<float>::quiet_NaN();
+  f.machine.loop();
+  EXPECT_TRUE(f.machine.is_over_temp_cutoff_triggered());
+}
+
+// No over-temp sensor wired → cutoff never fires (backward-compatible path).
+TEST(Safety, NoCutoffWithoutSensorWired) {
+  OrchestratorFixture f;  // does not wire an over-temp sensor
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  // No sensor wired — cutoff flag stays false regardless.
+  EXPECT_FALSE(f.machine.is_over_temp_cutoff_triggered());
+}
+
+// ---------------------------------------------------------------------------
+// 🔴 P0-4 — Brew timeout (Wi-Fi / HA disconnect safety)
+// ---------------------------------------------------------------------------
+
+// Fixture that enables a 30-second brew timeout.
+struct BrewTimeoutFixture {
+  static constexpr uint32_t kBrewTimeoutMs = 30000;
+
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  EspressoMachine machine;
+
+  BrewTimeoutFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+    machine.set_brew_timeout_ms(kBrewTimeoutMs);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// P0-4: Brew stops when timeout expires even if flow_max is never reached.
+// Models the scenario where the flow sensor is stuck at 0 after a Wi-Fi
+// disconnect prevents a manual stop from Home Assistant.
+TEST(Safety, BrewTimesOutWhenFlowNeverReachesMax) {
+  BrewTimeoutFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  // Flow sensor stuck at 0 — flow_max would never be reached
+  EXPECT_EQ(f.brew_pump.volume, 0.0f);
+
+  // Advance time past the 30-second timeout
+  g_mock_millis = BrewTimeoutFixture::kBrewTimeoutMs + 1000;
+  f.machine.loop();  // timeout fires
+
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+}
+
+// P0-4: Brew does NOT time out before the timeout has elapsed.
+TEST(Safety, BrewDoesNotTimeOutBeforeTimeout) {
+  BrewTimeoutFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  g_mock_millis = BrewTimeoutFixture::kBrewTimeoutMs - 1000;  // just under timeout
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+// P0-4: Normal shot that reaches flow_max before timeout is unaffected.
+TEST(Safety, BrewCompletesNormallyBeforeTimeout) {
+  BrewTimeoutFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  // Shot completes normally at 20 s (well before 30 s timeout)
+  g_mock_millis = 20000;
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE (flow_max reached)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+}
+
+// P0-4: Timeout = 0 (disabled by default) — brew runs indefinitely.
+TEST(Safety, BrewTimeoutDisabledByDefault) {
+  OrchestratorFixture f;  // no timeout configured (default 0)
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  // Advance to an absurdly long time — brew must still be active
+  g_mock_millis = 600000;  // 10 minutes
+  f.machine.loop();
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
 }

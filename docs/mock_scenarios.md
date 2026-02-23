@@ -103,11 +103,12 @@ TEST: OverTemperatureCutoffFiredWhenSensorExceedsLimit
   - Inject temperature = 166 °C directly into orchestrator
   - Verify heater mode switches to OFF within one loop tick
   - Verify the safety flag is set and logged at ERROR level
+  - STATUS: ✅ IMPLEMENTED — see Safety.OverTempCutoffFiredWhenSensorExceedsLimit
 
 TEST: SensorFaultReturnsZeroAndPIDSaturates
   - Simulate sensor returning 0 °C while real temperature is high
   - Verify the hard cutoff limits PID output (requires sensor fault injection)
-  - STATUS: not yet implemented — needs sensor-fault injection API
+  - STATUS: NaN injection implemented — see Safety.SensorNaNForcesHeaterOff
 ```
 
 ### ❌ Puck Channeling
@@ -180,8 +181,8 @@ machine in a dangerous state, regardless of what the mock components return.
 
 | Test ID | Scenario | Expected Outcome | Status |
 |---|---|---|---|
-| `Safety_OverTempCutoff` | Temperature exceeds 165 °C | Heater forced OFF immediately | ⚠️ Planned |
-| `Safety_PIDNotResumeAfterCutoff` | PID tries to re-enable heater post-cutoff | Cutoff interlock blocks it | ⚠️ Planned |
+| `Safety_OverTempCutoff` | Temperature exceeds 165 °C | Heater forced OFF immediately | ✅ Implemented |
+| `Safety_PIDNotResumeAfterCutoff` | PID tries to re-enable heater post-cutoff | Cutoff interlock blocks it | ✅ Implemented |
 | `Safety_HeaterOffOnReset` | ESP32 resets mid-brew | SSR defaults to LOW (heater off) | ✅ Hardware default (no test needed) |
 | `Safety_WatchdogReboot` | Loop stalls > watchdog timeout | ESPHome resets; heater defaults off | ✅ ESPHome built-in |
 

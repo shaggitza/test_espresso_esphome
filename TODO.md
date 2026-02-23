@@ -23,10 +23,10 @@
 
 | ID | Feature / Scenario | Status | Source | Notes |
 |----|-------------------|--------|--------|-------|
-| P0-1 | Hard over-temperature cutoff (C++ test) | ⚠️ YAML only | mock_scenarios.md | Covered in example YAML via `on_value_range`; C++ orchestrator test planned but not written |
+| P0-1 | Hard over-temperature cutoff (C++ test) | ✅ Done | mock_scenarios.md | `check_over_temp_safety_()` in orchestrator loop; latching cutoff flag; `Safety_OverTempCutoff` + `Safety_PIDNotResumeAfterCutoff` C++ tests added |
 | ~~P0-2~~ | ~~Grinder lockout during brew/steam~~ | ✅ N/A | — | **Design decision:** Grinder and brew are independent operations; no lockout needed |
-| P0-3 | Thermocouple/sensor fault handling | ⬜ Not done | failure_scenarios.md | PID could drive 100% duty if sensor returns 0/NaN; needs sensor-fault injection API |
-| P0-4 | Brew timeout when HA/Wi-Fi disconnects | ⬜ Not done | failure_scenarios.md | Brew continues until `flow_max`; no watchdog timeout config |
+| P0-3 | Thermocouple/sensor fault handling | ✅ Done | failure_scenarios.md | NaN detection in `check_over_temp_safety_()`; `IHeater::force_off()` added; `Safety_SensorNaNForcesHeaterOff` C++ test added |
+| P0-4 | Brew timeout when HA/Wi-Fi disconnects | ✅ Done | failure_scenarios.md | `set_brew_timeout_ms()` config; timeout checked in BREWING state; `Safety_BrewTimesOut*` C++ tests added |
 
 ### 🟠 P1 — High Priority (Blocks Functionality)
 
@@ -70,8 +70,8 @@ From `docs/mock_scenarios.md`:
 
 | Test ID | Scenario | Expected Outcome | Status |
 |---------|----------|------------------|--------|
-| `Safety_OverTempCutoff` | Temperature exceeds 165 °C | Heater forced OFF immediately | ⚠️ Planned |
-| `Safety_PIDNotResumeAfterCutoff` | PID tries to re-enable heater post-cutoff | Cutoff interlock blocks it | ⚠️ Planned |
+| `Safety_OverTempCutoff` | Temperature exceeds 165 °C | Heater forced OFF immediately | ✅ Implemented |
+| `Safety_PIDNotResumeAfterCutoff` | PID tries to re-enable heater post-cutoff | Cutoff interlock blocks it | ✅ Implemented |
 | `Safety_HeaterOffOnReset` | ESP32 resets mid-brew | SSR defaults to LOW (heater off) | ✅ Hardware default |
 | `Safety_WatchdogReboot` | Loop stalls > watchdog timeout | ESPHome resets; heater off | ✅ ESPHome built-in |
 | `Safety_ValveInterlockEnforced` | Two valves open simultaneously | Second valve refused / first closed | ✅ Implemented |
@@ -85,13 +85,12 @@ From `docs/mock_scenarios.md`:
 
 | Priority | Total | Done | Partial | Not Done |
 |----------|-------|------|---------|----------|
-| 🔴 P0 | 3 | 0 | 1 | 2 |
+| 🔴 P0 | 3 | 3 | 0 | 0 |
 | 🟠 P1 | 5 | 0 | 2 | 3 |
 | 🟡 P2 | 7 | 1 | 0 | 6 |
 | 🟢 P3 | 7 | 0 | 2 | 5 |
 
 **Next recommended actions:**
-1. Complete P0-1: Add C++ orchestrator test for over-temperature cutoff
-2. Complete P1-1/P1-2: Wire `IHeater` adapter for production `climate.pid` entity
-3. Complete P0-4: Add brew timeout configuration for Wi-Fi disconnect scenario
+1. Complete P1-1/P1-2: Wire `IHeater` adapter for production `climate.pid` entity
+2. Complete P1-4: Add `esphome config` validation of heater section
 

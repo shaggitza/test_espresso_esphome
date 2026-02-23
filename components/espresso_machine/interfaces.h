@@ -65,6 +65,11 @@ class IHeater {
  public:
   virtual float get_current_temperature() const = 0;
   virtual void set_target_temperature(float t) = 0;
+  // Called by the orchestrator's hard over-temperature safety cutoff.
+  // Implementations should immediately disable the heater output (e.g. set
+  // PID to off mode).  Default is a no-op so existing implementations that
+  // don't need it remain compilable without changes.
+  virtual void force_off() {}
   virtual ~IHeater() = default;
 };
 

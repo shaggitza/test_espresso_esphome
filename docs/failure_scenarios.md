@@ -153,9 +153,9 @@ automatically.
 
 | Scenario | Gap | Plan | Priority |
 |---|---|---|---|
-| HA/Wi-Fi disconnect during active brew | Brew continues until `flow_max`; no watchdog timeout | Add timeout config | 🔴 P0 |
+| HA/Wi-Fi disconnect during active brew | Brew continues until `flow_max`; no watchdog timeout | ✅ `set_brew_timeout_ms()` added; default 0 (disabled) | ✅ Done (P0-4) |
 | HA/Wi-Fi disconnect during steam cool-down | Purge continues autonomously (correct) | ✅ Handled by state machine | ✅ Done |
-| Thermocouple fault → PID drives 100% duty | Hard cutoff at 165 °C fires via `on_value_range` | Add C++ orchestrator test | 🔴 P0 |
+| Thermocouple fault → PID drives 100% duty | Hard cutoff at 165 °C fires via `on_value_range` | ✅ `check_over_temp_safety_()` in C++ orchestrator; NaN detection added | ✅ Done (P0-1 / P0-3) |
 | Power ON with thermoblock already at steam temp | Brew actions allowed; caution expected from user | Future UX consideration | 🟡 P2 |
 | Power OFF during pre-infusion hold | Pre-infusion is part of BREWING mode — stops immediately | ✅ Covered by "OFF during brew" | ✅ Done |
 | Grinder activated during brew/steam | ✅ Allowed by design — operations are independent | No action needed | ✅ N/A |
