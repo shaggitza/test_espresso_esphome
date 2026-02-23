@@ -18,7 +18,7 @@ class MockPump;
 // ---------------------------------------------------------------------------
 class MockPumpNumber : public number::Number, public Component {
  public:
-  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_PRESSURE };
+  enum class ParamType { NOMINAL_FLOW, PUCK_TIME_CONSTANT, PUCK_PRESSURE, PUMP_MAX_PRESSURE };
 
   void set_parent(MockPump *parent) { parent_ = parent; }
   void set_param_type(ParamType type) { param_type_ = type; }
@@ -45,6 +45,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_nominal_flow(float f) { nominal_flow_ = f; }
   void set_puck_time_constant(float t) { puck_time_constant_ = t; }
   void set_puck_pressure(float p) { puck_pressure_bar_ = p; }
+  void set_pump_max_pressure(float p) { pump_max_pressure_bar_ = p; }
 
   // Link to mock heater so flow rate drives thermoblock cooling
   void set_heater(espresso_machine::IFlowObserver *h) { flow_observer_ = h; }
@@ -66,6 +67,10 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
     puck_pressure_number_ = num;
     if (num) num->set_param_type(MockPumpNumber::ParamType::PUCK_PRESSURE);
   }
+  void set_pump_max_pressure_number(MockPumpNumber *num) {
+    pump_max_pressure_number_ = num;
+    if (num) num->set_param_type(MockPumpNumber::ParamType::PUMP_MAX_PRESSURE);
+  }
 
   void setup() override;
   void loop() override;
@@ -84,18 +89,31 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   float get_nominal_flow() const { return nominal_flow_; }
   float get_puck_time_constant() const { return puck_time_constant_; }
   float get_puck_pressure() const { return puck_pressure_bar_; }
+  float get_pump_max_pressure() const { return pump_max_pressure_bar_; }
 
   void update_nominal_flow(float v) { nominal_flow_ = v; }
   void update_puck_time_constant(float v) { puck_time_constant_ = v; }
   void update_puck_pressure(float v) { puck_pressure_bar_ = v; }
+  void update_pump_max_pressure(float v) { pump_max_pressure_bar_ = v; }
 
  protected:
   void write_state(bool state) override;
 
   // Physics parameters
-  float nominal_flow_{4.0f};          // Nominal flow rate at 9 bar [mL/s]
-  float puck_time_constant_{10.0f};   // Puck wetting time constant [s]
-  float puck_pressure_bar_{9.0f};     // Simulated puck back-pressure [bar]
+  //
+  // Pump curve model (replaces naive pressure_factor):
+  //   Q_ss = Q_max × (1 − P_puck / P_stall)     [linear pump curve]
+  //   Q_max = nominal_flow / (1 − 9 / pump_max_pressure)  [calibrated at 9 bar]
+  //
+  // Wetting model: effective wetting time scales with puck resistance so that
+  // a harder puck takes proportionally longer to wet before flow breaks through.
+  //   effective_τ = puck_time_constant × (puck_pressure / 9 bar)
+  //   wetted_fraction(t) = 1 − exp(−t / effective_τ)
+  //   Q(t) = Q_ss × wetted_fraction(t)
+  float nominal_flow_{4.0f};          // Target flow at 9 bar rated pressure [mL/s]
+  float puck_time_constant_{10.0f};   // Wetting time constant at 9 bar reference [s]
+  float puck_pressure_bar_{9.0f};     // Puck back-pressure resistance [bar]
+  float pump_max_pressure_bar_{15.0f}; // Pump stall pressure [bar] (Ulka EP5 ≈ 15 bar)
 
   // Simulation state
   bool running_{false};
@@ -109,6 +127,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   MockPumpNumber *nominal_flow_number_{nullptr};
   MockPumpNumber *puck_time_constant_number_{nullptr};
   MockPumpNumber *puck_pressure_number_{nullptr};
+  MockPumpNumber *pump_max_pressure_number_{nullptr};
   espresso_machine::IFlowObserver *flow_observer_{nullptr};
 
   // Timing

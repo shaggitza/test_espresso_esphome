@@ -40,12 +40,17 @@
 #     Cp     = 4.186 J/(mL·°C), specific heat of water
 #     T_inlet = water_inlet_temp_c
 #
-# PUCK WETTING + PRESSURE MODEL (mock pump):
-#   Q_wetted(t) = Q_nom × (1 − exp(−t/τ))
-#   Q_effective = Q_wetted × min(1, 9 / pressure_bar)
-#     Q_nom        = nominal_flow_ml_per_s (at 9 bar reference)
-#     τ            = puck_time_constant_s
-#     pressure_bar = puck back-pressure (6 bar easy, 9 bar nominal, 12 bar hard)
+# PUCK WETTING + PUMP CURVE MODEL (mock pump):
+#   Q_ss  = Q_max × (1 − P_puck / P_stall)        [linear pump curve]
+#   Q_max = nominal_flow / (1 − 9 / pump_max_pressure_bar)  [calibrated at 9 bar]
+#   Q(t)  = Q_ss × (1 − exp(−t / effective_τ))
+#   effective_τ = puck_time_constant × (P_puck / 9)  [scales with puck resistance]
+#
+#   Flow effects with pump_max_pressure_bar = 15 bar, nominal_flow = 4 mL/s:
+#     6 bar  (easy puck)  → Q_ss = 6.0 mL/s, τ_eff = 6.7 s
+#     9 bar  (nominal)    → Q_ss = 4.0 mL/s, τ_eff = 10 s
+#     12 bar (hard puck)  → Q_ss = 2.0 mL/s, τ_eff = 13.3 s
+#     15 bar (stall)      → Q_ss = 0  (pump stalls)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -174,20 +179,19 @@ espresso_machine_mock_heater:
 # Flow data is provided through the IPump interface — no separate flow meter
 # component needed. The orchestrator's pump->get_flow_total() works unchanged.
 #
-# Physics parameters:
-#   nominal_flow_ml_per_s: 4.0   — steady-state flow at 9 bar reference
-#   puck_time_constant_s: 10.0   — flow ramp-up time constant
-#   puck_pressure_bar: 9.0       — simulated puck back-pressure
-#     6 bar  = easy / channelling puck → full nominal flow
-#     9 bar  = nominal espresso extraction → full nominal flow
-#     12 bar = tight / over-tamped puck  → 75% of nominal flow
+# Pump curve + pressure-weighted wetting model (physically motivated):
+#   - nominal_flow_ml_per_s: 4.0  — flow at 9 bar rated pressure (Ulka EP5)
+#   - pump_max_pressure_bar: 15.0 — pump stall pressure (Ulka EP5 spec)
+#   - puck_pressure_bar: 9.0      — puck resistance in bar
+#   - puck_time_constant_s: 10.0  — wetting τ at 9 bar (scales with pressure)
 #
-# Use the "Puck Pressure" buttons below to set presets during a shot.
+# Use the "Puck Pressure" buttons below to simulate different coffee pucks.
 # =============================================================================
 espresso_machine_mock_pump:
   id: main_pump
   name: "Mock Pump"
   nominal_flow_ml_per_s: 4.0
+  pump_max_pressure_bar: 15.0    # Ulka EP5 stall pressure
   puck_time_constant_s: 10.0
   puck_pressure_bar: 9.0
   mock_heater: mock_heater
@@ -201,6 +205,8 @@ espresso_machine_mock_pump:
   # HA number entities for runtime tuning
   nominal_flow_number:
     name: "Mock Nominal Flow"
+  pump_max_pressure_number:
+    name: "Mock Pump Max Pressure"
   puck_time_constant_number:
     name: "Mock Puck Time Constant"
   puck_pressure_number:
@@ -394,8 +400,10 @@ button:
       - espresso_machine_mock_pump.reset: main_pump
 
   # Puck pressure presets — simulate different puck resistances.
-  # Effect on flow: 6 bar → 100% (easy puck), 9 bar → 100% (nominal),
-  # 12 bar → 75% of nominal (tight/over-tamped puck).
+  # With pump_max_pressure=15 bar and nominal_flow=4 mL/s:
+  #   6 bar  (easy puck)  → Q_ss ≈ 6.0 mL/s, wetting τ_eff ≈ 6.7 s
+  #   9 bar  (nominal)    → Q_ss ≈ 4.0 mL/s, wetting τ_eff ≈ 10 s
+  #   12 bar (hard puck)  → Q_ss ≈ 2.0 mL/s, wetting τ_eff ≈ 13.3 s
   - platform: template
     name: "Puck: Easy (6 bar)"
     on_press:
