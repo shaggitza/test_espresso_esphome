@@ -513,6 +513,9 @@ espresso_machine:
 
     # Stop the shot when this many ml have passed the flow meter
     flow_max: 40ml
+    # Expose flow_max as a HA number entity — adjustable at runtime without reflashing
+    flow_max_number:
+      name: "Brew Flow Max"      # number entity in HA (mL); 10–200 mL adjustable
     # ml absorbed by puck + basket; subtracted from flow reading for HA yield display
     flow_offset: 20ml
 
@@ -657,6 +660,27 @@ button:
     name: "Steam Stop"
     on_press:
       - lambda: id(my_espresso).steam_stop();
+
+# =============================================================================
+# NUMBER ENTITIES — adjustable parameters exposed to HA
+# =============================================================================
+number:
+  # Brew temperature — change from HA without reflashing; syncs with PID climate
+  # The PID climate entity (main_heater) remains visible in HA as-is.
+  - platform: template
+    name: "Brew Temperature"
+    id: brew_temp_number
+    unit_of_measurement: "°C"
+    min_value: 85
+    max_value: 105
+    step: 0.5
+    initial_value: 90
+    optimistic: true
+    restore_value: true
+    set_action:
+      - climate.control:
+          id: main_heater
+          target_temperature: !lambda "return x;"
 
 # =============================================================================
 # TEXT SENSOR — exposes the current machine mode to HA

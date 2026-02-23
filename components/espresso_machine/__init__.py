@@ -1,11 +1,14 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.components import number
 from esphome.const import CONF_ID
 
 CODEOWNERS = ["@shaggitza"]
+AUTO_LOAD = ["number"]
 
 espresso_machine_ns = cg.esphome_ns.namespace("espresso_machine")
 EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
+BrewFlowMaxNumber = espresso_machine_ns.class_("BrewFlowMaxNumber", number.Number)
 
 # Keys for brew sub-schema
 CONF_BREW = "brew"
@@ -17,6 +20,7 @@ CONF_VALVE = "valve"
 CONF_PURGE_VALVE = "purge_valve"
 CONF_TARGET_TEMPERATURE = "target_temperature"
 CONF_FLOW_MAX = "flow_max"
+CONF_FLOW_MAX_NUMBER = "flow_max_number"
 CONF_FLOW_OFFSET = "flow_offset"
 CONF_COOL_DOWN_TO = "cool_down_to"
 
@@ -63,6 +67,10 @@ BREW_SCHEMA = cv.Schema(
         cv.Optional(CONF_TEMPERATURE_PROFILE): TEMPERATURE_PROFILE_SCHEMA,
         cv.Required(CONF_FLOW_MAX): _validate_volume_ml,
         cv.Required(CONF_FLOW_OFFSET): _validate_volume_ml,
+        cv.Optional(CONF_FLOW_MAX_NUMBER): number.number_schema(
+            BrewFlowMaxNumber,
+            unit_of_measurement="mL",
+        ),
         cv.Optional(CONF_PRE_INFUSION): PRE_INFUSION_SCHEMA,
         # cleanup_script wired in Phase 9
         cv.Optional("cleanup_script"): cv.Any(),
@@ -115,6 +123,16 @@ async def to_code(config):
 
         cg.add(var.set_brew_flow_max(brew[CONF_FLOW_MAX]))
         cg.add(var.set_brew_flow_offset(brew[CONF_FLOW_OFFSET]))
+
+        if CONF_FLOW_MAX_NUMBER in brew:
+            num = await number.new_number(
+                brew[CONF_FLOW_MAX_NUMBER],
+                min_value=10.0,
+                max_value=200.0,
+                step=1.0,
+            )
+            cg.add(num.set_parent(var))
+            cg.add(var.set_brew_flow_max_number(num))
 
         if CONF_TARGET_TEMPERATURE in brew:
             cg.add(var.set_brew_target_temperature(brew[CONF_TARGET_TEMPERATURE]))

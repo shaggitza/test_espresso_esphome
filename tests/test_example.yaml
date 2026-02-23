@@ -162,6 +162,8 @@ espresso_machine:
       offset: 5°C
       ramp_time: 20s
     flow_max: 40ml
+    flow_max_number:
+      name: "Brew Flow Max"
     flow_offset: 20ml
     pre_infusion:
       enabled: true

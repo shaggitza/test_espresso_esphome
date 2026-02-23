@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include "esphome/components/number/number.h"
 #include "interfaces.h"
 
 namespace esphome {
@@ -41,6 +42,25 @@ enum class EspressoMode : uint8_t {
 };
 
 // ---------------------------------------------------------------------------
+// Forward declaration for BrewFlowMaxNumber
+// ---------------------------------------------------------------------------
+class EspressoMachine;
+
+// ---------------------------------------------------------------------------
+// BrewFlowMaxNumber — number entity exposing the brew flow max to HA
+// ---------------------------------------------------------------------------
+class BrewFlowMaxNumber : public number::Number {
+ public:
+  BrewFlowMaxNumber() = default;
+  void set_parent(EspressoMachine *parent) { parent_ = parent; }
+
+ protected:
+  void control(float value) override;
+
+  EspressoMachine *parent_{nullptr};
+};
+
+// ---------------------------------------------------------------------------
 // EspressoMachine — pure orchestrator, owns no hardware
 // ---------------------------------------------------------------------------
 class EspressoMachine : public Component {
@@ -57,6 +77,7 @@ class EspressoMachine : public Component {
   void set_brew_target_temperature(float t) { brew_target_temp_ = t; }
   void set_brew_flow_max(float ml) { brew_flow_max_ml_ = ml; }
   void set_brew_flow_offset(float ml) { brew_flow_offset_ml_ = ml; }
+  void set_brew_flow_max_number(BrewFlowMaxNumber *n) { brew_flow_max_number_ = n; }
 
   // ----- Temperature surfing setters (Phase 7) -----------------------------
   void set_brew_temp_offset(float offset) { brew_temp_offset_ = offset; }
@@ -139,6 +160,7 @@ class EspressoMachine : public Component {
   float brew_target_temp_{90.0f};     // °C
   float brew_flow_max_ml_{40.0f};     // ml to extract before stopping
   float brew_flow_offset_ml_{20.0f};  // ml absorbed by puck (subtracted for yield)
+  BrewFlowMaxNumber *brew_flow_max_number_{nullptr};
 
   // -- Temperature surfing config (Phase 7) ----------------------------------
   float brew_temp_offset_{0.0f};        // °C added to setpoint at shot start

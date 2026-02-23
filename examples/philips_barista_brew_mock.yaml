@@ -328,6 +328,8 @@ espresso_machine:
       offset: 5°C
       ramp_time: 20s
     flow_max: 40ml
+    flow_max_number:
+      name: "Brew Flow Max"      # number entity in HA (mL); 10–200 mL adjustable
     flow_offset: 20ml
     # cleanup_script not yet implemented — commented out for now
 
@@ -453,6 +455,27 @@ button:
       - number.set:
           id: main_pump_puck_pressure
           value: 12.0
+
+# =============================================================================
+# NUMBER ENTITIES — adjustable parameters exposed to HA
+# =============================================================================
+number:
+  # Brew temperature — change from HA without reflashing; syncs with PID climate
+  # The PID climate entity (main_heater) remains visible in HA as-is.
+  - platform: template
+    name: "Brew Temperature"
+    id: brew_temp_number
+    unit_of_measurement: "°C"
+    min_value: 85
+    max_value: 105
+    step: 0.5
+    initial_value: 90
+    optimistic: true
+    restore_value: true
+    set_action:
+      - climate.control:
+          id: main_heater
+          target_temperature: !lambda "return x;"
 
 # =============================================================================
 # TEXT SENSOR — same as real config
