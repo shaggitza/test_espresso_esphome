@@ -1,13 +1,13 @@
 # Custom Home Assistant UI — Espresso Machine
 
 This document explains how to install and use the two ready-made Home Assistant
-Lovelace dashboards included in this repository, as well as the AppDaemon-powered
-**per-shot history graphs** that let you scroll through every espresso shot you have
-ever pulled and inspect its temperature curve and flow profile.
+Lovelace dashboards included in this repository, as well as the
+**per-shot history graphs** that let you scroll through every espresso shot you
+have ever pulled and inspect its temperature curve and flow profile.
 
-> **No SSH required.** The preferred installation path below uses only the
-> Home Assistant web UI and two add-ons that are available directly from the
-> HA Add-on Store.  SSH is never needed.
+> **No SSH, no terminal, no AppDaemon required.**  
+> The primary installation path uses a custom add-on from this repository —
+> install it in HA in three clicks, configure it in the UI, done.
 
 ---
 
@@ -27,20 +27,7 @@ can explore how the PID and flow model behave without touching real hardware.
 
 ---
 
-## Quick Start — No SSH Required
-
-Everything below can be done entirely through the Home Assistant browser UI.
-You will need two add-ons from the HA **Add-on Store** — both are free and
-official:
-
-| Add-on | Why you need it |
-|---|---|
-| **File Editor** | Browser-based file manager/editor for your HA config folder |
-| **AppDaemon 4** | Runs the shot-history Python app that records every espresso shot |
-
-Both are installed via **Settings → Add-ons → Add-on Store**.
-
----
+## Quick Start — Add-on Installation (recommended)
 
 ### Step 1 — Install HACS custom cards
 
@@ -58,98 +45,67 @@ browser (`Ctrl+Shift+R` / `Cmd+Shift+R`).
 
 ---
 
-### Step 2 — Install the File Editor add-on
+### Step 2 — Add the HA helper entities (one-time)
 
-1. **Settings → Add-ons → Add-on Store → search "File Editor"**
-2. Install **File Editor**, enable **Show in sidebar**, click **Start**.
+The shot history feature needs four HA helper entities.  Install the **File
+Editor** add-on (Settings → Add-ons → Add-on Store → "File Editor"), then:
 
-The File Editor icon now appears in the left sidebar.  All subsequent file
-operations use this editor — no SSH, no terminal.
+1. Open File Editor, navigate to your HA config root (the folder with
+   `configuration.yaml`).
+2. Create a new file named `espresso_package.yaml` and paste the full contents
+   of [`home_assistant/espresso_package.yaml`](home_assistant/espresso_package.yaml)
+   into it.  Save.
+3. Open `configuration.yaml` in File Editor and add:
 
----
+   ```yaml
+   homeassistant:
+     packages:
+       espresso: !include espresso_package.yaml
+   ```
 
-### Step 3 — Add the HA package file (helpers + template sensors)
+   (Use the same indentation as the rest of your file — YAML is whitespace-sensitive.)
 
-A single combined file `home_assistant/espresso_package.yaml` ships in this
-repository and contains all helpers and template sensors in one place.
+4. Restart Home Assistant (`Developer Tools → YAML → Restart`).
 
-**3a — Open the File Editor** and navigate to your HA config root (the folder
-that contains `configuration.yaml`).
-
-**3b — Create a new file** called `espresso_package.yaml`.  Paste the entire
-contents of
-[`home_assistant/espresso_package.yaml`](home_assistant/espresso_package.yaml)
-from this repository into it and save.
-
-**3c — Edit `configuration.yaml`** (also via File Editor) and add the
-`packages:` block.  YAML is whitespace-sensitive, so use the same indentation
-style as the rest of your file (2 spaces shown here):
-
-```yaml
-homeassistant:
-  packages:
-    espresso: !include espresso_package.yaml
-```
-
-**3d — Restart Home Assistant** (`Developer Tools → YAML → Restart`).
-
-After the restart you should see four new helper entities under
+After the restart you will see four new helpers under
 **Settings → Devices & Services → Helpers**:
-
-- `input_text.espresso_shot_log`
-- `input_select.espresso_shot_viewer`
-- `input_datetime.espresso_shot_view_start`
-- `input_datetime.espresso_shot_view_end`
+`espresso_shot_log`, `espresso_shot_viewer`, `espresso_shot_view_start`,
+`espresso_shot_view_end`.
 
 ---
 
-### Step 4 — Install AppDaemon and the shot-history app
+### Step 3 — Add this repository as a custom add-on repository
 
-**4a — Install AppDaemon:**
+1. In HA go to **Settings → Add-ons → Add-on Store**
+2. Click the **⋮ three-dot menu** (top right) → **Repositories**
+3. Paste this URL and click **Add**:
 
-1. **Settings → Add-ons → Add-on Store → search "AppDaemon"**
-2. Install **AppDaemon 4**, enable **Auto-start** and **Watchdog**, click **Start**.
-
-**4b — Copy the app files using the File Editor:**
-
-The AppDaemon `apps/` directory is located at
-`/addon_configs/a0d7b954_appdaemon/apps/` inside the File Editor.
-
-1. Open the File Editor, navigate to
-   `/addon_configs/a0d7b954_appdaemon/apps/`.
-2. Create a new file called `shot_history.py` and paste the full contents of
-   [`home_assistant/appdaemon/shot_history.py`](home_assistant/appdaemon/shot_history.py)
-   from this repository.  Save.
-3. Create (or open) `apps.yaml` in the same folder and add the following block
-   (choose **real** or **mock** depending on your setup):
-
-   **Real hardware:**
-   ```yaml
-   espresso_shot_history:
-     module: shot_history
-     class: ShotHistory
-     mode_entity: text_sensor.philips_barista_brew_machine_mode
-     duration_entity: sensor.philips_barista_brew_last_shot_duration
-     yield_entity: sensor.philips_barista_brew_last_shot_yield
-     temp_entity: sensor.philips_barista_brew_thermoblock_temperature
-     max_shots: 20
-     graph_padding_sec: 15
+   ```
+   https://github.com/shaggitza/test_espresso_esphome
    ```
 
-   **Mock simulation:**
-   ```yaml
-   espresso_shot_history:
-     module: shot_history
-     class: ShotHistory
-     mode_entity: text_sensor.philips_barista_brew_mock_machine_mode
-     duration_entity: sensor.philips_barista_brew_mock_last_shot_duration
-     yield_entity: sensor.philips_barista_brew_mock_last_shot_yield
-     temp_entity: sensor.philips_barista_brew_mock_thermoblock_temperature
-     max_shots: 20
-     graph_padding_sec: 15
-   ```
+4. Close the dialog — the **Espresso Machine** repository now appears at the
+   bottom of the Add-on Store.
 
-4. **Restart AppDaemon** (Settings → Add-ons → AppDaemon → Restart).
+---
+
+### Step 4 — Install the Espresso Shot History add-on
+
+1. In the Add-on Store, find **Espresso Shot History** under the
+   *Espresso Machine* section.
+2. Click it → **Install**.
+3. After installation, go to the **Configuration** tab and set the entity IDs
+   to match your ESPHome device:
+
+   | Option | Real hardware | Mock simulation |
+   |---|---|---|
+   | `mode_entity` | `text_sensor.philips_barista_brew_machine_mode` | `text_sensor.philips_barista_brew_mock_machine_mode` |
+   | `duration_entity` | `sensor.philips_barista_brew_last_shot_duration` | `sensor.philips_barista_brew_mock_last_shot_duration` |
+   | `yield_entity` | `sensor.philips_barista_brew_last_shot_yield` | `sensor.philips_barista_brew_mock_last_shot_yield` |
+   | `temp_entity` | `sensor.philips_barista_brew_thermoblock_temperature` | `sensor.philips_barista_brew_mock_thermoblock_temperature` |
+
+4. Go to the **Info** tab, enable **Auto-start** and **Watchdog**, then click
+   **Start**.
 
 ---
 
@@ -190,7 +146,7 @@ Restart HA after saving.
 
 ---
 
-## Alternative: Manual File-based Installation (helpers split across two files)
+## Alternative: Manual helpers installation (split across two files)
 
 If you already have a split `configuration.yaml` setup and prefer keeping
 helpers and template sensors in separate files, you can use the original

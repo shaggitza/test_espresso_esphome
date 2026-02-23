@@ -1,0 +1,28 @@
+name: "Espresso Shot History"
+version: "1.0.0"
+slug: "espresso_shot_history"
+description: "Records every espresso shot and drives the shot-history dashboard graphs. No AppDaemon required."
+url: "https://github.com/shaggitza/test_espresso_esphome"
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+homeassistant_api: true
+options:
+  mode_entity: "text_sensor.philips_barista_brew_machine_mode"
+  duration_entity: "sensor.philips_barista_brew_last_shot_duration"
+  yield_entity: "sensor.philips_barista_brew_last_shot_yield"
+  temp_entity: "sensor.philips_barista_brew_thermoblock_temperature"
+  max_shots: 20
+  graph_padding_sec: 15
+schema:
+  mode_entity: str
+  duration_entity: str
+  yield_entity: str
+  temp_entity: str
+  max_shots: int
+  graph_padding_sec: int
