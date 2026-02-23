@@ -417,8 +417,8 @@ TEST(Orchestrator, SteamCoolingTransitionsToCleanup) {
   OrchestratorFixture f;
   f.machine.steam_start();
   f.machine.loop();  // HEATING → STEAMING
-  f.machine.steam_stop();  // STEAMING → COOLING
-  f.machine.loop();  // COOLING → CLEANUP (purge valve opens)
+  f.machine.steam_stop();  // STEAMING → COOLING (purge valve opens here)
+  f.machine.loop();  // COOLING → CLEANUP
   EXPECT_EQ(f.machine.get_steam_state(), SteamState::CLEANUP);
   EXPECT_TRUE(f.steam_purge_valve.open_state);
 }
@@ -479,4 +479,155 @@ TEST(Orchestrator, SteamStopIgnoredDuringCooling) {
   // Second steam_stop() during COOLING is a no-op
   f.machine.steam_stop();
   EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+}
+
+// ---------------------------------------------------------------------------
+// Steam temperature management — IHeater-gated transitions
+// ---------------------------------------------------------------------------
+
+// Simple in-test double for IHeater
+struct MockHeaterCtrl : public IHeater {
+  float current_temp{25.0f};
+  float target_temp{0.0f};
+  int set_target_count{0};
+
+  float get_current_temperature() const override { return current_temp; }
+  void set_target_temperature(float t) override {
+    target_temp = t;
+    set_target_count++;
+  }
+};
+
+// Fixture with heater controller wired (start cold, target 135°C, cool-down 90°C)
+struct OrchestratorWithHeaterFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  MockHeaterCtrl heater_ctrl;
+  EspressoMachine machine;
+
+  OrchestratorWithHeaterFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+    machine.set_steam_heater_ctrl(&heater_ctrl);
+
+    heater_ctrl.current_temp = 25.0f;  // Start cold
+
+    g_mock_millis = 0;
+    machine.setup();
+  }
+};
+
+TEST(Orchestrator, SteamStartSetsHeaterTargetToSteamTemperature) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 135.0f);
+  EXPECT_EQ(f.heater_ctrl.set_target_count, 1);
+}
+
+TEST(Orchestrator, SteamHeatingWaitsForTemperatureWhenHeaterWired) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+
+  // Simulate temperature still below target — HEATING should not transition
+  f.heater_ctrl.current_temp = 100.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  EXPECT_FALSE(f.steam_valve.open_state);
+  EXPECT_FALSE(f.steam_pump.running);
+}
+
+TEST(Orchestrator, SteamHeatingTransitionsWhenTemperatureReached) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+
+  // Simulate temperature reaching target
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → STEAMING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+  EXPECT_TRUE(f.steam_valve.open_state);
+  EXPECT_TRUE(f.steam_pump.running);
+}
+
+TEST(Orchestrator, SteamStopOpensPurgeValveForCooldown) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → STEAMING
+
+  f.machine.steam_stop();
+  EXPECT_FALSE(f.steam_valve.open_state);
+  EXPECT_FALSE(f.steam_pump.running);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);  // purge opens immediately on stop
+}
+
+TEST(Orchestrator, SteamStopSetsHeaterTargetToCoolDownTemperature) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → STEAMING
+
+  int count_before = f.heater_ctrl.set_target_count;
+  f.machine.steam_stop();
+  EXPECT_GT(f.heater_ctrl.set_target_count, count_before);
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);
+}
+
+TEST(Orchestrator, SteamCoolingWaitsForTemperatureWhenHeaterWired) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+
+  // Temperature still above cool_down_to (90°C) — should stay in COOLING
+  f.heater_ctrl.current_temp = 120.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);  // purge valve stays open
+}
+
+TEST(Orchestrator, SteamCoolingTransitionsWhenTemperatureDropped) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+
+  // Temperature drops to cool_down_to
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.loop();  // COOLING → CLEANUP
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::CLEANUP);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);  // still open until CLEANUP runs
+  f.machine.loop();  // CLEANUP → IDLE (purge valve closes)
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+}
+
+TEST(Orchestrator, SteamStopDuringHeatingResetsHeaterSetpoint) {
+  OrchestratorWithHeaterFixture f;
+  f.machine.steam_start();
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 135.0f);
+
+  // Cancel before steaming starts
+  f.heater_ctrl.current_temp = 80.0f;
+  f.machine.steam_stop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);  // lowered to cool_down_to
 }

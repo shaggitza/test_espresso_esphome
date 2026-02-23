@@ -70,7 +70,9 @@ class MockHeaterNumber : public number::Number, public Component {
 // ---------------------------------------------------------------------------
 // MockHeater — main component managing thermal simulation
 // ---------------------------------------------------------------------------
-class MockHeater : public Component, public espresso_machine::IFlowObserver {
+class MockHeater : public Component,
+                   public espresso_machine::IFlowObserver,
+                   public espresso_machine::IHeater {
  public:
   // Configuration setters (called from generated code)
   void set_initial_temperature(float t) { temperature_ = t; }
@@ -82,6 +84,10 @@ class MockHeater : public Component, public espresso_machine::IFlowObserver {
 
   // Called by MockPump each loop tick to drive flow-based cooling (IFlowObserver)
   void set_flow_rate(float flow_rate_ml_s) override { flow_rate_ = flow_rate_ml_s; }
+
+  // IHeater — temperature reading and setpoint commanding
+  float get_current_temperature() const override { return temperature_; }
+  void set_target_temperature(float t) override;
 
   void set_output(MockHeaterOutput *out) { output_ = out; }
   void set_temperature_sensor(MockHeaterTempSensor *sens) { temp_sensor_ = sens; }
@@ -134,6 +140,10 @@ class MockHeater : public Component, public espresso_machine::IFlowObserver {
   float thermal_mass_{800.0f};     // Thermal mass [J/°C] (Al block + water)
   float heat_loss_{1.7f};          // Heat-loss coefficient [W/°C]
   float water_inlet_temp_{20.0f};  // Cold-water inlet temperature [°C]
+
+  // Target temperature commanded via IHeater::set_target_temperature()
+  // Used for tracking/logging; actual control driven by PID output.
+  float target_temperature_{0.0f};
 
   // Flow rate pushed by MockPump each tick [mL/s]
   float flow_rate_{0.0f};

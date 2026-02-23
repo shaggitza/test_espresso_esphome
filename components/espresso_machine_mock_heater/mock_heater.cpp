@@ -77,6 +77,11 @@ void MockHeaterNumber::control(float value) {
 // ---------------------------------------------------------------------------
 // MockHeater
 // ---------------------------------------------------------------------------
+void MockHeater::set_target_temperature(float t) {
+  target_temperature_ = t;
+  ESP_LOGI(TAG, "IHeater::set_target_temperature(%.1f°C) — wire PID climate to propagate", t);
+}
+
 void MockHeater::setup() {
   last_update_ms_ = millis();
   ESP_LOGI(TAG, "Mock heater initialized:");

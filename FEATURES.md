@@ -29,7 +29,7 @@ planned in this project.
 | `espresso_machine_pump` (relay) | `switch` | ✅ | On/off relay; `run` action with volume + timeout |
 | `espresso_machine_pump` (dimmer) | `number` (0–100 %) | ✅ | Slow-PWM dimmer stub; `turn_on`/`turn_off` wired |
 | `espresso_machine_grinder` | `button` + `number` | ✅ | Timed relay grind; adjustable grind-time number entity |
-| `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines present; see brew/steam rows below |
+| `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines; steam temperature management implemented via `IHeater` |
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
@@ -56,11 +56,16 @@ planned in this project.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Steam state machine (`IDLE→HEATING→STEAMING→COOLING→CLEANUP`) | 🚧 | All states exist; `HEATING` transitions immediately (no live temperature check) |
-| Heater setpoint to steam temperature | 🚧 | Not wired — heater climate call pending Phase 2 |
+| Steam state machine (`IDLE→HEATING→STEAMING→COOLING→CLEANUP`) | ✅ | All states implemented with temperature-gated transitions |
+| Heater setpoint to steam temperature | ✅ | `set_target_temperature(steam_target_temp_)` called on `IHeater` in `steam_start()` |
+| Temperature-gated HEATING→STEAMING transition | ✅ | Waits for `get_current_temperature() >= steam_target_temp_`; falls back to immediate if no IHeater wired |
 | Steam valve + pump activation | ✅ | `steam_start()` opens the valve and starts the pump in STEAMING state |
-| Pump duty-cycle flow-rate control | ⬜ | Planned (Phase 8); pump runs continuously for now |
-| Auto cool-down after steaming | 🚧 | `cool_down_to` config accepted; heater setpoint NOT reset (Phase 2 wiring pending) |
+| Pump duty-cycle flow-rate control | ✅ | Bang-bang pump control to maintain `steam_flow_max_ml_per_s_` |
+| Purge on steam stop | ✅ | Purge valve opens immediately when steam stops to flush steam path during cool-down |
+| Auto cool-down after steaming | ✅ | `set_target_temperature(steam_cool_down_to_)` on `IHeater`; temperature-gated COOLING→CLEANUP transition |
+| Temperature-gated COOLING→CLEANUP transition | ✅ | Waits for `get_current_temperature() <= steam_cool_down_to_`; falls back to immediate if no IHeater wired |
+| `IHeater` interface | ✅ | `get_current_temperature()` + `set_target_temperature()` in `interfaces.h`; `MockHeater` implements it |
+| `heater_controller:` YAML key | ✅ | Optional in steam schema; wires an `IHeater*` to the orchestrator |
 | Cleanup script after steam | ⬜ | Schema accepts block; not executed (Phase 9) |
 | `steam_start` / `steam_stop` actions | ✅ | Available from YAML automations and HA services |
 

@@ -74,6 +74,12 @@ class EspressoMachine : public Component {
   void set_steam_purge_valve(IValve *v) { steam_purge_valve_ = v; }
   void set_steam_pump(IPump *p) { steam_pump_ = p; }
 
+  // ----- Steam temperature controller (IHeater) ----------------------------
+  // Optional: when set the state machine gates HEATING and COOLING transitions
+  // on actual temperature.  If not wired the machine transitions immediately
+  // (same as the Phase 1 placeholder behaviour).
+  void set_steam_heater_ctrl(IHeater *h) { steam_heater_ctrl_ = h; }
+
   // ----- Steam configuration setters ---------------------------------------
   void set_steam_target_temperature(float t) { steam_target_temp_ = t; }
   void set_steam_flow_max(float ml_per_s) { steam_flow_max_ml_per_s_ = ml_per_s; }
@@ -136,6 +142,7 @@ class EspressoMachine : public Component {
   IValve *steam_valve_{nullptr};
   IValve *steam_purge_valve_{nullptr};
   IPump *steam_pump_{nullptr};
+  IHeater *steam_heater_ctrl_{nullptr};  // optional temperature controller
 
   // -- Steam config ----------------------------------------------------------
   float steam_target_temp_{135.0f};       // °C

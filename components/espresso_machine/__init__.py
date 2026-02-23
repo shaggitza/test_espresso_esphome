@@ -11,6 +11,7 @@ EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
 CONF_BREW = "brew"
 CONF_STEAM = "steam"
 CONF_HEATER = "heater"
+CONF_HEATER_CTRL = "heater_controller"
 CONF_PUMP = "pump"
 CONF_VALVE = "valve"
 CONF_PURGE_VALVE = "purge_valve"
@@ -75,6 +76,8 @@ STEAM_SCHEMA = cv.Schema(
         cv.Required(CONF_TARGET_TEMPERATURE): cv.temperature,
         cv.Required(CONF_FLOW_MAX): _validate_flow_rate,
         cv.Required(CONF_COOL_DOWN_TO): cv.temperature,
+        # Optional IHeater-implementing component for temperature-gated transitions
+        cv.Optional(CONF_HEATER_CTRL): cv.use_id(cg.Component),
         # Advanced fields validated in later phases; accepted here to avoid errors
         cv.Optional("cleanup_script"): cv.Any(),
     }
@@ -141,3 +144,7 @@ async def to_code(config):
         cg.add(var.set_steam_target_temperature(steam[CONF_TARGET_TEMPERATURE]))
         cg.add(var.set_steam_flow_max(steam[CONF_FLOW_MAX]))
         cg.add(var.set_steam_cool_down_to(steam[CONF_COOL_DOWN_TO]))
+
+        if CONF_HEATER_CTRL in steam:
+            heater_ctrl = await cg.get_variable(steam[CONF_HEATER_CTRL])
+            cg.add(var.set_steam_heater_ctrl(heater_ctrl))
