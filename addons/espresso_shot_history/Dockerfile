@@ -6,9 +6,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.4 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-COPY requirements.txt /app/
-RUN uv pip install --system --no-cache -r /app/requirements.txt
+COPY pyproject.toml /app/
+RUN uv sync --no-cache --no-dev
 
 COPY shot_history.py /app/
 
-CMD ["python3", "-u", "/app/shot_history.py"]
+CMD ["uv", "run", "python3", "-u", "/app/shot_history.py"]
