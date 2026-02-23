@@ -19,12 +19,15 @@ struct MockPumpFixture {
   Sensor nozzle_total_sensor;
 
   // Default: nominal_flow=4, tau=10, pump_max=15, density=50 (medium puck)
+  // extraction_tau defaults to 0 (no degradation) to keep unit tests deterministic.
+  // Use set_puck_extraction_tau() on the pump to test degradation behaviour.
   MockPumpFixture(float nominal_flow = 4.0f, float puck_tau = 10.0f,
                   float pump_max_pressure = 15.0f, float puck_density = 50.0f) {
     pump.set_nominal_flow(nominal_flow);
     pump.set_puck_time_constant(puck_tau);
     pump.set_pump_max_pressure(pump_max_pressure);
     pump.set_puck_density(puck_density);
+    pump.set_puck_extraction_tau(0.0f);  // Disable degradation for deterministic tests
     pump.set_rate_sensor(&rate_sensor);
     pump.set_total_sensor(&total_sensor);
     pump.set_nozzle_rate_sensor(&nozzle_rate_sensor);
@@ -534,6 +537,7 @@ TEST(MockPump, PressureSensorPublished) {
   pump.set_pump_max_pressure(15.0f);
   pump.set_puck_density(50.0f);        // P_eq = 7.35 bar
   pump.set_internal_volume(0.0f);
+  pump.set_puck_extraction_tau(0.0f);  // disable degradation for deterministic P_eq
   pump.set_rate_sensor(&rate_sensor);
   pump.set_total_sensor(&total_sensor);
   pump.set_pressure_sensor(&pressure_sensor);
@@ -560,6 +564,7 @@ TEST(MockPump, PressureSensorPublishesZeroOnReset) {
   pump.set_puck_time_constant(0.0f);
   pump.set_pump_max_pressure(15.0f);
   pump.set_puck_density(50.0f);
+  pump.set_puck_extraction_tau(0.0f);  // disable degradation for deterministic P_eq
   pump.set_pressure_sensor(&pressure_sensor);
 
   g_mock_millis = 0;
@@ -829,5 +834,184 @@ TEST(MockPump, RestartResetsRunTimeButNotVolume) {
 
   EXPECT_LT(f.pump.get_flow_rate(), rate_before);
   EXPECT_GT(f.pump.get_flow_total(), volume_before - 0.1f);
+}
+
+// ---------------------------------------------------------------------------
+// Puck extraction / degradation model tests
+//
+// When puck_extraction_tau > 0, the effective puck density decreases over time:
+//   D_eff(t) = 1 + (D − 1) × exp(−t / τ_extract)
+//
+// This models coffee solubles dissolving and the puck structure weakening,
+// causing flow rate to increase monotonically throughout the shot.
+// ---------------------------------------------------------------------------
+
+TEST(MockPump, FlowIncreasesOverTimeWithDegradation) {
+  // With degradation enabled, flow should continue to increase past Q_ss
+  // even after the wetting phase is complete.
+  MockPumpFixture f(4.0f, 10.0f, 15.0f, 50.0f);
+  f.pump.set_puck_extraction_tau(45.0f);
+  f.pump.turn_on();
+
+  // Let wetting phase complete: τ_eff = puck_tau × (D/100) = 10 × 0.5 = 5s → 5×τ_eff = 25s
+  for (int i = 0; i < 2500; ++i) {
+    f.advance_time_ms(10);
+  }
+  float flow_after_wetting = f.pump.get_flow_rate();
+
+  // Run for another 30 s — degradation should increase flow further
+  for (int i = 0; i < 3000; ++i) {
+    f.advance_time_ms(10);
+  }
+  float flow_after_degradation = f.pump.get_flow_rate();
+
+  // Flow must be strictly higher after further degradation
+  EXPECT_GT(flow_after_degradation, flow_after_wetting);
+}
+
+TEST(MockPump, DegradationFlowAlwaysIncreasing) {
+  // Verify that flow is strictly monotonically increasing throughout a shot
+  // when degradation is enabled (after the brief initial wetting transient).
+  MockPumpFixture f(4.0f, 10.0f, 15.0f, 50.0f);
+  f.pump.set_puck_extraction_tau(45.0f);
+  f.pump.turn_on();
+
+  // Skip the very first few ms where wetting starts from 0
+  for (int i = 0; i < 10; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  float prev_flow = f.pump.get_flow_rate();
+
+  // Sample flow every 2 s from t=0.1s to t=60s and verify it keeps rising
+  for (int s = 0; s < 30; ++s) {
+    for (int i = 0; i < 200; ++i) {
+      f.advance_time_ms(10);
+    }
+    float current_flow = f.pump.get_flow_rate();
+    EXPECT_GE(current_flow, prev_flow - 0.001f)
+        << "Flow decreased at t=" << (0.1f + s * 2.0f) << "s";
+    prev_flow = current_flow;
+  }
+}
+
+TEST(MockPump, DegradationFlowExceedsInitialQss) {
+  // After significant extraction time, flow should exceed the initial Q_ss
+  // (the steady-state flow computed from the initial puck density).
+  // D=50 → initial Q_ss = 4 × (101-50)/100 = 4 × 0.51 = 2.04 mL/s
+  // After 45s (1×τ_extract): D_eff = 1 + 49×exp(-1) ≈ 19.0 → Q_ss ≈ 3.28 mL/s > 2.04
+  MockPumpFixture f(4.0f, 10.0f, 15.0f, 50.0f);
+  f.pump.set_puck_extraction_tau(45.0f);
+  f.pump.turn_on();
+
+  // Run for 50 s (past 1×τ_extract = 45 s)
+  for (int i = 0; i < 5000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  float initial_q_ss = density_q_ss(4.0f, 50.0f);  // 2.04 mL/s at D=50
+  EXPECT_GT(f.pump.get_flow_rate(), initial_q_ss);
+}
+
+TEST(MockPump, DegradationDisabledWhenTauIsZero) {
+  // When puck_extraction_tau = 0, flow should plateau at Q_ss
+  // (same as existing behaviour — this verifies backward compatibility).
+  MockPumpFixture f(4.0f, 10.0f, 15.0f, 50.0f);
+  // f.pump.set_puck_extraction_tau(0.0f);  // already set to 0 by fixture
+  f.pump.turn_on();
+
+  // Run to flow steady state (5×τ_eff = 25 s)
+  for (int i = 0; i < 2500; ++i) {
+    f.advance_time_ms(10);
+  }
+  float flow_at_25s = f.pump.get_flow_rate();
+
+  // Run for another 25 s — without degradation, flow should not increase
+  for (int i = 0; i < 2500; ++i) {
+    f.advance_time_ms(10);
+  }
+  float flow_at_50s = f.pump.get_flow_rate();
+
+  float q_ss = density_q_ss(4.0f, 50.0f);
+  // Both readings should be near Q_ss (no degradation)
+  EXPECT_NEAR(flow_at_25s, q_ss, 0.1f);
+  EXPECT_NEAR(flow_at_50s, q_ss, 0.1f);
+  // And they should be essentially equal (no degradation drift)
+  EXPECT_NEAR(flow_at_50s, flow_at_25s, 0.05f);
+}
+
+TEST(MockPump, DegradationEffectivelyOpenAtLargeTime) {
+  // At t >> τ_extract, effective density → 1, so flow → nominal_flow
+  // Use a fast extraction tau for practical test timing
+  MockPumpFixture f(4.0f, 10.0f, 15.0f, 50.0f);
+  f.pump.set_puck_extraction_tau(5.0f);  // Fast degradation for test
+  f.pump.turn_on();
+
+  // Run for 5×τ_extract = 25 s — puck should be nearly fully extracted
+  for (int i = 0; i < 2500; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  // At t=25s with τ_extract=5s: D_eff = 1 + 49×exp(-5) ≈ 1 + 49×0.0067 ≈ 1.33
+  // Q_ss = 4 × (101-1.33)/100 ≈ 4 × 0.997 ≈ 3.99 mL/s
+  // Flow should be close to nominal_flow (4 mL/s) after full degradation
+  EXPECT_GT(f.pump.get_flow_rate(), 3.5f);
+}
+
+TEST(MockPump, DegradationResetsOnPumpRestart) {
+  // When the pump restarts (run_time_ reset to 0), degradation restarts from
+  // the initial puck density (extraction tau resets to the fresh puck).
+  MockPumpFixture f(4.0f, 10.0f, 15.0f, 50.0f);
+  f.pump.set_puck_extraction_tau(10.0f);  // Moderate degradation
+  f.pump.turn_on();
+
+  // Run for 20 s to degrade the puck significantly
+  for (int i = 0; i < 2000; ++i) {
+    f.advance_time_ms(10);
+  }
+  float flow_after_degradation = f.pump.get_flow_rate();
+
+  // Stop and restart — run_time_ resets to 0 → fresh puck density applied
+  f.pump.turn_off();
+  f.advance_time_ms(50);
+  f.pump.turn_on();
+  f.advance_time_ms(50);  // Very start of new shot
+
+  // Flow should have dropped back toward initial Q_ss (fresh puck)
+  float initial_q_ss = density_q_ss(4.0f, 50.0f);
+  EXPECT_LT(f.pump.get_flow_rate(), flow_after_degradation);
+  // (Flow is near 0 because wetting just started again — just confirm it's
+  //  lower than the degraded value.)
+}
+
+TEST(MockPump, DegradationRuntimeUpdate) {
+  // Verify set_puck_extraction_tau accessor round-trips correctly.
+  MockPumpFixture f;
+  f.pump.set_puck_extraction_tau(60.0f);
+  EXPECT_FLOAT_EQ(f.pump.get_puck_extraction_tau(), 60.0f);
+
+  f.pump.update_puck_extraction_tau(30.0f);
+  EXPECT_FLOAT_EQ(f.pump.get_puck_extraction_tau(), 30.0f);
+}
+
+TEST(MockPump, PressureAlsoDecreasesDuringDegradation) {
+  // With degradation, P_equilibrium decreases as D_eff drops.
+  // After significant extraction, the system pressure should stabilise
+  // LOWER than the initial P_eq computed from puck_density.
+  MockPumpFixture f(4.0f, 10.0f, 15.0f, 50.0f);
+  f.pump.set_puck_extraction_tau(10.0f);  // Fast degradation for test
+  f.pump.turn_on();
+
+  // Run just past τ_rise (say 10 s) so pressure has stabilised
+  // but also enough degradation has occurred (1×τ_extract)
+  for (int i = 0; i < 1000; ++i) {
+    f.advance_time_ms(10);
+  }
+
+  // P_eq at D=50 (initial) = 15 × 0.49 = 7.35 bar
+  // After 10s with τ_extract=10s: D_eff = 1 + 49 × exp(-1) ≈ 19.0
+  // P_eq at D_eff=19.0 = 15 × 0.18 = 2.7 bar  → significantly lower
+  float initial_p_eq = density_p_eq(15.0f, 50.0f);  // 7.35 bar
+  EXPECT_LT(f.pump.get_system_pressure(), initial_p_eq);
 }
 
