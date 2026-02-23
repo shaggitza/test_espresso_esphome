@@ -89,6 +89,14 @@ class EspressoMachine : public Component {
   void setup() override;
   void loop() override;
 
+  // ----- Power control (on/off toggle) -------------------------------------
+  // machine_on():  powers the machine on; brew_start / steam_start become active.
+  // machine_off(): safely shuts down.  If steaming, waits for the cool-down +
+  //               purge sequence to complete before returning to IDLE.
+  void machine_on();
+  void machine_off();
+  bool is_powered_on() const { return powered_on_; }
+
   // ----- Public actions (callable from YAML / HA automations) --------------
   void brew_start();
   void brew_stop();
@@ -116,6 +124,10 @@ class EspressoMachine : public Component {
   EspressoMode mode_{EspressoMode::IDLE};
   BrewState brew_state_{BrewState::IDLE};
   SteamState steam_state_{SteamState::IDLE};
+
+  // -- Power state -----------------------------------------------------------
+  // Defaults to false (off) on boot for safety. Call machine_on() to enable.
+  bool powered_on_{false};
 
   // -- Brew hardware ---------------------------------------------------------
   Component *brew_heater_{nullptr};  // native ESPHome climate entity (Phase 2)

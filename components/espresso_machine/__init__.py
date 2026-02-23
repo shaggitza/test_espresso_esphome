@@ -57,7 +57,9 @@ BREW_SCHEMA = cv.Schema(
         cv.Required(CONF_PUMP): cv.use_id(cg.Component),
         cv.Required(CONF_VALVE): cv.use_id(cg.Component),
         cv.Required(CONF_PURGE_VALVE): cv.use_id(cg.Component),
-        cv.Required(CONF_TARGET_TEMPERATURE): cv.temperature,
+        # target_temperature is optional: when omitted the heater setpoint set from
+        # Home Assistant is used as-is and never overridden by the orchestrator.
+        cv.Optional(CONF_TARGET_TEMPERATURE): cv.temperature,
         cv.Optional(CONF_TEMPERATURE_PROFILE): TEMPERATURE_PROFILE_SCHEMA,
         cv.Required(CONF_FLOW_MAX): _validate_volume_ml,
         cv.Required(CONF_FLOW_OFFSET): _validate_volume_ml,
@@ -111,9 +113,11 @@ async def to_code(config):
         purge_valve = await cg.get_variable(brew[CONF_PURGE_VALVE])
         cg.add(var.set_brew_purge_valve(purge_valve))
 
-        cg.add(var.set_brew_target_temperature(brew[CONF_TARGET_TEMPERATURE]))
         cg.add(var.set_brew_flow_max(brew[CONF_FLOW_MAX]))
         cg.add(var.set_brew_flow_offset(brew[CONF_FLOW_OFFSET]))
+
+        if CONF_TARGET_TEMPERATURE in brew:
+            cg.add(var.set_brew_target_temperature(brew[CONF_TARGET_TEMPERATURE]))
 
         if CONF_TEMPERATURE_PROFILE in brew:
             tp = brew[CONF_TEMPERATURE_PROFILE]

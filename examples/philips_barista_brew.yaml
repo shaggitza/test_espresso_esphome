@@ -491,7 +491,7 @@ espresso_machine:
 
   # ---------------------------------------------------------------------------
   # Brew mode — full espresso shot sequence
-  # State machine: idle → heating → pre_infusion → brewing → done → cleanup
+  # State machine: idle → heating → brewing → done → cleanup
   # ---------------------------------------------------------------------------
   brew:
     heater: main_heater           # id of the climate entity above
@@ -499,8 +499,10 @@ espresso_machine:
     valve: brew_valve             # id of the valve entity above
     purge_valve: purge_valve      # id of the valve entity above
 
-    # Target brew temperature at the thermoblock
-    target_temperature: 90°C
+    # target_temperature is intentionally omitted here.
+    # The brew sequence uses whatever setpoint the PID climate currently has,
+    # which lets you adjust temperature freely from Home Assistant without it
+    # being reset back to a fixed value on every shot.
 
     # Temperature surfing: at shot start the heater setpoint is raised by
     # `offset`, then linearly decays back to target_temperature over ramp_time.
@@ -513,12 +515,6 @@ espresso_machine:
     flow_max: 40ml
     # ml absorbed by puck + basket; subtracted from flow reading for HA yield display
     flow_offset: 20ml
-
-    # Pre-infusion: wet the puck at low flow before full-pressure extraction
-    pre_infusion:
-      enabled: true
-      volume_ml: 5ml            # ml to push through during pre-infusion
-      hold_time: 5s             # pause after pre-infusion before full extraction begins
 
     # Cleanup: automatically flush brew path after shot completes.
     # NOTE: cleanup_script execution is planned for Phase 9. This block is
@@ -584,6 +580,46 @@ font:
   - file: "gfonts://Roboto Mono"
     id: font_small
     size: 12
+
+# =============================================================================
+# POWER SWITCH — master on/off toggle
+#
+# Turning ON:  powers the machine on and enables the PID heater → the
+#              thermoblock starts warming to the last-set temperature.
+#
+# Turning OFF: safely shuts the machine down.
+#   • If idle:    hardware is already safe — power flag cleared immediately.
+#   • If brewing: brew sequence stopped immediately (safe to interrupt).
+#   • If steaming or cooling: the cool-down + purge sequence completes
+#                             automatically before the machine idles.
+#                             This prevents residual steam pressure from
+#                             being trapped in the circuit.
+#
+# restore_mode: RESTORE_DEFAULT_OFF — starts OFF on first boot (no saved state);
+# on subsequent boots restores the last on/off state from flash. This means a
+# power failure does not force the machine off permanently — it comes back in
+# the same state it was in before the outage.
+# =============================================================================
+switch:
+  - platform: template
+    id: machine_power
+    name: "Espresso Machine Power"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      # 1. Enable the orchestrator logic
+      - lambda: id(my_espresso).machine_on();
+      # 2. Enable the PID heater so the thermoblock begins warming immediately
+      - climate.control:
+          id: main_heater
+          mode: heat
+    turn_off_action:
+      # 1. Safely shut down the orchestrator (handles any active brew/steam sequence)
+      - lambda: id(my_espresso).machine_off();
+      # 2. Disable the PID heater (orchestrator handles active sequences first)
+      - climate.control:
+          id: main_heater
+          mode: "off"
 
 # =============================================================================
 # BUTTONS — restart and PID autotune
