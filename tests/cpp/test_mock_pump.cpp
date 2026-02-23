@@ -312,11 +312,12 @@ TEST(MockPump, NozzleFlowLessThanPumpFlowDuringWetting) {
 
 TEST(MockPump, NozzleFlowApproachesPumpFlowAfterSaturation) {
   // After the puck is saturated (many τ), nozzle flow ≈ pump flow
-  MockPumpFixture f(4.0f, 10.0f);
+  MockPumpFixture f(4.0f, 10.0f);  // Uses default puck_density = 50
   f.pump.set_puck_absorption(10.0f);  // Smaller absorption for faster saturation
   f.pump.turn_on();
 
-  // Run for 25 seconds (5× τ_eff = 5 × 5s = 25s for D=50)
+  // With D=50: τ_eff = puck_time_constant × (D/100) = 10 × 0.5 = 5s
+  // Run for 25 seconds (5× τ_eff) to ensure puck is fully saturated
   for (int i = 0; i < 2500; ++i) {
     f.advance_time_ms(10);
   }
