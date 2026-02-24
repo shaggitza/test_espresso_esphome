@@ -125,7 +125,6 @@ wifi:
 # External components — pulls all espresso_machine platforms from this repo
 # -----------------------------------------------------------------------------
 external_components:
-external_components:
   - source: github://shaggitza/test_espresso_esphome@main
     components:
       - espresso_machine
