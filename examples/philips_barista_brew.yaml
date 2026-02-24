@@ -82,6 +82,7 @@ external_components:
   - source: github://shaggitza/test_espresso_esphome@main
     components:
       - espresso_machine           # orchestrator: brew + steam state machines
+      - espresso_machine_heater    # IHeater adapter wrapping climate.pid (P1-1)
       - espresso_machine_valve     # solenoid valve with safety interlock
       - espresso_machine_pump      # vibration pump (relay or dimmer)
       - espresso_machine_grinder   # timed relay grinder with lockout
@@ -206,27 +207,9 @@ sensor:
   - platform: internal_temperature
     name: "ESP32 Temperature"
 
-  # ---------------------------------------------------------------------------
-  # Shot statistics — updated once per completed shot.
-  # "Last Shot Duration" and "Last Shot Yield" appear in HA after each pull.
-  # ---------------------------------------------------------------------------
-  - platform: template
-    id: last_shot_duration
-    name: "Last Shot Duration"
-    unit_of_measurement: "s"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_time_s();
-
-  - platform: template
-    id: last_shot_yield
-    name: "Last Shot Yield"
-    unit_of_measurement: "mL"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_yield_ml();
+  # NOTE: Shot statistics (last shot time, volume, yield) are now declared
+  # natively under espresso_machine: brew: shot_stats: (P1-5).
+  # Remove the template sensor blocks below if upgrading from an older config.
 
 # =============================================================================
 # FLOW METER — espresso_machine_flow_meter platform (first-class citizen)
@@ -329,6 +312,18 @@ climate:
     deadband_parameters:
       threshold_high: 0.3   # °C above setpoint — stop integrating
       threshold_low: -0.3   # °C below setpoint — stop integrating
+
+# =============================================================================
+# HEATER CONTROLLER ADAPTER — espresso_machine_heater platform (P1-1)
+# Bridges the ESPHome climate.pid entity with the espresso_machine orchestrator
+# via the IHeater interface. This enables the orchestrator to:
+#   • Read thermoblock temperature from the PID sensor
+#   • Set the PID target temperature for brew/steam/cool-down
+#   • Force the heater off during safety cutoffs
+# =============================================================================
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
 
 # =============================================================================
 # VALVES — espresso_machine_valve platform (first-class citizen)
@@ -495,6 +490,7 @@ espresso_machine:
   # ---------------------------------------------------------------------------
   brew:
     heater: main_heater           # id of the climate entity above
+    heater_controller: heater_ctrl  # IHeater adapter — enables setpoint wiring and temp surfing (P1-2/P1-3)
     pump: main_pump               # id of the pump entity above
     valve: brew_valve             # id of the valve entity above
     purge_valve: purge_valve      # id of the valve entity above
@@ -507,6 +503,7 @@ espresso_machine:
     # Temperature surfing: at shot start the heater setpoint is raised by
     # `offset`, then linearly decays back to target_temperature over ramp_time.
     # Compensates for heat absorbed by the cold portafilter.
+    # Requires heater_controller: to be wired (P1-3).
     temperature_profile:
       offset: 5°C               # °C above target_temperature at shot start
       ramp_time: 20s            # time to decay back to target_temperature
@@ -518,6 +515,15 @@ espresso_machine:
       name: "Brew Flow Max"      # number entity in HA (mL); 10–200 mL adjustable
     # ml absorbed by puck + basket; subtracted from flow reading for HA yield display
     flow_offset: 20ml
+
+    # Shot statistics — native HA sensor entities updated after each completed shot (P1-5)
+    shot_stats:
+      last_shot_time:
+        name: "Last Shot Time"          # seconds
+      last_shot_volume:
+        name: "Last Shot Volume"        # mL total through flow meter
+      last_shot_yield:
+        name: "Last Shot Yield"         # mL net yield (volume minus puck absorption)
 
     # Cleanup: automatically flush brew path after shot completes.
     # NOTE: cleanup_script execution is planned for Phase 9. This block is
@@ -534,6 +540,7 @@ espresso_machine:
   # ---------------------------------------------------------------------------
   steam:
     heater: main_heater           # id of the climate entity above
+    heater_controller: heater_ctrl  # IHeater adapter — temperature-gated HEATING and COOLING (P1-2)
     pump: main_pump               # id of the pump entity above
     valve: steam_valve            # id of the valve entity above
     purge_valve: purge_valve      # id of the valve entity above

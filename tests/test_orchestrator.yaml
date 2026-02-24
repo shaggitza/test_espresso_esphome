@@ -1,6 +1,7 @@
 # Test: espresso_machine (orchestrator) — validates the orchestrator with full brew+steam
 # wiring. All hardware subsystems are declared inline so cross-references resolve.
 # A template sensor + slow_pwm output + PID climate stand in for the real thermocouple.
+# Also validates espresso_machine_heater adapter (P1-1) and shot stat sensors (P1-5).
 esphome:
   name: test-orchestrator
 
@@ -17,6 +18,7 @@ external_components:
       path: ../components
     components:
       - espresso_machine
+      - espresso_machine_heater
       - espresso_machine_valve
       - espresso_machine_pump
       - espresso_machine_flow_meter
@@ -44,6 +46,11 @@ climate:
       kp: 0.5
       ki: 0.01
       kd: 1.0
+
+# --- IHeater adapter wrapping the PID climate entity (P1-1) ---
+espresso_machine_heater:
+  id: brew_heater_ctrl
+  climate_id: main_heater
 
 # --- Hardware subsystems referenced by the orchestrator ---
 espresso_machine_flow_meter:
@@ -75,6 +82,7 @@ espresso_machine:
   id: my_espresso
   brew:
     heater: main_heater
+    heater_controller: brew_heater_ctrl   # P1-2: wire IHeater adapter for setpoint control
     pump: main_pump
     valve: brew_valve
     purge_valve: purge_valve
@@ -88,6 +96,13 @@ espresso_machine:
       enabled: true
       volume_ml: 5ml
       hold_time: 5s
+    shot_stats:                           # P1-5: expose shot stats as HA sensor entities
+      last_shot_time:
+        name: "Last Shot Time"
+      last_shot_volume:
+        name: "Last Shot Volume"
+      last_shot_yield:
+        name: "Last Shot Yield"
   steam:
     heater: main_heater
     pump: main_pump
@@ -96,3 +111,4 @@ espresso_machine:
     target_temperature: 135°C
     flow_max: 2ml/s
     cool_down_to: 90°C
+    heater_controller: brew_heater_ctrl   # steam also benefits from the same adapter

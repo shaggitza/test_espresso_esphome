@@ -32,11 +32,11 @@
 
 | ID | Feature / Scenario | Status | Source | Notes |
 |----|-------------------|--------|--------|-------|
-| P1-1 | Production `IHeater` adapter for ESPHome `climate.pid` | ⬜ Not done | PLAN.md Phase 8 | Steam works with `MockHeater`; needs real climate entity adapter |
-| P1-2 | Heater setpoint wiring for brew mode (climate call) | 🚧 Partial | PLAN.md Phase 7 | Heater stored as `Component*`; `set_target_temperature()` not actually called |
-| P1-3 | Temperature surfing: apply computed setpoint to climate | 🚧 Partial | FEATURES.md | Ramp value computed but NOT applied to climate entity |
-| P1-4 | `esphome config` validation of heater section | ⬜ Not done | PLAN.md Phase 2 | Requires Phase 1 complete + real climate wiring test |
-| P1-5 | Shot stats as HA sensor entities | ⬜ Not done | PLAN.md Phase 7 | Stats stored on orchestrator; not yet exposed as separate HA sensors |
+| P1-1 | Production `IHeater` adapter for ESPHome `climate.pid` | ✅ Done | PLAN.md Phase 8 | `espresso_machine_heater` component wraps `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()` |
+| P1-2 | Heater setpoint wiring for brew mode (climate call) | ✅ Done | PLAN.md Phase 7 | `brew_heater_ctrl_` (`IHeater*`) added; `set_target_temperature()` called in `brew_start()`; HEATING→BREWING gates on temperature when wired |
+| P1-3 | Temperature surfing: apply computed setpoint to climate | ✅ Done | FEATURES.md | Ramp setpoint computed and applied via `brew_heater_ctrl_->set_target_temperature()` in BREWING state |
+| P1-4 | `esphome config` validation of heater section | ✅ Done | PLAN.md Phase 2 | `heater_controller:` added to brew schema; `test_orchestrator.yaml` and `test_all_components.yaml` updated to validate `espresso_machine_heater` |
+| P1-5 | Shot stats as HA sensor entities | ✅ Done | PLAN.md Phase 7 | `shot_stats.last_shot_time/volume/yield` in brew schema; `sensor::Sensor*` members published at BREWING→DONE |
 
 ### 🟡 P2 — Medium Priority (Usability / Completeness)
 
@@ -86,11 +86,11 @@ From `docs/mock_scenarios.md`:
 | Priority | Total | Done | Partial | Not Done |
 |----------|-------|------|---------|----------|
 | 🔴 P0 | 3 | 3 | 0 | 0 |
-| 🟠 P1 | 5 | 0 | 2 | 3 |
+| 🟠 P1 | 5 | 5 | 0 | 0 |
 | 🟡 P2 | 7 | 1 | 0 | 6 |
 | 🟢 P3 | 7 | 0 | 2 | 5 |
 
 **Next recommended actions:**
-1. Complete P1-1/P1-2: Wire `IHeater` adapter for production `climate.pid` entity
-2. Complete P1-4: Add `esphome config` validation of heater section
+1. Complete P2-5: Residual flow C++ test after pump stop
+2. Complete P2-7: Steam pump 2s minimum on window
 

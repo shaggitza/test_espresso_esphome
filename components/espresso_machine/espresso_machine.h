@@ -5,6 +5,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/components/number/number.h"
+#include "esphome/components/sensor/sensor.h"
 #include "interfaces.h"
 
 namespace esphome {
@@ -68,11 +69,17 @@ class EspressoMachine : public Component {
  public:
   // ----- Brew hardware setters (called by Python codegen) -----------------
   // Heater is a native ESPHome climate entity; stored as Component* here.
-  // Phase 2 will call set_target_temperature() via a climate::ClimateCall.
   void set_brew_heater(Component *h) { brew_heater_ = h; }
   void set_brew_valve(IValve *v) { brew_valve_ = v; }
   void set_brew_purge_valve(IValve *v) { brew_purge_valve_ = v; }
   void set_brew_pump(IPump *p) { brew_pump_ = p; }
+
+  // ----- Brew temperature controller (IHeater) ----------------------------
+  // Optional: when set the brew state machine calls set_target_temperature()
+  // at shot start and gates the HEATING→BREWING transition on actual temperature.
+  // Also used to apply the temperature-surfing ramp during extraction.
+  // If not wired the machine transitions from HEATING immediately (backward compat).
+  void set_brew_heater_ctrl(IHeater *h) { brew_heater_ctrl_ = h; }
 
   // ----- Brew configuration setters ----------------------------------------
   void set_brew_target_temperature(float t) { brew_target_temp_ = t; }
@@ -153,6 +160,11 @@ class EspressoMachine : public Component {
     return last_shot_volume_ml_ > 0.0f ? last_shot_volume_ml_ - brew_flow_offset_ml_ : 0.0f;
   }
 
+  // ----- Shot stat HA sensor entities (P1-5) --------------------------------
+  void set_last_shot_time_sensor(sensor::Sensor *s) { last_shot_time_sensor_ = s; }
+  void set_last_shot_volume_sensor(sensor::Sensor *s) { last_shot_volume_sensor_ = s; }
+  void set_last_shot_yield_sensor(sensor::Sensor *s) { last_shot_yield_sensor_ = s; }
+
   // ----- Safety query for grinder lockout -----------------------------------
   bool is_busy() const { return mode_ != EspressoMode::IDLE; }
 
@@ -167,7 +179,8 @@ class EspressoMachine : public Component {
   bool powered_on_{false};
 
   // -- Brew hardware ---------------------------------------------------------
-  Component *brew_heater_{nullptr};  // native ESPHome climate entity (Phase 2)
+  Component *brew_heater_{nullptr};  // native ESPHome climate entity reference
+  IHeater *brew_heater_ctrl_{nullptr};  // optional temperature controller (P1-2)
   IValve *brew_valve_{nullptr};
   IValve *brew_purge_valve_{nullptr};
   IPump *brew_pump_{nullptr};
@@ -188,7 +201,7 @@ class EspressoMachine : public Component {
   uint32_t pre_infusion_hold_time_ms_{5000};   // ms to hold after pre-infusion flowing
 
   // -- Steam hardware --------------------------------------------------------
-  Component *steam_heater_{nullptr};  // shared native climate entity (Phase 2)
+  Component *steam_heater_{nullptr};  // shared native climate entity reference
   IValve *steam_valve_{nullptr};
   IValve *steam_purge_valve_{nullptr};
   IPump *steam_pump_{nullptr};
@@ -210,6 +223,11 @@ class EspressoMachine : public Component {
   // -- Shot stats (Phase 7) --------------------------------------------------
   float last_shot_time_s_{0.0f};
   float last_shot_volume_ml_{0.0f};
+
+  // -- Shot stat HA sensor entities (P1-5) -----------------------------------
+  sensor::Sensor *last_shot_time_sensor_{nullptr};
+  sensor::Sensor *last_shot_volume_sensor_{nullptr};
+  sensor::Sensor *last_shot_yield_sensor_{nullptr};
 
   // -- Safety: over-temperature cutoff (P0-1 / P0-3) ------------------------
   IHeater *over_temp_sensor_{nullptr};       // sensor to monitor for cutoff

@@ -2,6 +2,8 @@
 # using local components so CI catches schema regressions in the reference config.
 # Covers all options used in the example: pre-infusion, temperature_profile,
 # cleanup_script, flow_meter wired to the pump (not the orchestrator).
+# Also validates espresso_machine_heater (P1-1), brew heater_controller (P1-2/P1-3),
+# and shot_stats sensor entities (P1-5).
 esphome:
   name: test-example
 
@@ -19,6 +21,7 @@ external_components:
       path: ../components
     components:
       - espresso_machine
+      - espresso_machine_heater
       - espresso_machine_valve
       - espresso_machine_pump
       - espresso_machine_grinder
@@ -30,24 +33,6 @@ sensor:
     id: thermoblock_temp
     lambda: "return 90.0f;"
     update_interval: 1s
-
-  - platform: template
-    id: last_shot_duration
-    name: "Last Shot Duration"
-    unit_of_measurement: "s"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_time_s();
-
-  - platform: template
-    id: last_shot_yield
-    name: "Last Shot Yield"
-    unit_of_measurement: "mL"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_yield_ml();
 
 # --- Heater SSR and PID climate ---
 output:
@@ -70,6 +55,11 @@ climate:
     deadband_parameters:
       threshold_high: 0.3
       threshold_low: -0.3
+
+# --- IHeater adapter (P1-1) ---
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
 
 # --- Flow meter ---
 espresso_machine_flow_meter:
@@ -154,6 +144,7 @@ espresso_machine:
   id: my_espresso
   brew:
     heater: main_heater
+    heater_controller: heater_ctrl      # P1-2: wire IHeater adapter
     pump: main_pump
     valve: brew_valve
     purge_valve: purge_valve
@@ -169,8 +160,16 @@ espresso_machine:
       enabled: true
       volume_ml: 5ml
       hold_time: 5s
+    shot_stats:                         # P1-5: native HA sensor entities
+      last_shot_time:
+        name: "Last Shot Duration"
+      last_shot_volume:
+        name: "Last Shot Volume"
+      last_shot_yield:
+        name: "Last Shot Yield"
   steam:
     heater: main_heater
+    heater_controller: heater_ctrl      # P1-2: wire IHeater adapter for steam too
     pump: main_pump
     valve: steam_valve
     purge_valve: purge_valve
