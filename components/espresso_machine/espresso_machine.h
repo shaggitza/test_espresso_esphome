@@ -29,9 +29,10 @@ enum class BrewState : uint8_t {
 enum class SteamState : uint8_t {
   IDLE = 0,
   HEATING = 1,   // waiting for thermoblock to reach steam temperature
-  STEAMING = 2,  // steam valve open; pump pulsing
-  COOLING = 3,   // heater setpoint lowered; waiting for temp to drop
-  CLEANUP = 4,   // purging steam path
+  PURGING = 2,   // pump running through purge valve to clear water before steam
+  STEAMING = 3,  // steam valve open; pump pulsing
+  COOLING = 4,   // heater setpoint lowered; waiting for temp to drop
+  CLEANUP = 5,   // purging steam path
 };
 
 // ---------------------------------------------------------------------------
@@ -113,6 +114,11 @@ class EspressoMachine : public Component {
   void set_steam_target_temperature(float t) { steam_target_temp_ = t; }
   void set_steam_flow_max(float ml_per_s) { steam_flow_max_ml_per_s_ = ml_per_s; }
   void set_steam_cool_down_to(float t) { steam_cool_down_to_ = t; }
+  // Volume (ml) to pump through the purge valve before opening the steam valve.
+  // 0 = skip purge phase (default, backward compatible).
+  void set_steam_purge_volume_ml(float ml) { steam_purge_volume_ml_ = ml; }
+  // Maximum steaming duration (ms). 0 = disabled (default).
+  void set_steam_timeout_ms(uint32_t ms) { steam_timeout_ms_ = ms; }
 
   // ----- Safety: hard over-temperature cutoff (P0-1) -----------------------
   // When a temperature sensor exceeds the cutoff limit the orchestrator
@@ -211,9 +217,12 @@ class EspressoMachine : public Component {
   float steam_target_temp_{135.0f};       // °C
   float steam_flow_max_ml_per_s_{2.0f};   // ml/s target flow rate while steaming
   float steam_cool_down_to_{90.0f};       // °C — heater setpoint after steaming
+  float steam_purge_volume_ml_{0.0f};     // ml to purge before steaming (0 = skip)
+  uint32_t steam_timeout_ms_{0};          // max steaming duration ms (0 = disabled)
 
   // -- Internal state --------------------------------------------------------
   uint32_t state_entered_ms_{0};  // millis() when current brew/steam state was entered
+  uint32_t steam_start_ms_{0};    // millis() when STEAMING state was entered
 
   // -- Brewing tracking (Phase 7) -------------------------------------------
   bool pre_infusion_flowing_{true};       // true=flowing phase, false=hold phase

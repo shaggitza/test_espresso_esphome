@@ -1226,3 +1226,384 @@ TEST(P1ShotStats, ShotStatsNoCrashWithoutSensors) {
   f.machine.loop();          // BREWING → DONE (no crash)
   EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
 }
+
+// ---------------------------------------------------------------------------
+// Steam purge-before-steam sequence
+//
+// Scenario (from issue):
+//   1. Steam start → heater raised to steam temperature
+//   2. Wait for temperature to reach target (HEATING)
+//   3. Pump through purge valve to clear water (PURGING)
+//   4. Close purge valve, open steam valve (STEAMING)
+//   5. Stop on exit conditions (steam_stop, timeout, over-temp)
+// ---------------------------------------------------------------------------
+
+// Fixture with steam purge enabled (2 ml purge volume).
+struct SteamPurgeFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  EspressoMachine machine;
+
+  SteamPurgeFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+    machine.set_steam_purge_volume_ml(2.0f);
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// Purge phase entered after HEATING when purge volume is configured.
+TEST(SteamPurge, HeatingTransitionsToPurgingWhenPurgeVolumeSet) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  f.machine.loop();  // HEATING → PURGING (no heater_ctrl → immediate)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::PURGING);
+}
+
+// During PURGING the purge valve is open and the pump is running.
+TEST(SteamPurge, PurgingOpensPurgeValveAndStartsPump) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  EXPECT_TRUE(f.steam_purge_valve.open_state);
+  EXPECT_TRUE(f.steam_pump.running);
+}
+
+// During PURGING the steam valve must remain closed.
+TEST(SteamPurge, PurgingSteamValveRemainsClosedDuringPurge) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  EXPECT_FALSE(f.steam_valve.open_state);
+}
+
+// PURGING stays in PURGING while volume is below the threshold.
+TEST(SteamPurge, PurgingDoesNotTransitionBeforePurgeVolumeReached) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  f.steam_pump.volume = 1.9f;  // just under 2 ml
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::PURGING);
+  EXPECT_FALSE(f.steam_valve.open_state);
+}
+
+// PURGING → STEAMING when purge volume is reached.
+TEST(SteamPurge, PurgingTransitionsToSteamingAtPurgeVolume) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  f.steam_pump.volume = 2.0f;
+  f.machine.loop();  // PURGING → STEAMING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+}
+
+// On PURGING → STEAMING: purge valve closes, steam valve opens, pump keeps running.
+TEST(SteamPurge, PurgingToSteamingClosesPurgeOpensSteamAndKeepsPump) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  f.steam_pump.volume = 2.0f;
+  f.machine.loop();  // PURGING → STEAMING
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+  EXPECT_TRUE(f.steam_valve.open_state);
+  EXPECT_TRUE(f.steam_pump.running);
+}
+
+// The flow counter is reset when PURGING transitions to STEAMING so that
+// flow tracking during STEAMING reflects steam-only volume.
+TEST(SteamPurge, PurgeFlowCounterResetOnTransitionToSteaming) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  f.steam_pump.volume = 2.0f;  // purge volume done
+  f.machine.loop();  // PURGING → STEAMING (resets pump flow)
+  // Flow counter should have been reset; the mock reports 0 after reset.
+  EXPECT_FLOAT_EQ(f.steam_pump.volume, 0.0f);
+}
+
+// steam_stop() during PURGING cancels immediately (like during HEATING).
+TEST(SteamPurge, SteamStopDuringPurgingCancelsImmediately) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::PURGING);
+  f.machine.steam_stop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::IDLE);
+}
+
+// steam_stop() during PURGING closes all valves and stops the pump.
+TEST(SteamPurge, SteamStopDuringPurgingStopsAllHardware) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING (purge valve open, pump on)
+  EXPECT_TRUE(f.steam_purge_valve.open_state);
+  EXPECT_TRUE(f.steam_pump.running);
+  f.machine.steam_stop();
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+  EXPECT_FALSE(f.steam_pump.running);
+}
+
+// machine_off() during PURGING cancels the sequence immediately.
+TEST(SteamPurge, MachineOffDuringPurgingCancelsImmediately) {
+  SteamPurgeFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → PURGING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::PURGING);
+  f.machine.machine_off();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// Full steam scenario with purge: HEATING → PURGING → STEAMING → COOLING → IDLE.
+TEST(SteamPurge, FullSteamSequenceWithPurge) {
+  SteamPurgeFixture f;
+
+  // Step 1: start steaming (heater setpoint NOT checked here — no heater_ctrl)
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::STEAMING);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+  EXPECT_FALSE(f.steam_valve.open_state);
+  EXPECT_FALSE(f.steam_pump.running);
+
+  // Step 2: transition to PURGING (temperature immediately reached — no heater_ctrl)
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::PURGING);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);
+  EXPECT_FALSE(f.steam_valve.open_state);  // steam valve still closed
+  EXPECT_TRUE(f.steam_pump.running);
+
+  // Step 3: purge volume reached → STEAMING
+  f.steam_pump.volume = 2.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);  // purge valve closed
+  EXPECT_TRUE(f.steam_valve.open_state);          // steam valve open
+  EXPECT_TRUE(f.steam_pump.running);
+
+  // Step 4: manually stop → COOLING
+  f.machine.steam_stop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_FALSE(f.steam_valve.open_state);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);  // purge opens for cool-down flush
+
+  // Step 5: COOLING → CLEANUP → IDLE
+  f.machine.loop();  // COOLING → CLEANUP
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::CLEANUP);
+  f.machine.loop();  // CLEANUP → IDLE
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+}
+
+// Purge volume of 0 (default) skips PURGING and goes directly to STEAMING.
+TEST(SteamPurge, ZeroPurgeVolumeSkipsPurgingState) {
+  OrchestratorFixture f;  // default purge_volume = 0
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (no PURGING with purge_volume=0)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+}
+
+// ---------------------------------------------------------------------------
+// Steam timeout (auto-stop safety)
+// ---------------------------------------------------------------------------
+
+// Fixture with a steam timeout configured (10 seconds).
+struct SteamTimeoutFixture {
+  static constexpr uint32_t kSteamTimeoutMs = 10000;
+
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  EspressoMachine machine;
+
+  SteamTimeoutFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+    machine.set_steam_timeout_ms(kSteamTimeoutMs);
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// Steam auto-stops when the timeout elapses.
+TEST(SteamTimeout, SteamTimesOutWhenTimeoutElapses) {
+  SteamTimeoutFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (no purge configured)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+
+  // Advance time past the 10-second timeout
+  g_mock_millis = SteamTimeoutFixture::kSteamTimeoutMs + 1000;
+  f.machine.loop();  // timeout fires → COOLING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_FALSE(f.steam_valve.open_state);
+  EXPECT_FALSE(f.steam_pump.running);
+}
+
+// Steam does NOT auto-stop before the timeout.
+TEST(SteamTimeout, SteamDoesNotTimeOutBeforeTimeout) {
+  SteamTimeoutFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  g_mock_millis = SteamTimeoutFixture::kSteamTimeoutMs - 1000;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+}
+
+// Timeout = 0 (default) means steam runs until manually stopped.
+TEST(SteamTimeout, SteamTimeoutDisabledByDefault) {
+  OrchestratorFixture f;  // no timeout configured (default 0)
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  g_mock_millis = 600000;  // 10 minutes
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+}
+
+// ---------------------------------------------------------------------------
+// Steam purge with heater controller: full temperature-gated sequence
+// ---------------------------------------------------------------------------
+
+// Fixture: heater_ctrl + purge volume configured.
+struct SteamPurgeWithHeaterFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  MockHeaterCtrl heater_ctrl;
+  EspressoMachine machine;
+
+  SteamPurgeWithHeaterFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+    machine.set_steam_heater_ctrl(&heater_ctrl);
+    machine.set_steam_purge_volume_ml(2.0f);
+
+    heater_ctrl.current_temp = 25.0f;  // Start cold
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// With heater_ctrl: steam_start() sets heater to steam temperature and waits.
+TEST(SteamPurgeWithHeater, SteamStartSetsHeaterAndWaitsForTemp) {
+  SteamPurgeWithHeaterFixture f;
+  f.machine.steam_start();
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 135.0f);
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+
+  // Still below target — must not advance to PURGING yet.
+  f.heater_ctrl.current_temp = 100.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+  EXPECT_FALSE(f.steam_pump.running);
+}
+
+// With heater_ctrl: HEATING → PURGING when temperature is reached.
+TEST(SteamPurgeWithHeater, HeatingTransitionsToPurgingWhenTempReached) {
+  SteamPurgeWithHeaterFixture f;
+  f.machine.steam_start();
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → PURGING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::PURGING);
+  EXPECT_TRUE(f.steam_purge_valve.open_state);
+  EXPECT_FALSE(f.steam_valve.open_state);
+  EXPECT_TRUE(f.steam_pump.running);
+}
+
+// With heater_ctrl: PURGING → STEAMING at purge volume, then manual stop works.
+TEST(SteamPurgeWithHeater, FullSequenceWithHeaterGating) {
+  SteamPurgeWithHeaterFixture f;
+  f.machine.steam_start();
+
+  // Heater reaches steam temperature
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → PURGING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::PURGING);
+
+  // Purge volume reached
+  f.steam_pump.volume = 2.0f;
+  f.machine.loop();  // PURGING → STEAMING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+  EXPECT_TRUE(f.steam_valve.open_state);
+
+  // Manual stop
+  f.machine.steam_stop();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);  // setpoint lowered
+
+  // Cool down and cleanup
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.loop();  // COOLING → CLEANUP
+  f.machine.loop();  // CLEANUP → IDLE
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.steam_purge_valve.open_state);
+}
+
+// With heater_ctrl: steam_stop() during PURGING lowers heater setpoint to cool_down_to.
+TEST(SteamPurgeWithHeater, SteamStopDuringPurgingResetsHeaterSetpoint) {
+  SteamPurgeWithHeaterFixture f;
+  f.machine.steam_start();
+  f.heater_ctrl.current_temp = 135.0f;
+  f.machine.loop();  // HEATING → PURGING
+
+  int count_before = f.heater_ctrl.set_target_count;
+  f.machine.steam_stop();
+  EXPECT_GT(f.heater_ctrl.set_target_count, count_before);
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
