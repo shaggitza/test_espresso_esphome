@@ -305,6 +305,7 @@ climate:
   - platform: pid
     id: main_heater
     name: "Espresso Heater"
+    entity_category: diagnostic      # internal — user controls temperature via "Brew Temperature" number entity
     sensor: thermoblock_temp
     default_target_temperature: 90   # °C — brew temperature default (ESPHome PID uses plain number in Celsius)
     heat_output: heater_ssr
@@ -520,7 +521,6 @@ espresso_machine:
     # Expose flow_max as a HA number entity — adjustable at runtime without reflashing
     flow_max_number:
       name: "Brew Flow Max"      # number entity in HA (mL); 10–200 mL adjustable
-      entity_category: config
     # ml absorbed by puck + basket; subtracted from flow reading for HA yield display
     flow_offset: 20ml
 
@@ -677,7 +677,6 @@ button:
   # Trigger ESPHome's built-in PID autotune from HA — see docs/pid_tuning.md
   - platform: template
     name: "PID Autotune"
-    entity_category: config
     on_press:
       - climate.pid.autotune: main_heater
 
@@ -721,7 +720,6 @@ number:
     initial_value: 90
     optimistic: true
     restore_value: true
-    entity_category: config
     set_action:
       - climate.control:
           id: main_heater
@@ -736,5 +734,4 @@ text_sensor:
     name: "Machine Mode"
     id: machine_mode
     update_interval: 2s
-    entity_category: diagnostic
     lambda: return std::string(id(my_espresso).mode_name());

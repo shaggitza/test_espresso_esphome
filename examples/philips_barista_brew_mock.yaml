@@ -67,12 +67,17 @@
 #   Set internal_volume_ml = 0 to disable (legacy instant-decay behaviour).
 #
 # HA ENTITY CATEGORIES:
-#   config     — Mock physics parameters, puck preset buttons, and other tuning
-#                knobs appear in the "Configuration" section of the HA device page.
-#   diagnostic — Mock-only estimated sensors (nozzle flow, SSR duty), valves,
-#                and system/uptime diagnostics appear in the "Diagnostics" section.
-#   (none)     — Primary user-facing sensors and controls (brew flow, temperature,
-#                start/stop buttons) appear at the top of the device page.
+#   config     — Mock physics parameters and puck preset buttons appear in the
+#                "Configuration" section of the HA device page.
+#   diagnostic — Mock pump switch, mock-only sensors (nozzle flow, SSR duty,
+#                mock brew pump pressure), valves, and system/uptime diagnostics
+#                appear in the "Diagnostics" section.
+#   (none)     — Primary user-facing entities (machine mode, brew temperature,
+#                brew flow max, brew flow sensors, start/stop/action buttons)
+#                appear at the top of the device page.
+#   NOTE: The PID climate entity is categorized as diagnostic — users control
+#         brew temperature via the "Brew Temperature" number entity (Controls).
+#   See docs/home_assistant.md for the full rationale and category decisions.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -233,7 +238,7 @@ espresso_machine_mock_pump:
   total_sensor:
     name: "Brew Flow Total"
   pressure_sensor:
-    name: "Brew Pump Pressure"
+    name: "Mock Brew Pump Pressure"
 
   # Nozzle flow sensors — estimated output from the group head
   nozzle_rate_sensor:
@@ -285,6 +290,7 @@ climate:
   - platform: pid
     id: main_heater
     name: "Espresso Heater"
+    entity_category: diagnostic      # internal — user controls temperature via "Brew Temperature" number entity
     sensor: thermoblock_temp           # ← reads from MockHeaterTempSensor
     default_target_temperature: 90
     heat_output: heater_ssr            # ← writes to MockHeaterOutput
@@ -439,7 +445,6 @@ button:
 
   - platform: template
     name: "PID Autotune"
-    entity_category: config
     on_press:
       - climate.pid.autotune: main_heater
 
@@ -466,7 +471,6 @@ button:
   # Additional button to reset flow counter for new shot
   - platform: template
     name: "Reset Flow"
-    entity_category: config
     on_press:
       - espresso_machine_mock_pump.reset: main_pump
 
@@ -533,7 +537,6 @@ number:
     initial_value: 90
     optimistic: true
     restore_value: true
-    entity_category: config
     set_action:
       - climate.control:
           id: main_heater
@@ -547,5 +550,4 @@ text_sensor:
     name: "Machine Mode"
     id: machine_mode
     update_interval: 2s
-    entity_category: diagnostic
     lambda: return std::string(id(my_espresso).mode_name());

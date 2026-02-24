@@ -174,7 +174,7 @@ CONF_PUCK_ABSORPTION_NUMBER = "puck_absorption_number"
 CONF_PUCK_EXTRACTION_TAU_NUMBER = "puck_extraction_tau_number"
 
 CONFIG_SCHEMA = (
-    switch.switch_schema(MockPump)
+    switch.switch_schema(MockPump, entity_category=ENTITY_CATEGORY_DIAGNOSTIC)
     .extend(
         {
             # Max unimpeded flow with no puck resistance (D=1) [mL/s]
@@ -227,6 +227,7 @@ CONFIG_SCHEMA = (
                 unit_of_measurement="bar",
                 accuracy_decimals=2,
                 state_class=STATE_CLASS_MEASUREMENT,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
             # Nozzle flow sensors — estimated output from the group head nozzle
             cv.Optional(CONF_NOZZLE_RATE_SENSOR): sensor.sensor_schema(
