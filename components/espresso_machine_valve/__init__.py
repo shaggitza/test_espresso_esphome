@@ -2,7 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation, pins
 from esphome.components import switch
-from esphome.const import CONF_ID, CONF_PIN
+from esphome.const import CONF_ID, CONF_PIN, ENTITY_CATEGORY_DIAGNOSTIC
 
 CODEOWNERS = ["@shaggitza"]
 MULTI_CONF = True
@@ -16,7 +16,7 @@ CloseAction = espresso_machine_valve_ns.class_("CloseAction", automation.Action)
 CONF_NORMALLY_OPEN = "normally_open"
 
 CONFIG_SCHEMA = (
-    switch.switch_schema(Valve)
+    switch.switch_schema(Valve, entity_category=ENTITY_CATEGORY_DIAGNOSTIC)
     .extend(
         {
             cv.Required(CONF_PIN): pins.gpio_output_pin_schema,

@@ -131,6 +131,7 @@ from esphome import automation
 from esphome.components import switch, sensor, number
 from esphome.const import (
     CONF_ID,
+    ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
 )
@@ -232,11 +233,13 @@ CONFIG_SCHEMA = (
                 unit_of_measurement="mL/s",
                 accuracy_decimals=1,
                 state_class=STATE_CLASS_MEASUREMENT,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
             cv.Optional(CONF_NOZZLE_TOTAL_SENSOR): sensor.sensor_schema(
                 unit_of_measurement="mL",
                 accuracy_decimals=1,
                 state_class=STATE_CLASS_TOTAL_INCREASING,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
             # Optional HA number entities for runtime tuning
             cv.Optional(CONF_NOMINAL_FLOW_NUMBER): number.number_schema(

@@ -41,6 +41,8 @@ jobs:
           - tests/test_all_components.yaml
           - tests/test_compile.yaml
           - tests/test_example.yaml
+          - tests/test_philips_real.yaml
+          - tests/test_philips_mock.yaml
 
     steps:
       - uses: actions/checkout@v4

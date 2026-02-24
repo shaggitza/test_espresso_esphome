@@ -6,6 +6,7 @@ from esphome.const import (
     CONF_ID,
     CONF_PIN,
     CONF_TYPE,
+    ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_PERCENT,
 )
 
@@ -27,7 +28,7 @@ CONF_VOLUME_ML = "volume_ml"
 CONF_TIMEOUT_MS = "timeout_ms"
 
 RELAY_SCHEMA = (
-    switch.switch_schema(PumpSwitch)
+    switch.switch_schema(PumpSwitch, entity_category=ENTITY_CATEGORY_DIAGNOSTIC)
     .extend(
         {
             cv.Required(CONF_PIN): pins.gpio_output_pin_schema,

@@ -195,7 +195,6 @@ espresso_machine_mock_heater:
   duty_sensor:
     name: "Heater SSR Duty"
     unit_of_measurement: "%"
-    entity_category: diagnostic
 
 # =============================================================================
 # MOCK PUMP — replaces physical relay pump + flow meter
@@ -239,10 +238,8 @@ espresso_machine_mock_pump:
   # Nozzle flow sensors — estimated output from the group head
   nozzle_rate_sensor:
     name: "Nozzle Flow Rate"
-    entity_category: diagnostic
   nozzle_total_sensor:
     name: "Nozzle Flow Total"
-    entity_category: diagnostic
 
   # HA number entities for runtime tuning (entity_category: config keeps
   # them separate from primary sensors on the HA device page)
@@ -278,25 +275,6 @@ sensor:
     name: "ESP32 Temperature"
     entity_category: diagnostic
 
-  # Shot statistics
-  - platform: template
-    id: last_shot_duration
-    name: "Last Shot Duration"
-    unit_of_measurement: "s"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_time_s();
-
-  - platform: template
-    id: last_shot_yield
-    name: "Last Shot Yield"
-    unit_of_measurement: "mL"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_yield_ml();
-
 # =============================================================================
 # HEATER PID — IDENTICAL to real config (uses same sensor/output IDs)
 #
@@ -328,19 +306,16 @@ espresso_machine_valve:
     name: "Brew Valve"
     pin: GPIO26
     normally_open: false
-    entity_category: diagnostic
 
   - id: steam_valve
     name: "Steam Valve"
     pin: GPIO27
     normally_open: false
-    entity_category: diagnostic
 
   - id: purge_valve
     name: "Purge / Drain Valve"
     pin: GPIO14
     normally_open: false
-    entity_category: diagnostic
 
 # =============================================================================
 # GRINDER — unchanged from real config (dummy GPIO)
