@@ -1,10 +1,10 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import number
-from esphome.const import CONF_ID
+from esphome.components import number, sensor
+from esphome.const import CONF_ID, UNIT_SECOND, STATE_CLASS_MEASUREMENT
 
 CODEOWNERS = ["@shaggitza"]
-AUTO_LOAD = ["number"]
+AUTO_LOAD = ["number", "sensor"]
 
 espresso_machine_ns = cg.esphome_ns.namespace("espresso_machine")
 EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
@@ -35,6 +35,12 @@ CONF_PRE_INFUSION_ENABLED = "enabled"
 CONF_PRE_INFUSION_VOLUME = "volume_ml"
 CONF_PRE_INFUSION_HOLD_TIME = "hold_time"
 
+# Shot-stats sensor sub-schema keys (P1-5)
+CONF_SHOT_STATS = "shot_stats"
+CONF_SHOT_TIME_SENSOR = "last_shot_time"
+CONF_SHOT_VOLUME_SENSOR = "last_shot_volume"
+CONF_SHOT_YIELD_SENSOR = "last_shot_yield"
+
 # Validator for ml volumes (e.g. "40ml")
 _validate_volume_ml = cv.float_with_unit("volume", "ml")
 # Validator for ml/s flow rates (e.g. "2ml/s")
@@ -58,6 +64,9 @@ PRE_INFUSION_SCHEMA = cv.Schema(
 BREW_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_HEATER): cv.use_id(cg.Component),
+        # Optional IHeater-implementing component for temperature-gated HEATING
+        # transition and temperature-surfing setpoint application (P1-2, P1-3).
+        cv.Optional(CONF_HEATER_CTRL): cv.use_id(cg.Component),
         cv.Required(CONF_PUMP): cv.use_id(cg.Component),
         cv.Required(CONF_VALVE): cv.use_id(cg.Component),
         cv.Required(CONF_PURGE_VALVE): cv.use_id(cg.Component),
@@ -72,6 +81,26 @@ BREW_SCHEMA = cv.Schema(
             unit_of_measurement="mL",
         ),
         cv.Optional(CONF_PRE_INFUSION): PRE_INFUSION_SCHEMA,
+        # Shot statistics exposed as HA sensor entities (P1-5)
+        cv.Optional(CONF_SHOT_STATS): cv.Schema(
+            {
+                cv.Optional(CONF_SHOT_TIME_SENSOR): sensor.sensor_schema(
+                    unit_of_measurement=UNIT_SECOND,
+                    accuracy_decimals=1,
+                    state_class=STATE_CLASS_MEASUREMENT,
+                ),
+                cv.Optional(CONF_SHOT_VOLUME_SENSOR): sensor.sensor_schema(
+                    unit_of_measurement="mL",
+                    accuracy_decimals=1,
+                    state_class=STATE_CLASS_MEASUREMENT,
+                ),
+                cv.Optional(CONF_SHOT_YIELD_SENSOR): sensor.sensor_schema(
+                    unit_of_measurement="mL",
+                    accuracy_decimals=1,
+                    state_class=STATE_CLASS_MEASUREMENT,
+                ),
+            }
+        ),
         # cleanup_script wired in Phase 9
         cv.Optional("cleanup_script"): cv.Any(),
     }
@@ -134,6 +163,10 @@ async def to_code(config):
             cg.add(num.set_parent(var))
             cg.add(var.set_brew_flow_max_number(num))
 
+        if CONF_HEATER_CTRL in brew:
+            heater_ctrl = await cg.get_variable(brew[CONF_HEATER_CTRL])
+            cg.add(var.set_brew_heater_ctrl(heater_ctrl))
+
         if CONF_TARGET_TEMPERATURE in brew:
             cg.add(var.set_brew_target_temperature(brew[CONF_TARGET_TEMPERATURE]))
 
@@ -147,6 +180,18 @@ async def to_code(config):
             cg.add(var.set_pre_infusion_enabled(pi[CONF_PRE_INFUSION_ENABLED]))
             cg.add(var.set_pre_infusion_volume_ml(pi[CONF_PRE_INFUSION_VOLUME]))
             cg.add(var.set_pre_infusion_hold_time_ms(pi[CONF_PRE_INFUSION_HOLD_TIME]))
+
+        if CONF_SHOT_STATS in brew:
+            stats = brew[CONF_SHOT_STATS]
+            if CONF_SHOT_TIME_SENSOR in stats:
+                sens = await sensor.new_sensor(stats[CONF_SHOT_TIME_SENSOR])
+                cg.add(var.set_last_shot_time_sensor(sens))
+            if CONF_SHOT_VOLUME_SENSOR in stats:
+                sens = await sensor.new_sensor(stats[CONF_SHOT_VOLUME_SENSOR])
+                cg.add(var.set_last_shot_volume_sensor(sens))
+            if CONF_SHOT_YIELD_SENSOR in stats:
+                sens = await sensor.new_sensor(stats[CONF_SHOT_YIELD_SENSOR])
+                cg.add(var.set_last_shot_yield_sensor(sens))
 
     if CONF_STEAM in config:
         steam = config[CONF_STEAM]

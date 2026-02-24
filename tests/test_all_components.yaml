@@ -1,5 +1,6 @@
 # Test: all Phase 1 hardware components co-existing in a single config,
 # including a fully-wired espresso_machine orchestrator (brew + steam).
+# Now also validates espresso_machine_heater (P1-1) and shot stat sensors (P1-5).
 esphome:
   name: test-all-components
 
@@ -16,6 +17,7 @@ external_components:
       path: ../components
     components:
       - espresso_machine
+      - espresso_machine_heater
       - espresso_machine_valve
       - espresso_machine_pump
       - espresso_machine_grinder
@@ -44,6 +46,11 @@ climate:
       kp: 0.5
       ki: 0.01
       kd: 1.0
+
+# --- IHeater adapter (P1-1) ---
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
 
 espresso_machine_flow_meter:
   id: brew_flow
@@ -89,14 +96,23 @@ espresso_machine:
   id: my_espresso
   brew:
     heater: main_heater
+    heater_controller: heater_ctrl      # P1-2: wire IHeater adapter
     pump: main_pump
     valve: brew_valve
     purge_valve: purge_valve
     target_temperature: 90°C
     flow_max: 40ml
     flow_offset: 20ml
+    shot_stats:                         # P1-5: shot stat sensor entities
+      last_shot_time:
+        name: "Last Shot Time"
+      last_shot_volume:
+        name: "Last Shot Volume"
+      last_shot_yield:
+        name: "Last Shot Yield"
   steam:
     heater: main_heater
+    heater_controller: heater_ctrl      # P1-2: wire IHeater adapter for steam too
     pump: main_pump
     valve: steam_valve
     purge_valve: purge_valve

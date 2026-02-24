@@ -29,10 +29,11 @@ planned in this project.
 | `espresso_machine_pump` (relay) | `switch` | ✅ | On/off relay; `run` action with volume + timeout |
 | `espresso_machine_pump` (dimmer) | `number` (0–100 %) | ✅ | Slow-PWM dimmer stub; `turn_on`/`turn_off` wired |
 | `espresso_machine_grinder` | `button` + `number` | ✅ | Timed relay grind; adjustable grind-time number entity |
-| `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines; steam temperature management implemented via `IHeater` |
+| `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines; steam temperature management implemented via `IHeater`; brew heater ctrl wired (P1-2) |
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
+| `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()` |
 
 ---
 
@@ -42,13 +43,13 @@ planned in this project.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Brew state machine (`IDLE→HEATING→BREWING→DONE→CLEANUP`) | 🚧 | All states exist; `HEATING` transitions immediately (no live temperature check yet) |
-| Heater setpoint wiring (climate call) | 🚧 | Heater stored as `Component*`; `set_target_temperature()` call not yet wired (Phase 2) |
-| Temperature surfing (offset + ramp) | 🚧 | Config accepted; ramp value computed but NOT applied to the climate entity yet |
+| Brew state machine (`IDLE→HEATING→BREWING→DONE→CLEANUP`) | ✅ | All states; `HEATING` gates on temperature when `brew_heater_ctrl` is wired (P1-2) |
+| Heater setpoint wiring (climate call) | ✅ | `set_target_temperature(brew_target_temp_)` called via `IHeater` in `brew_start()`; `espresso_machine_heater` adapter wires production `climate.pid` (P1-2) |
+| Temperature surfing (offset + ramp) | ✅ | Config accepted; ramp setpoint computed and applied to `brew_heater_ctrl_->set_target_temperature()` each BREWING tick (P1-3) |
 | Pre-infusion (low-pressure pre-wet) | ✅ | Volume-driven flowing phase + hold timer; resets flow before main extraction |
 | Auto-terminate at `flow_max` | ✅ | Shot stops when flow meter reports ≥ `flow_max` ml |
-| Shot stats (`last_shot_time_s`, `last_shot_volume_ml`) | ✅ | Stored on the orchestrator; not yet exposed as HA sensor entities |
-| Shot stats as HA sensor entities | ⬜ | Planned (Phase 7 completion) |
+| Shot stats (`last_shot_time_s`, `last_shot_volume_ml`) | ✅ | Stored on the orchestrator |
+| Shot stats as HA sensor entities | ✅ | `shot_stats.last_shot_time`, `last_shot_volume`, `last_shot_yield` in brew schema; published at BREWING→DONE (P1-5) |
 | Cleanup script after brew | ⬜ | Schema accepts block; not executed (Phase 9) |
 | `brew_start` / `brew_stop` actions | ✅ | Available from YAML automations and HA services |
 
@@ -105,9 +106,6 @@ configuration and documented in the example YAML.
 |---|---|---|
 | Brew profiles (`espresso_machine_profile:`) | Phase 12 | Multi-phase pressure/flow curves; runtime HA select |
 | Gaggiuino/GaggiaMate profile import | Phase 12 | Python CLI converter planned |
-| Shot stats as HA sensor entities | Phase 7 finish | time, volume, yield per shot |
 | Cleanup scripts execution | Phase 9 | `cleanup_script:` blocks wired to ESPHome action lists |
-| Production `IHeater` adapter | Phase 2/8 finish | Wire `climate.pid` entity to orchestrator |
 | Weight-based shot exit (scale) | Future | Requires HX711 / NAU7802 scale platform |
 | Pressure transducer | Future | Requires ADC + transducer hardware |
-| Brew timeout on Wi-Fi disconnect | Future | Safety feature — **P0 SAFETY** |

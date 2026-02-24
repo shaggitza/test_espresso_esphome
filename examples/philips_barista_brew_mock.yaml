@@ -351,6 +351,7 @@ espresso_machine:
 
   brew:
     heater: main_heater
+    heater_controller: mock_heater   # IHeater — enables temperature-gated transitions and temperature surfing (P1-2/P1-3)
     pump: main_pump
     valve: brew_valve
     purge_valve: purge_valve
@@ -362,6 +363,13 @@ espresso_machine:
     flow_max_number:
       name: "Brew Flow Max"      # number entity in HA (mL); 10–200 mL adjustable
     flow_offset: 20ml
+    shot_stats:                          # P1-5: native HA sensor entities for shot statistics
+      last_shot_time:
+        name: "Last Shot Time"
+      last_shot_volume:
+        name: "Last Shot Volume"
+      last_shot_yield:
+        name: "Last Shot Yield"
     # cleanup_script not yet implemented — commented out for now
 
   steam:

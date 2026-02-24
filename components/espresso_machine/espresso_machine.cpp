@@ -133,8 +133,10 @@ void EspressoMachine::brew_start() {
     brew_pump_->reset_flow();
   }
 
-  // NOTE: heater setpoint is raised to brew_target_temp_ in Phase 2.
-  // The PID climate entity will be referenced here via a climate::ClimateCall.
+  // NOTE: heater setpoint is raised to brew_target_temp_ when a brew heater
+  // controller is wired via set_brew_heater_ctrl() (P1-2).
+  if (brew_heater_ctrl_ && brew_target_temp_ > 0.0f)
+    brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
 }
 
 void EspressoMachine::brew_stop() {
@@ -221,8 +223,15 @@ void EspressoMachine::steam_stop() {
 void EspressoMachine::advance_brew_() {
   switch (brew_state_) {
     case BrewState::HEATING:
-      // Phase 2: transition when temperature sensor reads >= brew_target_temp_.
-      // Phase 7 placeholder: transition immediately (no climate wiring yet).
+      // Gate transition on actual temperature when a heater controller is wired.
+      // Without a controller, transition immediately (backward-compatible placeholder).
+      if (brew_heater_ctrl_) {
+        if (brew_heater_ctrl_->get_current_temperature() < brew_target_temp_) {
+          break;  // Still heating — wait
+        }
+        ESP_LOGI(TAG, "Brew: HEATING → next (%.1f°C)",
+                 brew_heater_ctrl_->get_current_temperature());
+      }
       state_entered_ms_ = millis();
       if (pre_infusion_enabled_) {
         ESP_LOGI(TAG, "Brew: HEATING → PRE_INFUSION");
@@ -274,8 +283,8 @@ void EspressoMachine::advance_brew_() {
 
       // Temperature surfing: linearly ramp the desired setpoint from
       // (target + offset) back to target over brew_temp_ramp_time_ms_.
-      // NOTE: actual climate setpoint call is wired in Phase 2.
-      if (brew_temp_offset_ > 0.0f && brew_temp_ramp_time_ms_ > 0) {
+      // Applied to the brew heater controller when wired (P1-3).
+      if (brew_heater_ctrl_ && brew_temp_offset_ > 0.0f && brew_temp_ramp_time_ms_ > 0) {
         uint32_t elapsed = millis() - brew_shot_start_ms_;
         float desired_temp;
         if (elapsed >= brew_temp_ramp_time_ms_) {
@@ -284,7 +293,7 @@ void EspressoMachine::advance_brew_() {
           float frac = 1.0f - (static_cast<float>(elapsed) / static_cast<float>(brew_temp_ramp_time_ms_));
           desired_temp = brew_target_temp_ + brew_temp_offset_ * frac;
         }
-        (void)desired_temp;  // used in Phase 2 climate call
+        brew_heater_ctrl_->set_target_temperature(desired_temp);
       }
 
       // Auto-terminate when flow_max ml reached
@@ -294,6 +303,13 @@ void EspressoMachine::advance_brew_() {
         last_shot_volume_ml_ = volume;
         ESP_LOGI(TAG, "Brew: DONE — volume=%.1fml  yield=%.1fml  time=%.1fs",
                  volume, volume - brew_flow_offset_ml_, last_shot_time_s_);
+        // Publish shot stats to HA sensor entities (P1-5)
+        if (last_shot_time_sensor_ != nullptr)
+          last_shot_time_sensor_->publish_state(last_shot_time_s_);
+        if (last_shot_volume_sensor_ != nullptr)
+          last_shot_volume_sensor_->publish_state(last_shot_volume_ml_);
+        if (last_shot_yield_sensor_ != nullptr)
+          last_shot_yield_sensor_->publish_state(get_last_shot_yield_ml());
         brew_state_ = BrewState::DONE;
         state_entered_ms_ = millis();
         if (brew_pump_)

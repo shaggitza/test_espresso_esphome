@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include "esphome/core/hal.h"
+#include "esphome/components/sensor/sensor.h"
 #include "espresso_machine/espresso_machine.h"
 #include "espresso_machine/interfaces.h"
 
@@ -1057,4 +1058,171 @@ TEST(Safety, BrewTimeoutDisabledByDefault) {
   g_mock_millis = 600000;  // 10 minutes
   f.machine.loop();
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+// ---------------------------------------------------------------------------
+// 🟠 P1-2 — Brew heater controller: setpoint wiring and HEATING gate
+// ---------------------------------------------------------------------------
+
+// Fixture with a brew heater controller wired (cold start, brew target 90°C).
+struct BrewHeaterFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  MockHeaterCtrl brew_heater_ctrl;
+  EspressoMachine machine;
+
+  BrewHeaterFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+    machine.set_brew_heater_ctrl(&brew_heater_ctrl);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    brew_heater_ctrl.current_temp = 25.0f;  // Start cold
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// P1-2: brew_start() calls set_target_temperature() on the heater controller.
+TEST(P1BrewHeater, BrewStartSetsHeaterTargetToBrewTemperature) {
+  BrewHeaterFixture f;
+  f.machine.brew_start();
+  EXPECT_FLOAT_EQ(f.brew_heater_ctrl.target_temp, 90.0f);
+  EXPECT_EQ(f.brew_heater_ctrl.set_target_count, 1);
+}
+
+// P1-2: HEATING state waits for temperature when heater controller is wired.
+TEST(P1BrewHeater, BrewHeatingWaitsForTemperatureWhenHeaterWired) {
+  BrewHeaterFixture f;
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+
+  // Temperature still below target — HEATING should not transition.
+  f.brew_heater_ctrl.current_temp = 80.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+}
+
+// P1-2: HEATING transitions to BREWING once temperature is reached.
+TEST(P1BrewHeater, BrewHeatingTransitionsWhenTemperatureReached) {
+  BrewHeaterFixture f;
+  f.machine.brew_start();
+
+  f.brew_heater_ctrl.current_temp = 90.0f;
+  f.machine.loop();  // HEATING → BREWING
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  EXPECT_TRUE(f.brew_pump.running);
+  EXPECT_TRUE(f.brew_valve.open_state);
+}
+
+// P1-2: Without a heater controller the HEATING transition is still immediate.
+TEST(P1BrewHeater, BrewHeatingImmediateWithoutHeaterController) {
+  OrchestratorFixture f;  // no brew heater ctrl wired
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING immediately
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+}
+
+// ---------------------------------------------------------------------------
+// 🟠 P1-3 — Temperature surfing: apply computed setpoint to climate
+// ---------------------------------------------------------------------------
+
+// P1-3: At shot start (elapsed=0) the ramp setpoint is target + offset.
+TEST(P1TempSurfing, TempSurfingAppliesFullOffsetAtShotStart) {
+  BrewHeaterFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+
+  f.brew_heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING; first surfing tick fires here
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+
+  // At t=0, desired = 90 + 5*(1 - 0/20000) = 95°C
+  // set_target_temperature is called at HEATING→BREWING and then on the
+  // first BREWING tick in the same loop call; target should be ~95°C.
+  EXPECT_GE(f.brew_heater_ctrl.target_temp, 90.0f);
+  EXPECT_LE(f.brew_heater_ctrl.target_temp, 95.0f);
+}
+
+// P1-3: After the ramp time has elapsed the setpoint returns to target.
+TEST(P1TempSurfing, TempSurfingAppliesTargetAfterRampTime) {
+  BrewHeaterFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+
+  f.brew_heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  // Advance past ramp time
+  g_mock_millis = 25000;
+  f.machine.loop();  // BREWING tick: desired = 90°C (ramp complete)
+  EXPECT_FLOAT_EQ(f.brew_heater_ctrl.target_temp, 90.0f);
+}
+
+// P1-3: Without heater controller, temperature surfing does not crash.
+TEST(P1TempSurfing, TempSurfingWithoutHeaterControllerIsNoop) {
+  OrchestratorFixture f;  // no brew heater ctrl wired
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (no crash)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+}
+
+// ---------------------------------------------------------------------------
+// 🟠 P1-5 — Shot stats as HA sensor entities
+// ---------------------------------------------------------------------------
+
+// P1-5: Shot stats are published to sensor entities when BREWING → DONE.
+TEST(P1ShotStats, ShotStatSensorsPublishedOnDone) {
+  OrchestratorFixture f;
+  esphome::sensor::Sensor time_sensor, volume_sensor, yield_sensor;
+
+  f.machine.set_last_shot_time_sensor(&time_sensor);
+  f.machine.set_last_shot_volume_sensor(&volume_sensor);
+  f.machine.set_last_shot_yield_sensor(&yield_sensor);
+
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+
+  g_mock_millis = 25000;
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE — sensors published here
+
+  // time sensor: ~25 s
+  EXPECT_NEAR(time_sensor.state, 25.0f, 0.5f);
+  // volume sensor: 40 ml
+  EXPECT_FLOAT_EQ(volume_sensor.state, 40.0f);
+  // yield sensor: 40 - 20 = 20 ml (offset is 20 ml)
+  EXPECT_FLOAT_EQ(yield_sensor.state, 20.0f);
+}
+
+// P1-5: With no sensors wired, BREWING → DONE does not crash.
+TEST(P1ShotStats, ShotStatsNoCrashWithoutSensors) {
+  OrchestratorFixture f;  // no sensors wired
+  f.machine.brew_start();
+  f.machine.loop();          // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();          // BREWING → DONE (no crash)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
 }
