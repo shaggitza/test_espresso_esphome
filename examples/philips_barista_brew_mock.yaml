@@ -353,6 +353,8 @@ espresso_machine:
     temperature_profile:
       offset: 5°C
       ramp_time: 20s
+      temp_surf_switch:
+        name: "Temperature Surfing"   # switch entity in HA; toggles surfing on/off at runtime
     flow_max: 40ml
     flow_max_number:
       name: "Brew Flow Max"      # number entity in HA (mL); 10–200 mL adjustable

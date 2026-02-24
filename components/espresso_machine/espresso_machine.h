@@ -7,6 +7,7 @@
 #include "esphome/core/log.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/switch/switch.h"
 #include "esphome/core/automation.h"
 #include "interfaces.h"
 
@@ -67,6 +68,20 @@ class BrewFlowMaxNumber : public number::Number {
 };
 
 // ---------------------------------------------------------------------------
+// TempSurfSwitch — switch entity enabling/disabling temperature surfing from HA
+// ---------------------------------------------------------------------------
+class TempSurfSwitch : public switch_::Switch {
+ public:
+  TempSurfSwitch() = default;
+  void set_parent(EspressoMachine *parent) { parent_ = parent; }
+
+ protected:
+  void write_state(bool state) override;
+
+  EspressoMachine *parent_{nullptr};
+};
+
+// ---------------------------------------------------------------------------
 // EspressoMachine — pure orchestrator, owns no hardware
 // ---------------------------------------------------------------------------
 class EspressoMachine : public Component {
@@ -94,6 +109,10 @@ class EspressoMachine : public Component {
   // ----- Temperature surfing setters (Phase 7) -----------------------------
   void set_brew_temp_offset(float offset) { brew_temp_offset_ = offset; }
   void set_brew_temp_ramp_time_ms(uint32_t ms) { brew_temp_ramp_time_ms_ = ms; }
+  // Runtime enable/disable switch wired from HA (optional — if not set,
+  // temp surfing is governed purely by offset/ramp_time being non-zero).
+  void set_temp_surf_enabled(bool enabled) { temp_surf_enabled_ = enabled; }
+  void set_temp_surf_switch(TempSurfSwitch *sw) { temp_surf_switch_ = sw; }
 
   // ----- Pre-infusion setters (Phase 7) ------------------------------------
   void set_pre_infusion_enabled(bool enabled) { pre_infusion_enabled_ = enabled; }
@@ -215,6 +234,8 @@ class EspressoMachine : public Component {
   // -- Temperature surfing config (Phase 7) ----------------------------------
   float brew_temp_offset_{0.0f};        // °C added to setpoint at shot start
   uint32_t brew_temp_ramp_time_ms_{0};  // ms to ramp back to target temperature
+  bool temp_surf_enabled_{true};        // runtime toggle (controlled from HA switch)
+  TempSurfSwitch *temp_surf_switch_{nullptr};
 
   // -- Pre-infusion config (Phase 7) -----------------------------------------
   bool pre_infusion_enabled_{false};

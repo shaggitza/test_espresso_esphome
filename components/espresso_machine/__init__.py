@@ -1,15 +1,16 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import number, sensor
+from esphome.components import number, sensor, switch
 from esphome.const import CONF_ID, UNIT_SECOND, STATE_CLASS_MEASUREMENT
 
 CODEOWNERS = ["@shaggitza"]
-AUTO_LOAD = ["number", "sensor"]
+AUTO_LOAD = ["number", "sensor", "switch"]
 
 espresso_machine_ns = cg.esphome_ns.namespace("espresso_machine")
 EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
 BrewFlowMaxNumber = espresso_machine_ns.class_("BrewFlowMaxNumber", number.Number)
+TempSurfSwitch = espresso_machine_ns.class_("TempSurfSwitch", switch.Switch)
 FlushAction = espresso_machine_ns.class_("FlushAction", automation.Action)
 
 # Keys for brew sub-schema
@@ -34,6 +35,7 @@ CONF_FLUSH_VOLUME = "volume_ml"
 CONF_TEMPERATURE_PROFILE = "temperature_profile"
 CONF_TEMP_OFFSET = "offset"
 CONF_TEMP_RAMP_TIME = "ramp_time"
+CONF_TEMP_SURF_SWITCH = "temp_surf_switch"
 
 # Pre-infusion sub-schema keys
 CONF_PRE_INFUSION = "pre_infusion"
@@ -56,6 +58,11 @@ TEMPERATURE_PROFILE_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_TEMP_OFFSET): cv.temperature,
         cv.Required(CONF_TEMP_RAMP_TIME): cv.positive_time_period_milliseconds,
+        # Optional HA switch that enables/disables temperature surfing at runtime.
+        # When omitted, surfing is always active (governed by offset/ramp_time).
+        cv.Optional(CONF_TEMP_SURF_SWITCH): switch.switch_schema(
+            TempSurfSwitch,
+        ),
     }
 )
 
@@ -188,6 +195,10 @@ async def to_code(config):
             tp = brew[CONF_TEMPERATURE_PROFILE]
             cg.add(var.set_brew_temp_offset(tp[CONF_TEMP_OFFSET]))
             cg.add(var.set_brew_temp_ramp_time_ms(tp[CONF_TEMP_RAMP_TIME]))
+            if CONF_TEMP_SURF_SWITCH in tp:
+                sw = await switch.new_switch(tp[CONF_TEMP_SURF_SWITCH])
+                cg.add(sw.set_parent(var))
+                cg.add(var.set_temp_surf_switch(sw))
 
         if CONF_PRE_INFUSION in brew:
             pi = brew[CONF_PRE_INFUSION]

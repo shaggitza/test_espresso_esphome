@@ -19,6 +19,18 @@ void BrewFlowMaxNumber::control(float value) {
 }
 
 // ---------------------------------------------------------------------------
+// TempSurfSwitch
+// ---------------------------------------------------------------------------
+
+void TempSurfSwitch::write_state(bool state) {
+  if (parent_ != nullptr) {
+    parent_->set_temp_surf_enabled(state);
+    publish_state(state);
+    ESP_LOGI(TAG, "Temperature surfing %s", state ? "enabled" : "disabled");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 void EspressoMachine::setup() {
@@ -29,6 +41,8 @@ void EspressoMachine::setup() {
            steam_target_temp_, steam_cool_down_to_, steam_flow_max_ml_per_s_);
   if (brew_flow_max_number_ != nullptr)
     brew_flow_max_number_->publish_state(brew_flow_max_ml_);
+  if (temp_surf_switch_ != nullptr)
+    temp_surf_switch_->publish_state(temp_surf_enabled_);
   safe_stop_all_();
 }
 
@@ -326,7 +340,8 @@ void EspressoMachine::advance_brew_() {
       // Temperature surfing: linearly ramp the desired setpoint from
       // (target + offset) back to target over brew_temp_ramp_time_ms_.
       // Applied to the brew heater controller when wired (P1-3).
-      if (brew_heater_ctrl_ && brew_temp_offset_ > 0.0f && brew_temp_ramp_time_ms_ > 0) {
+      // Only active when the temp_surf_enabled_ flag is true (HA switch).
+      if (brew_heater_ctrl_ && temp_surf_enabled_ && brew_temp_offset_ > 0.0f && brew_temp_ramp_time_ms_ > 0) {
         uint32_t elapsed = millis() - brew_shot_start_ms_;
         float desired_temp;
         if (elapsed >= brew_temp_ramp_time_ms_) {
