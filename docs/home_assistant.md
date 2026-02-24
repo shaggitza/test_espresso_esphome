@@ -1,16 +1,19 @@
 # Home Assistant Dashboard — Espresso Machine
 
-## Unified Futuristic Dashboard
+## Futuristic Dashboards
 
-A ready-to-use, visually rich Lovelace dashboard is provided at:
+Two ready-to-paste, visually rich Lovelace dashboards are provided:
 
-```
-home_assistant/dashboards/dashboard.yaml
-```
+| File | Target | Description |
+|---|---|---|
+| `home_assistant/dashboards/dashboard.yaml` | Real hardware + simulation | Unified dashboard with all four views |
+| `home_assistant/dashboards/dashboard_mock.yaml` | Simulation only | Dedicated mock dashboard with physics tuning view |
 
-**How to install:** Settings → Dashboards → Add Dashboard → name it "Espresso Machine"
-→ open it → three-dot menu → "Edit Dashboard" → "Raw configuration editor"
-→ paste the full contents of `dashboard.yaml` (starting from `title:`) → Save.
+**How to install:**
+1. Settings → Dashboards → Add Dashboard
+2. Name it (e.g. "Espresso Machine" or "Espresso Sim"), open it → three-dot menu → "Edit Dashboard"
+3. Three-dot menu again → "Raw configuration editor"
+4. Paste the full contents of the chosen file (starting from `title:`) → Save.
 
 **Required HACS custom cards** (install via HACS → Frontend before pasting):
 1. mushroom — https://github.com/piitaya/lovelace-mushroom
@@ -19,25 +22,35 @@ home_assistant/dashboards/dashboard.yaml
 4. button-card — https://github.com/custom-cards/button-card
 5. layout-card — https://github.com/thomasloven/lovelace-layout-card
 
-**Dashboard views:**
-| View | Description |
-|---|---|
-| ☕ Control | Three-column grid: status+buttons (left), sensors+settings (centre), live graphs (right) |
-| 🧪 Simulation | Two-column: mock controls + puck presets (left), live graphs + physics tuning (right) |
-| 📊 Shot History | Scrollable shot log + ApexCharts per-shot temperature + flow replay |
-| ⚙️ Advanced | Direct valve/pump control + system diagnostics for both real and mock devices |
+### `dashboard.yaml` — Unified (Real + Simulation)
 
-> ⚡ **Maintenance rule:** Whenever a new entity is added to the ESPHome firmware (real or
-> mock), add the corresponding card to `home_assistant/dashboards/dashboard.yaml` in the
-> same PR. Real-device cards use the prefix `philips_barista_brew`; mock cards use
-> `philips_barista_brew_mock`.
+| View | Layout | Description |
+|---|---|---|
+| ☕ Control | 3-column grid | Status+buttons (left) · Sensors+settings (centre) · Live graphs (right) |
+| 🧪 Simulation | 2-column grid | Mock controls+puck presets (left) · Live graphs+physics tuning (right) |
+| 📊 Shot History | Single column | Scrollable shot log + ApexCharts per-shot temperature + flow replay |
+| ⚙️ Advanced | Single column | Direct valve/pump control + diagnostics for both real and mock devices |
 
-The per-device dashboards (`espresso_real.yaml`, `espresso_mock.yaml`) are kept for
-reference but the unified `dashboard.yaml` is the recommended starting point.
+### `dashboard_mock.yaml` — Dedicated Simulation Dashboard
+
+| View | Layout | Description |
+|---|---|---|
+| 🧪 Simulation | 3-column grid | Status+buttons+puck presets (left) · Sensors+settings (centre) · Live graphs (right) |
+| 🔬 Physics Tuning | 2-column grid | Thermal model (left) · Pump+puck model (right) |
+| 📊 Shot History | Single column | Mock shot log + ApexCharts per-shot replay |
+| ⚙️ Advanced | Single column | Direct valve/pump control + mock diagnostics |
+
+> ⚡ **Maintenance rule:** Whenever a new entity is added to the ESPHome firmware, add the
+> corresponding card to both `dashboard.yaml` and `dashboard_mock.yaml` (if it is
+> mock-specific) in the same PR.
+> Real-device cards use the prefix `philips_barista_brew`.
+> Mock-device cards use the prefix `philips_barista_brew_mock`.
+
+The legacy per-device dashboards (`espresso_real.yaml`, `espresso_mock.yaml`) are kept for
+reference. The `dashboard.yaml` and `dashboard_mock.yaml` files are the recommended starting
+point.
 
 ---
-
-Below is the legacy quick-reference card configuration:
 
 Below is a ready-to-paste Lovelace dashboard card configuration for the espresso machine.
 Add it via **Settings → Dashboards → Edit Dashboard → Add Card → Manual**.

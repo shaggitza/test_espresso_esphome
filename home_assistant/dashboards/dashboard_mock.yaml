@@ -1,0 +1,1062 @@
+# =============================================================================
+# Lovelace Dashboard — Espresso Machine Simulation (Mock Device)
+# Target device: philips_barista_brew_mock.yaml
+# =============================================================================
+#
+# HOW TO INSTALL
+# --------------
+# 1. In Home Assistant: Settings → Dashboards → Add Dashboard
+# 2. Name it "Espresso Sim", icon mdi:flask
+# 3. Open the dashboard → three-dot menu → "Edit Dashboard"
+# 4. Three-dot menu again → "Raw configuration editor"
+# 5. Replace ALL content with this file (starting from `title:`) and Save.
+#
+# ⚡ MAINTENANCE RULE ⚡
+# ─────────────────────
+# Whenever a new entity is added to philips_barista_brew_mock.yaml,
+# add the corresponding card to this dashboard in the same PR.
+# All entities use the prefix: philips_barista_brew_mock
+# (If your mock device has a different name, search-and-replace that prefix.)
+#
+# REQUIRED HACS CUSTOM CARDS
+# ---------------------------
+# Install via HACS → Frontend before using this dashboard:
+#   1. mushroom        — https://github.com/piitaya/lovelace-mushroom
+#   2. mini-graph-card — https://github.com/kalkih/mini-graph-card
+#   3. apexcharts-card — https://github.com/RomRider/apexcharts-card
+#   4. button-card     — https://github.com/custom-cards/button-card
+#   5. layout-card     — https://github.com/thomasloven/lovelace-layout-card
+#
+# SHOT HISTORY SETUP
+# ------------------
+# The Shot History view requires the AppDaemon app and HA helpers from:
+#   home_assistant/appdaemon/shot_history.py
+#   home_assistant/helpers.yaml
+#   home_assistant/template_sensors.yaml
+# Follow CUSTOM_UI.md for setup instructions.
+# =============================================================================
+
+title: 🧪 Espresso Sim
+
+views:
+  # ===========================================================================
+  # VIEW 1 — SIMULATION CONTROL
+  # Three-column futuristic layout (purple-neon simulation theme):
+  #   Column 1 (left)  : Status chips + primary action buttons + puck presets
+  #   Column 2 (centre): Live sensors + mock-specific sensor readings + settings
+  #   Column 3 (right) : Live temperature + flow/pressure graphs
+  # ===========================================================================
+  - title: Simulation
+    icon: mdi:flask
+    path: control
+    type: custom:grid-layout
+    layout:
+      grid-template-columns: "1fr 1fr 1fr"
+      grid-gap: "12px 12px"
+      padding: "8px"
+      mediaquery:
+        "(max-width: 900px)":
+          grid-template-columns: "1fr 1fr"
+        "(max-width: 600px)":
+          grid-template-columns: "1fr"
+    cards:
+
+      # -----------------------------------------------------------------------
+      # COLUMN 1 — STATUS + ACTION BUTTONS + PUCK PRESETS
+      # -----------------------------------------------------------------------
+      - type: vertical-stack
+        view_layout:
+          grid-column: "1"
+        cards:
+
+          # Simulation status chips
+          - type: custom:mushroom-chips-card
+            chips:
+              - type: template
+                icon: mdi:flask
+                icon_color: purple
+                content: "SIMULATION MODE"
+                tap_action:
+                  action: none
+              - type: template
+                icon: mdi:coffee-maker-check
+                icon_color: >-
+                  {% set mode = states('text_sensor.philips_barista_brew_mock_machine_mode') %}
+                  {% if mode == 'brewing' %} amber
+                  {% elif mode == 'steaming' %} blue
+                  {% else %} green
+                  {% endif %}
+                content: >-
+                  {% set mode = states('text_sensor.philips_barista_brew_mock_machine_mode') | upper %}
+                  {{ mode if mode not in ('UNKNOWN','UNAVAILABLE') else 'OFFLINE' }}
+                tap_action:
+                  action: none
+              - type: template
+                icon: mdi:thermometer
+                icon_color: >-
+                  {% set t = states('sensor.philips_barista_brew_mock_thermoblock_temperature') | float(0) %}
+                  {% if t >= 125 %} red
+                  {% elif t >= 85 %} amber
+                  {% else %} blue
+                  {% endif %}
+                content: >-
+                  {{ states('sensor.philips_barista_brew_mock_thermoblock_temperature') | round(1) }} °C
+                tap_action:
+                  action: none
+              - type: template
+                icon: mdi:water
+                icon_color: teal
+                content: >-
+                  {{ states('sensor.philips_barista_brew_mock_brew_flow_total') | round(1) }} mL
+                tap_action:
+                  action: none
+
+          # Master simulation power switch
+          - type: custom:mushroom-entity-card
+            entity: switch.philips_barista_brew_mock_espresso_machine_power
+            name: Simulation Power
+            icon: mdi:power
+            icon_color: >-
+              {{ 'purple' if is_state('switch.philips_barista_brew_mock_espresso_machine_power', 'on') else 'grey' }}
+            tap_action:
+              action: toggle
+
+          # BREW buttons (purple simulation theme)
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_brew_start
+                name: BREW
+                label: START
+                show_label: true
+                icon: mdi:play-circle
+                styles:
+                  card:
+                    - height: "90px"
+                    - background: "linear-gradient(135deg, rgba(30,0,40,0.85), rgba(60,0,80,0.35))"
+                    - border: "1px solid rgba(180,0,255,0.45)"
+                    - box-shadow: "0 0 18px rgba(180,0,255,0.15), 0 4px 12px rgba(0,0,0,0.4)"
+                    - border-radius: "14px"
+                  name:
+                    - font-size: "17px"
+                    - letter-spacing: "3px"
+                    - color: "#cc44ff"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - letter-spacing: "2px"
+                    - color: "rgba(180,0,255,0.55)"
+                    - text-transform: "uppercase"
+                  icon:
+                    - color: "#cc44ff"
+                    - width: "34px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_brew_start
+
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_brew_stop
+                name: BREW
+                label: STOP
+                show_label: true
+                icon: mdi:stop-circle
+                styles:
+                  card:
+                    - height: "90px"
+                    - background: "linear-gradient(135deg, rgba(60,0,0,0.85), rgba(100,0,0,0.35))"
+                    - border: "1px solid rgba(255,60,60,0.45)"
+                    - box-shadow: "0 0 18px rgba(255,60,60,0.15), 0 4px 12px rgba(0,0,0,0.4)"
+                    - border-radius: "14px"
+                  name:
+                    - font-size: "17px"
+                    - letter-spacing: "3px"
+                    - color: "#ff4444"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - letter-spacing: "2px"
+                    - color: "rgba(255,60,60,0.55)"
+                    - text-transform: "uppercase"
+                  icon:
+                    - color: "#ff4444"
+                    - width: "34px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_brew_stop
+
+          # STEAM buttons
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_steam_start
+                name: STEAM
+                label: START
+                show_label: true
+                icon: mdi:play-circle-outline
+                styles:
+                  card:
+                    - height: "90px"
+                    - background: "linear-gradient(135deg, rgba(0,20,50,0.85), rgba(0,40,100,0.35))"
+                    - border: "1px solid rgba(0,120,255,0.45)"
+                    - box-shadow: "0 0 18px rgba(0,120,255,0.15), 0 4px 12px rgba(0,0,0,0.4)"
+                    - border-radius: "14px"
+                  name:
+                    - font-size: "17px"
+                    - letter-spacing: "3px"
+                    - color: "#3399ff"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - letter-spacing: "2px"
+                    - color: "rgba(0,120,255,0.55)"
+                    - text-transform: "uppercase"
+                  icon:
+                    - color: "#3399ff"
+                    - width: "34px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_steam_start
+
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_steam_stop
+                name: STEAM
+                label: STOP
+                show_label: true
+                icon: mdi:stop-circle-outline
+                styles:
+                  card:
+                    - height: "90px"
+                    - background: "linear-gradient(135deg, rgba(50,25,0,0.85), rgba(100,50,0,0.35))"
+                    - border: "1px solid rgba(255,160,0,0.45)"
+                    - box-shadow: "0 0 18px rgba(255,160,0,0.15), 0 4px 12px rgba(0,0,0,0.4)"
+                    - border-radius: "14px"
+                  name:
+                    - font-size: "17px"
+                    - letter-spacing: "3px"
+                    - color: "#ff9900"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - letter-spacing: "2px"
+                    - color: "rgba(255,160,0,0.55)"
+                    - text-transform: "uppercase"
+                  icon:
+                    - color: "#ff9900"
+                    - width: "34px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_steam_stop
+
+          # GRINDER button
+          - type: custom:button-card
+            entity: button.philips_barista_brew_mock_grinder
+            name: GRINDER
+            label: ONE-SHOT GRIND
+            show_label: true
+            icon: mdi:screw-machine-round-top
+            styles:
+              card:
+                - height: "75px"
+                - background: "linear-gradient(135deg, rgba(40,20,0,0.85), rgba(80,40,0,0.35))"
+                - border: "1px solid rgba(200,120,0,0.45)"
+                - box-shadow: "0 0 15px rgba(200,120,0,0.12), 0 4px 12px rgba(0,0,0,0.4)"
+                - border-radius: "14px"
+              name:
+                - font-size: "15px"
+                - letter-spacing: "3px"
+                - color: "#cc8800"
+                - font-weight: "700"
+              label:
+                - font-size: "9px"
+                - letter-spacing: "2px"
+                - color: "rgba(200,120,0,0.55)"
+                - text-transform: "uppercase"
+              icon:
+                - color: "#cc8800"
+                - width: "30px"
+            tap_action:
+              action: call-service
+              service: button.press
+              target:
+                entity_id: button.philips_barista_brew_mock_grinder
+
+          # Grind time number
+          - type: custom:mushroom-number-card
+            entity: number.philips_barista_brew_mock_grind_time
+            name: Grind Time (ms)
+            display_mode: buttons
+            icon: mdi:timer-outline
+
+          # ─── PUCK DENSITY PRESETS ───────────────────────────────────────────
+          - type: markdown
+            content: >
+              **☕ Puck Presets** — simulate different coffee puck resistance levels
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_puck_open_d_1
+                name: OPEN
+                label: 0 bar
+                show_label: true
+                icon: mdi:coffee-outline
+                styles:
+                  card:
+                    - height: "70px"
+                    - background: "linear-gradient(135deg, rgba(0,30,30,0.8), rgba(0,60,50,0.3))"
+                    - border: "1px solid rgba(0,200,180,0.45)"
+                    - box-shadow: "0 0 12px rgba(0,200,180,0.12)"
+                    - border-radius: "12px"
+                  name:
+                    - font-size: "11px"
+                    - letter-spacing: "2px"
+                    - color: "#00ccb4"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - color: "rgba(0,200,180,0.6)"
+                  icon:
+                    - color: "#00ccb4"
+                    - width: "22px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_puck_open_d_1
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_puck_soft_d_25
+                name: SOFT
+                label: 3.6 bar
+                show_label: true
+                icon: mdi:coffee
+                styles:
+                  card:
+                    - height: "70px"
+                    - background: "linear-gradient(135deg, rgba(0,30,0,0.8), rgba(0,70,10,0.3))"
+                    - border: "1px solid rgba(0,210,80,0.45)"
+                    - box-shadow: "0 0 12px rgba(0,210,80,0.12)"
+                    - border-radius: "12px"
+                  name:
+                    - font-size: "11px"
+                    - letter-spacing: "2px"
+                    - color: "#00d450"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - color: "rgba(0,210,80,0.6)"
+                  icon:
+                    - color: "#00d450"
+                    - width: "22px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_puck_soft_d_25
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_puck_medium_d_50
+                name: MED
+                label: 7.4 bar
+                show_label: true
+                icon: mdi:coffee-maker
+                styles:
+                  card:
+                    - height: "70px"
+                    - background: "linear-gradient(135deg, rgba(40,30,0,0.8), rgba(80,60,0,0.3))"
+                    - border: "1px solid rgba(255,200,0,0.45)"
+                    - box-shadow: "0 0 12px rgba(255,200,0,0.12)"
+                    - border-radius: "12px"
+                  name:
+                    - font-size: "11px"
+                    - letter-spacing: "2px"
+                    - color: "#ffcc00"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - color: "rgba(255,200,0,0.6)"
+                  icon:
+                    - color: "#ffcc00"
+                    - width: "22px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_puck_medium_d_50
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_puck_hard_d_75
+                name: HARD
+                label: 11.1 bar
+                show_label: true
+                icon: mdi:coffee-maker-check
+                styles:
+                  card:
+                    - height: "70px"
+                    - background: "linear-gradient(135deg, rgba(50,15,0,0.8), rgba(100,30,0,0.3))"
+                    - border: "1px solid rgba(255,120,0,0.45)"
+                    - box-shadow: "0 0 12px rgba(255,120,0,0.12)"
+                    - border-radius: "12px"
+                  name:
+                    - font-size: "11px"
+                    - letter-spacing: "2px"
+                    - color: "#ff8800"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - color: "rgba(255,120,0,0.6)"
+                  icon:
+                    - color: "#ff8800"
+                    - width: "22px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_puck_hard_d_75
+              - type: custom:button-card
+                entity: button.philips_barista_brew_mock_puck_blocked_d_100
+                name: BLOCKED
+                label: 15 bar
+                show_label: true
+                icon: mdi:cancel
+                styles:
+                  card:
+                    - height: "70px"
+                    - background: "linear-gradient(135deg, rgba(60,0,0,0.8), rgba(110,0,0,0.3))"
+                    - border: "1px solid rgba(255,40,40,0.45)"
+                    - box-shadow: "0 0 12px rgba(255,40,40,0.12)"
+                    - border-radius: "12px"
+                  name:
+                    - font-size: "11px"
+                    - letter-spacing: "2px"
+                    - color: "#ff2222"
+                    - font-weight: "700"
+                  label:
+                    - font-size: "9px"
+                    - color: "rgba(255,40,40,0.6)"
+                  icon:
+                    - color: "#ff2222"
+                    - width: "22px"
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_puck_blocked_d_100
+
+          # Puck density live number entity
+          - type: custom:mushroom-number-card
+            entity: number.philips_barista_brew_mock_mock_puck_density
+            name: Puck Density (1=open · 100=blocked)
+            display_mode: buttons
+            icon: mdi:coffee
+
+          # Utility buttons
+          - type: horizontal-stack
+            cards:
+              - type: custom:mushroom-template-card
+                primary: Reset Flow
+                secondary: Clear volume
+                icon: mdi:restart
+                icon_color: grey
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_reset_flow
+              - type: custom:mushroom-template-card
+                primary: Autotune PID
+                secondary: Calibrate
+                icon: mdi:tune-variant
+                icon_color: purple
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_pid_autotune
+              - type: custom:mushroom-template-card
+                primary: Restart
+                secondary: ESP32
+                icon: mdi:restart-alert
+                icon_color: grey
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.philips_barista_brew_mock_restart
+
+      # -----------------------------------------------------------------------
+      # COLUMN 2 — LIVE SENSORS + SETTINGS
+      # -----------------------------------------------------------------------
+      - type: vertical-stack
+        view_layout:
+          grid-column: "2"
+        cards:
+
+          # Temperature big display
+          - type: custom:mushroom-template-card
+            primary: >-
+              {{ states('sensor.philips_barista_brew_mock_thermoblock_temperature') | round(1) }} °C
+            secondary: Simulated Thermoblock Temperature
+            icon: mdi:thermometer
+            icon_color: >-
+              {% set t = states('sensor.philips_barista_brew_mock_thermoblock_temperature') | float(0) %}
+              {% if t >= 125 %} red
+              {% elif t >= 85 %} amber
+              {% else %} blue
+              {% endif %}
+            badge_icon: mdi:flask
+            badge_color: purple
+            tap_action:
+              action: more-info
+              entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+
+          # SSR duty display
+          - type: custom:mushroom-template-card
+            primary: >-
+              {{ states('sensor.philips_barista_brew_mock_heater_ssr_duty') | round(1) }} %
+            secondary: Heater SSR Duty Cycle
+            icon: mdi:lightning-bolt
+            icon_color: >-
+              {% set d = states('sensor.philips_barista_brew_mock_heater_ssr_duty') | float(0) %}
+              {% if d >= 80 %} red
+              {% elif d >= 40 %} amber
+              {% else %} green
+              {% endif %}
+            tap_action:
+              action: more-info
+              entity: sensor.philips_barista_brew_mock_heater_ssr_duty
+
+          # Brew temperature setpoint
+          - type: custom:mushroom-number-card
+            entity: number.philips_barista_brew_mock_brew_temperature
+            name: Brew Temperature Target (°C)
+            display_mode: buttons
+            icon: mdi:thermometer-chevron-up
+
+          # Brew flow max setpoint
+          - type: custom:mushroom-number-card
+            entity: number.philips_barista_brew_mock_brew_flow_max
+            name: Shot Volume Target (mL)
+            display_mode: buttons
+            icon: mdi:cup-water
+
+          # Mock heater climate card
+          - type: custom:mushroom-climate-card
+            entity: climate.philips_barista_brew_mock_espresso_heater
+            name: PID Heater (Simulated)
+            show_temperature_control: true
+            hvac_modes:
+              - heat
+              - "off"
+
+          # Live pump-side sensors
+          - type: glance
+            title: Pump-Side Sensors
+            show_name: true
+            show_icon: true
+            show_state: true
+            entities:
+              - entity: sensor.philips_barista_brew_mock_brew_flow_rate
+                name: Flow Rate
+                icon: mdi:water-pump
+              - entity: sensor.philips_barista_brew_mock_brew_flow_total
+                name: Volume
+                icon: mdi:water
+              - entity: sensor.philips_barista_brew_mock_mock_brew_pump_pressure
+                name: Pressure
+                icon: mdi:gauge
+
+          # Nozzle / group head output sensors (mock-specific)
+          - type: glance
+            title: Group Head Output (Nozzle)
+            show_name: true
+            show_icon: true
+            show_state: true
+            entities:
+              - entity: sensor.philips_barista_brew_mock_nozzle_flow_rate
+                name: Flow Rate
+                icon: mdi:water-boiler
+              - entity: sensor.philips_barista_brew_mock_nozzle_flow_total
+                name: Volume
+                icon: mdi:cup
+
+          # Last shot summary
+          - type: glance
+            title: Last Shot
+            show_name: true
+            show_icon: true
+            show_state: true
+            entities:
+              - entity: sensor.philips_barista_brew_mock_last_shot_duration
+                name: Duration (s)
+                icon: mdi:timer
+              - entity: sensor.philips_barista_brew_mock_last_shot_yield
+                name: Yield (mL)
+                icon: mdi:cup
+              - entity: sensor.philips_barista_brew_mock_last_shot_volume
+                name: Volume (mL)
+                icon: mdi:water-outline
+
+      # -----------------------------------------------------------------------
+      # COLUMN 3 — LIVE GRAPHS
+      # -----------------------------------------------------------------------
+      - type: vertical-stack
+        view_layout:
+          grid-column: "3"
+        cards:
+
+          # Temperature + SSR duty live graph — 30-minute window
+          - type: custom:mini-graph-card
+            name: Thermoblock + SSR Duty — Live (30 min)
+            icon: mdi:thermometer
+            entities:
+              - entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+                name: Temperature (°C)
+                color: "#e74c3c"
+              - entity: sensor.philips_barista_brew_mock_heater_ssr_duty
+                name: SSR Duty (%)
+                color: "#f39c12"
+                y_axis: secondary
+            hours_to_show: 0.5
+            points_per_hour: 120
+            line_width: 2
+            animate: true
+            show:
+              labels: true
+              points: false
+              fill: false
+              legend: true
+            color_thresholds:
+              - value: 80
+                color: "#27ae60"
+              - value: 100
+                color: "#f39c12"
+              - value: 130
+                color: "#e74c3c"
+
+          # Flow rate + volume + pressure live graph — 5-minute window
+          - type: custom:mini-graph-card
+            name: Shot Flow + Pressure — Live (5 min)
+            icon: mdi:water-pump
+            entities:
+              - entity: sensor.philips_barista_brew_mock_brew_flow_rate
+                name: Flow Rate (mL/s)
+                color: "#3498db"
+              - entity: sensor.philips_barista_brew_mock_brew_flow_total
+                name: Volume (mL)
+                color: "#2ecc71"
+                y_axis: secondary
+              - entity: sensor.philips_barista_brew_mock_mock_brew_pump_pressure
+                name: Pressure (bar)
+                color: "#e67e22"
+                y_axis: secondary
+            hours_to_show: 0.083
+            points_per_hour: 720
+            line_width: 2
+            animate: true
+            show:
+              labels: true
+              points: false
+              legend: true
+              fill: false
+
+          # Nozzle / group head output flow live graph
+          - type: custom:mini-graph-card
+            name: Group Head Nozzle — Live (5 min)
+            icon: mdi:water-boiler
+            entities:
+              - entity: sensor.philips_barista_brew_mock_nozzle_flow_rate
+                name: Nozzle Rate (mL/s)
+                color: "#9b59b6"
+              - entity: sensor.philips_barista_brew_mock_nozzle_flow_total
+                name: Nozzle Volume (mL)
+                color: "#8e44ad"
+                y_axis: secondary
+            hours_to_show: 0.083
+            points_per_hour: 720
+            line_width: 2
+            animate: true
+            show:
+              labels: true
+              points: false
+              legend: true
+              fill: false
+
+  # ===========================================================================
+  # VIEW 2 — PHYSICS TUNING (mock-only)
+  # Two-column layout:
+  #   Column 1 (left) : Thermal model parameters + temperature/duty graph
+  #   Column 2 (right): Pump & puck model parameters + flow/pressure graph
+  # ===========================================================================
+  - title: Physics Tuning
+    icon: mdi:flask-outline
+    path: physics
+    type: custom:grid-layout
+    layout:
+      grid-template-columns: "1fr 1fr"
+      grid-gap: "12px 12px"
+      padding: "8px"
+      mediaquery:
+        "(max-width: 700px)":
+          grid-template-columns: "1fr"
+    cards:
+
+      # -----------------------------------------------------------------------
+      # COLUMN 1 — THERMAL MODEL
+      # -----------------------------------------------------------------------
+      - type: vertical-stack
+        view_layout:
+          grid-column: "1"
+        cards:
+
+          - type: markdown
+            content: >-
+              ## 🔥 Thermal Model
+
+              Adjust the simulated thermoblock physics at runtime without reflashing.
+              Changes take effect immediately. Observe the PID controller adapting.
+
+              **Thermal ODE:**
+              `dT/dt = (duty × P − h × (T − T_amb)) / C`
+
+              | Symbol | Entity |
+              |---|---|
+              | P | Heater Power (W) |
+              | C | Thermal Mass (J/°C) |
+              | h | Heat Loss (W/°C) |
+              | T_amb | Ambient Temperature (°C) |
+
+          - type: entities
+            title: Thermal Parameters
+            entities:
+              - entity: number.philips_barista_brew_mock_mock_heater_power
+                name: Heater Power (W)
+                icon: mdi:lightning-bolt
+              - entity: number.philips_barista_brew_mock_mock_thermal_mass
+                name: Thermal Mass (J/°C)
+                icon: mdi:weight
+              - entity: number.philips_barista_brew_mock_mock_heat_loss
+                name: Heat Loss (W/°C)
+                icon: mdi:fire
+              - entity: number.philips_barista_brew_mock_mock_ambient_temperature
+                name: Ambient Temperature (°C)
+                icon: mdi:home-thermometer
+
+          # Temperature + SSR duty — 15-minute tuning window
+          - type: custom:mini-graph-card
+            name: Thermal Response (15 min)
+            entities:
+              - entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+                name: Temperature (°C)
+                color: "#e74c3c"
+              - entity: sensor.philips_barista_brew_mock_heater_ssr_duty
+                name: SSR Duty (%)
+                color: "#f39c12"
+                y_axis: secondary
+            hours_to_show: 0.25
+            points_per_hour: 240
+            line_width: 2
+            animate: true
+            show:
+              labels: true
+              legend: true
+              fill: false
+
+          # 24-hour temperature context
+          - type: custom:mini-graph-card
+            name: Temperature — Last 24 Hours
+            entities:
+              - entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+                name: Thermoblock
+                color: "#e74c3c"
+            hours_to_show: 24
+            points_per_hour: 60
+            line_width: 1
+            show:
+              labels: true
+              points: false
+              fill: true
+
+      # -----------------------------------------------------------------------
+      # COLUMN 2 — PUMP + PUCK MODEL
+      # -----------------------------------------------------------------------
+      - type: vertical-stack
+        view_layout:
+          grid-column: "2"
+        cards:
+
+          - type: markdown
+            content: >-
+              ## 💧 Pump + Puck Model
+
+              Adjust pump physics and puck resistance at runtime.
+              Combine with the **Puck Presets** on the Simulation tab
+              for quick scenario switching.
+
+              **Pressure Model:**
+              `P_eq = pump_max × (D − 1) / 100`
+
+              | D | Flow | Pressure |
+              |---|---|---|
+              | 1 (open) | ≈4.0 mL/s | ≈0 bar |
+              | 25 (soft) | ≈3.0 mL/s | ≈3.6 bar |
+              | 50 (medium) | ≈2.0 mL/s | ≈7.4 bar |
+              | 75 (hard) | ≈1.0 mL/s | ≈11.1 bar |
+              | 100 (blocked) | ≈0 mL/s | ≈15 bar |
+
+          - type: entities
+            title: Pump + Puck Parameters
+            entities:
+              - entity: number.philips_barista_brew_mock_mock_nominal_flow
+                name: Nominal Flow (mL/s @ 9 bar)
+                icon: mdi:water-pump
+              - entity: number.philips_barista_brew_mock_mock_pump_max_pressure
+                name: Pump Max Pressure (bar)
+                icon: mdi:gauge
+              - entity: number.philips_barista_brew_mock_mock_puck_time_constant
+                name: Puck Time Constant (s)
+                icon: mdi:timer-sand
+              - entity: number.philips_barista_brew_mock_mock_puck_density
+                name: Puck Density (1–100)
+                icon: mdi:coffee
+              - entity: number.philips_barista_brew_mock_mock_internal_volume
+                name: Internal Volume (mL)
+                icon: mdi:pipe
+
+          # Flow + pressure — 5-minute tuning window
+          - type: custom:mini-graph-card
+            name: Flow + Pressure Response (5 min)
+            entities:
+              - entity: sensor.philips_barista_brew_mock_brew_flow_rate
+                name: Flow Rate (mL/s)
+                color: "#3498db"
+              - entity: sensor.philips_barista_brew_mock_brew_flow_total
+                name: Volume (mL)
+                color: "#2ecc71"
+                y_axis: secondary
+              - entity: sensor.philips_barista_brew_mock_mock_brew_pump_pressure
+                name: Pressure (bar)
+                color: "#e67e22"
+                y_axis: secondary
+            hours_to_show: 0.083
+            points_per_hour: 720
+            line_width: 2
+            animate: true
+            show:
+              labels: true
+              legend: true
+              fill: false
+
+          # Nozzle output vs pump-side for residual decay observation
+          - type: custom:mini-graph-card
+            name: Pump vs Nozzle Output (5 min)
+            entities:
+              - entity: sensor.philips_barista_brew_mock_brew_flow_rate
+                name: Pump Side (mL/s)
+                color: "#3498db"
+              - entity: sensor.philips_barista_brew_mock_nozzle_flow_rate
+                name: Group Head (mL/s)
+                color: "#9b59b6"
+            hours_to_show: 0.083
+            points_per_hour: 720
+            line_width: 2
+            animate: true
+            show:
+              labels: true
+              legend: true
+              fill: false
+
+  # ===========================================================================
+  # VIEW 3 — SHOT HISTORY + ANALYTICS
+  # Requires AppDaemon + helpers — see CUSTOM_UI.md
+  # ===========================================================================
+  - title: Shot History
+    icon: mdi:chart-timeline-variant
+    path: history
+    cards:
+
+      # Shot count chip
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: template
+            icon: mdi:flask
+            icon_color: purple
+            content: "SIMULATION"
+            tap_action:
+              action: none
+          - type: template
+            icon: mdi:counter
+            icon_color: purple
+            content: "{{ states('sensor.espresso_shot_count') }} shots recorded"
+            tap_action:
+              action: none
+
+      # Scrollable shot log
+      - type: markdown
+        title: Shot Log
+        content: >-
+          {% set log = states('input_text.espresso_shot_log') %}
+          {% if log in ('unknown','unavailable','[]','') %}
+          _No shots recorded yet. Pull a simulated espresso to start your history!_
+          {% else %}
+          {% set shots = log | from_json | reverse | list %}
+          | # | Date | Duration | Yield | Temp |
+          |---|------|----------|-------|------|
+          {% for s in shots %}
+          | {{ s.number }} | {{ as_datetime(s.start) | as_local | strftime('%m/%d %H:%M') }} | {{ s.duration_s | round(0) }}s | {{ s.yield_ml | round(1) }} mL | {{ s.temp_c | round(1) }} °C |
+          {% endfor %}
+          {% endif %}
+
+      # Shot selector
+      - type: entities
+        title: Inspect a Shot
+        entities:
+          - entity: input_select.espresso_shot_viewer
+            name: Select Shot
+            icon: mdi:magnify
+
+      # Temperature during selected shot
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Temperature — Selected Shot
+          show_states: true
+          colorize_states: true
+        graph_span: "{{ states('sensor.espresso_selected_shot_span_sec') | int(180) }}sec"
+        span:
+          end: "{{ states('sensor.espresso_selected_shot_end_offset') }}"
+        series:
+          - entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+            name: Thermoblock (°C)
+            color: "#e74c3c"
+            stroke_width: 2
+            fill_raw: "last"
+            type: line
+          - entity: sensor.philips_barista_brew_mock_heater_ssr_duty
+            name: SSR Duty (%)
+            color: "#f39c12"
+            stroke_width: 1
+            fill_raw: "last"
+            type: line
+        yaxis:
+          - id: temp
+            min: 50
+            max: 140
+            decimals: 1
+        apex_config:
+          chart:
+            animations:
+              enabled: false
+          stroke:
+            curve: smooth
+
+      # Flow + pressure during selected shot
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Flow Rate & Pressure — Selected Shot
+          show_states: true
+          colorize_states: true
+        graph_span: "{{ states('sensor.espresso_selected_shot_span_sec') | int(180) }}sec"
+        span:
+          end: "{{ states('sensor.espresso_selected_shot_end_offset') }}"
+        series:
+          - entity: sensor.philips_barista_brew_mock_brew_flow_rate
+            name: Flow Rate (mL/s)
+            color: "#3498db"
+            stroke_width: 2
+            fill_raw: "last"
+            type: area
+          - entity: sensor.philips_barista_brew_mock_brew_flow_total
+            name: Volume (mL)
+            color: "#2ecc71"
+            stroke_width: 2
+            fill_raw: "last"
+            type: line
+          - entity: sensor.philips_barista_brew_mock_mock_brew_pump_pressure
+            name: Pressure (bar)
+            color: "#e67e22"
+            stroke_width: 2
+            fill_raw: "last"
+            type: line
+        apex_config:
+          chart:
+            animations:
+              enabled: false
+          stroke:
+            curve: stepline
+
+      # 2-hour temperature context
+      - type: history-graph
+        title: Temperature — Last 2 Hours
+        entities:
+          - entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+            name: Temperature
+        hours_to_show: 2
+        refresh_interval: 30
+
+  # ===========================================================================
+  # VIEW 4 — ADVANCED / DIAGNOSTICS
+  # Direct hardware control — for debugging and maintenance only
+  # ===========================================================================
+  - title: Advanced
+    icon: mdi:wrench
+    path: advanced
+    cards:
+
+      # System diagnostics
+      - type: glance
+        title: System Diagnostics
+        entities:
+          - entity: sensor.philips_barista_brew_mock_uptime
+            name: Uptime
+            icon: mdi:clock
+          - entity: sensor.philips_barista_brew_mock_wi_fi_signal
+            name: Wi-Fi (dBm)
+            icon: mdi:wifi
+          - entity: sensor.philips_barista_brew_mock_esp32_temperature
+            name: ESP32 (°C)
+            icon: mdi:chip
+
+      # Direct valve control (diagnostic)
+      - type: entities
+        title: Valves — Direct Control
+        entities:
+          - entity: switch.philips_barista_brew_mock_brew_valve
+            name: Brew Valve
+            icon: mdi:valve
+          - entity: switch.philips_barista_brew_mock_steam_valve
+            name: Steam Valve
+            icon: mdi:valve
+          - entity: switch.philips_barista_brew_mock_purge_valve
+            name: Purge / Drain Valve
+            icon: mdi:valve
+
+      # Mock pump direct control (diagnostic)
+      - type: entities
+        title: Mock Pump — Direct Control
+        entities:
+          - entity: switch.philips_barista_brew_mock_mock_pump
+            name: Mock Pump (Sim)
+            icon: mdi:pump
+
+      # 24-hour temperature history
+      - type: custom:mini-graph-card
+        name: Temperature — Last 24 Hours
+        entities:
+          - entity: sensor.philips_barista_brew_mock_thermoblock_temperature
+            name: Thermoblock
+        hours_to_show: 24
+        points_per_hour: 60
+        line_width: 1
+        show:
+          labels: true
+          points: false
+          fill: true
