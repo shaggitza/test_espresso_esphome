@@ -67,8 +67,12 @@
 #   Set internal_volume_ml = 0 to disable (legacy instant-decay behaviour).
 #
 # HA ENTITY CATEGORIES:
-#   Tuning number entities use entity_category: config so they appear in the
-#   "Configuration" section of the HA device page, separate from primary sensors.
+#   config     — Mock physics parameters, puck preset buttons, and other tuning
+#                knobs appear in the "Configuration" section of the HA device page.
+#   diagnostic — Mock-only estimated sensors (nozzle flow, SSR duty), valves,
+#                and system/uptime diagnostics appear in the "Diagnostics" section.
+#   (none)     — Primary user-facing sensors and controls (brew flow, temperature,
+#                start/stop buttons) appear at the top of the device page.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -235,8 +239,10 @@ espresso_machine_mock_pump:
   # Nozzle flow sensors — estimated output from the group head
   nozzle_rate_sensor:
     name: "Nozzle Flow Rate"
+    entity_category: diagnostic
   nozzle_total_sensor:
     name: "Nozzle Flow Total"
+    entity_category: diagnostic
 
   # HA number entities for runtime tuning (entity_category: config keeps
   # them separate from primary sensors on the HA device page)
@@ -322,16 +328,19 @@ espresso_machine_valve:
     name: "Brew Valve"
     pin: GPIO26
     normally_open: false
+    entity_category: diagnostic
 
   - id: steam_valve
     name: "Steam Valve"
     pin: GPIO27
     normally_open: false
+    entity_category: diagnostic
 
   - id: purge_valve
     name: "Purge / Drain Valve"
     pin: GPIO14
     normally_open: false
+    entity_category: diagnostic
 
 # =============================================================================
 # GRINDER — unchanged from real config (dummy GPIO)

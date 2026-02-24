@@ -343,16 +343,19 @@ espresso_machine_valve:
     name: "Brew Valve"
     pin: GPIO26               # ← CHANGE ME — 3-way solenoid to portafilter
     normally_open: false
+    entity_category: diagnostic
 
   - id: steam_valve
     name: "Steam Valve"
     pin: GPIO27               # ← CHANGE ME — steam wand solenoid
     normally_open: false
+    entity_category: diagnostic
 
   - id: purge_valve
     name: "Purge / Drain Valve"
     pin: GPIO14               # ← CHANGE ME — drain / purge solenoid
     normally_open: false
+    entity_category: diagnostic
 
 # =============================================================================
 # PUMP — espresso_machine_pump platform (first-class citizen)
@@ -378,6 +381,7 @@ espresso_machine_pump:
   type: relay                 # relay | dimmer
   pin: GPIO25                 # ← CHANGE ME
   flow_meter: brew_flow       # flow meter owned by the pump; see design note above
+  entity_category: diagnostic
 
 # =============================================================================
 # GRINDER — espresso_machine_grinder platform (first-class citizen)
