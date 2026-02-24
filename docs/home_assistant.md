@@ -1,13 +1,13 @@
 # Home Assistant Dashboard — Espresso Machine
 
-## Futuristic Dashboards
+## Dashboards
 
-Two ready-to-paste, visually rich Lovelace dashboards are provided:
+Two ready-to-paste Lovelace dashboards are provided:
 
 | File | Target | Description |
 |---|---|---|
-| `home_assistant/dashboards/dashboard.yaml` | Real hardware + simulation | Unified dashboard with all four views |
-| `home_assistant/dashboards/dashboard_mock.yaml` | Simulation only | Dedicated mock dashboard with physics tuning view |
+| `home_assistant/dashboards/dashboard.yaml` | Real hardware + simulation | Unified dashboard — Controls, Live Data, Advanced |
+| `home_assistant/dashboards/dashboard_mock.yaml` | Simulation only | Dedicated mock dashboard — Controls, Live Data, Advanced |
 
 **How to install:**
 1. Settings → Dashboards → Add Dashboard
@@ -15,40 +15,37 @@ Two ready-to-paste, visually rich Lovelace dashboards are provided:
 3. Three-dot menu again → "Raw configuration editor"
 4. Paste the full contents of the chosen file (starting from `title:`) → Save.
 
-**Required HACS custom cards** (install via HACS → Frontend before pasting):
-1. mushroom — https://github.com/piitaya/lovelace-mushroom
-2. mini-graph-card — https://github.com/kalkih/mini-graph-card
-3. apexcharts-card — https://github.com/RomRider/apexcharts-card
-4. button-card — https://github.com/custom-cards/button-card
-5. layout-card — https://github.com/thomasloven/lovelace-layout-card
+**No HACS addons required** — both dashboards use only standard Home Assistant card types
+(`entities`, `glance`, `tile`, `button`, `gauge`, `history-graph`, `thermostat`,
+`horizontal-stack`, `vertical-stack`, `markdown`).
 
 ### `dashboard.yaml` — Unified (Real + Simulation)
 
 | View | Layout | Description |
 |---|---|---|
-| ☕ Control | 3-column grid | Status+buttons (left) · Sensors+settings (centre) · Live graphs (right) |
-| 🧪 Simulation | 2-column grid | Mock controls+puck presets (left) · Live graphs+physics tuning (right) |
-| 📊 Shot History | Single column | Scrollable shot log + ApexCharts per-shot temperature + flow replay |
-| ⚙️ Advanced | Single column | Direct valve/pump control + diagnostics for both real and mock devices |
+| ☕ Control | 3-column `horizontal-stack` | Controls (left) · Buttons + live sensors (centre) · Simulation physics (right) |
+| 📊 Live Data | Single column | Temperature gauge + history-graph charts for temperature, flow, SSR duty, pressure |
+| ⚙️ Advanced | Single column | Direct valve/pump control + system diagnostics |
 
 ### `dashboard_mock.yaml` — Dedicated Simulation Dashboard
 
 | View | Layout | Description |
 |---|---|---|
-| 🧪 Simulation | 3-column grid | Status+buttons+puck presets (left) · Sensors+settings (centre) · Live graphs (right) |
-| 🔬 Physics Tuning | 2-column grid | Thermal model (left) · Pump+puck model (right) |
-| 📊 Shot History | Single column | Mock shot log + ApexCharts per-shot replay |
-| ⚙️ Advanced | Single column | Direct valve/pump control + mock diagnostics |
+| 🧪 Control | 3-column `horizontal-stack` | Controls (left) · Buttons + live sensors (centre) · Puck presets + physics parameters (right) |
+| 📊 Live Data | Single column | Temperature gauge + history-graph charts for temperature, flow, SSR duty, pressure, nozzle |
+| ⚙️ Advanced | Single column | Direct valve/pump control + mock system diagnostics |
 
 > ⚡ **Maintenance rule:** Whenever a new entity is added to the ESPHome firmware, add the
-> corresponding card to both `dashboard.yaml` and `dashboard_mock.yaml` (if it is
-> mock-specific) in the same PR.
+> corresponding card to both `dashboard.yaml` and `dashboard_mock.yaml` in the same PR.
 > Real-device cards use the prefix `philips_barista_brew`.
 > Mock-device cards use the prefix `philips_barista_brew_mock`.
 
 The legacy per-device dashboards (`espresso_real.yaml`, `espresso_mock.yaml`) are kept for
-reference. The `dashboard.yaml` and `dashboard_mock.yaml` files are the recommended starting
-point.
+reference. Use `dashboard.yaml` or `dashboard_mock.yaml` for new installations.
+
+---
+
+Below is a ready-to-paste Lovelace dashboard card configuration for the espresso machine.
 
 ---
 
