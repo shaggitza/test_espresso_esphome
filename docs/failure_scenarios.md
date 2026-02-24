@@ -19,6 +19,7 @@ For each scenario the document records:
 | Power OFF while idle | Flag cleared; hardware already safe | ✅ Covered (C++ test) |
 | Power OFF during brew | Brew stops immediately; pump off, valves closed | ✅ Covered (C++ test) |
 | Power OFF during steam heat-up | Heat-up cancelled; heater lowered; all off | ✅ Covered (C++ test) |
+| Power OFF during steam purge (PURGING) | Purge cancelled immediately; heater lowered; all off | ✅ Covered (C++ test) |
 | Power OFF during active steaming | Purge sequence initiated; completes automatically | ✅ Covered (C++ test) |
 | Power OFF during steam cool-down | Cool-down + purge continues until IDLE | ✅ Covered (C++ test) |
 | Power ON mid-purge (quick toggle after steam) | On flag set; new operations blocked until IDLE | ✅ Covered (C++ test) |
@@ -54,6 +55,12 @@ fittings. Leaving the heater at 135 °C unattended is a burn/fire risk.
    - CLEANUP: purge valve closes; transitions to IDLE
 4. The YAML `turn_off_action` also sets the PID climate to `mode: off`,
    stopping the heater element entirely.
+
+> **Note on PURGING state:** If the machine is off-ed during the `PURGING` phase
+> (pump flushing water through purge valve before the steam valve opened),
+> `machine_off()` calls `steam_stop()` which cancels PURGING immediately:
+> pump stops, purge valve closes, heater setpoint is lowered — no cool-down
+> is needed because the steam valve was never opened.
 
 **Net result:** Steam pressure is safely vented through the purge path. The
 thermoblock cools naturally. The machine reaches a safe idle state without
@@ -182,3 +189,6 @@ The scenarios above are validated by the following GoogleTest tests in
 | `Power.MachineOffDuringHeatUpCancelsImmediately` | OFF during heat-up → immediate cancel |
 | `Power.MachineCanBeReusedAfterOffOnCycle` | Machine usable after off/on cycle |
 | `Power.MachineOnWhilePurgingAllowsNewOpsAfterIdle` | Quick off/on: new ops wait for purge |
+| `SteamPurge.MachineOffDuringPurgingCancelsImmediately` | OFF during PURGING → immediate cancel |
+| `SteamPurge.FullSteamSequenceWithPurge` | Full HEATING→PURGING→STEAMING→COOLING→IDLE sequence |
+| `SteamTimeout.SteamTimesOutWhenTimeoutElapses` | Steam auto-stops after configured timeout |

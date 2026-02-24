@@ -29,7 +29,7 @@ planned in this project.
 | `espresso_machine_pump` (relay) | `switch` | ✅ | On/off relay; `run` action with volume + timeout |
 | `espresso_machine_pump` (dimmer) | `number` (0–100 %) | ✅ | Slow-PWM dimmer stub; `turn_on`/`turn_off` wired |
 | `espresso_machine_grinder` | `button` + `number` | ✅ | Timed relay grind; adjustable grind-time number entity |
-| `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines; steam temperature management implemented via `IHeater`; brew heater ctrl wired (P1-2) |
+| `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines; purge-before-steam (PURGING state); steam timeout; temperature management via `IHeater`; brew heater ctrl wired (P1-2) |
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
@@ -57,11 +57,13 @@ planned in this project.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Steam state machine (`IDLE→HEATING→STEAMING→COOLING→CLEANUP`) | ✅ | All states implemented with temperature-gated transitions |
+| Steam state machine (`IDLE→HEATING→PURGING→STEAMING→COOLING→CLEANUP`) | ✅ | All states; `PURGING` flushes residual water before steam; `HEATING` gates on temperature when `heater_controller` is wired |
 | Heater setpoint to steam temperature | ✅ | `set_target_temperature(steam_target_temp_)` called on `IHeater` in `steam_start()` |
-| Temperature-gated HEATING→STEAMING transition | ✅ | Waits for `get_current_temperature() >= steam_target_temp_`; falls back to immediate if no IHeater wired |
-| Steam valve + pump activation | ✅ | `steam_start()` opens the valve and starts the pump in STEAMING state |
+| Temperature-gated HEATING→PURGING/STEAMING transition | ✅ | Waits for `get_current_temperature() >= steam_target_temp_`; falls back to immediate if no IHeater wired |
+| Purge-before-steam (`purge_volume`) | ✅ | Pumps configured volume through purge valve to clear residual water; `purge_volume: 0` (default) skips phase (backward-compatible) |
+| Steam valve + pump activation | ✅ | Steam valve opens and pump starts in STEAMING state (after purge, if configured) |
 | Pump duty-cycle flow-rate control | ✅ | Bang-bang pump control to maintain `steam_flow_max_ml_per_s_` |
+| Steam safety timeout (`timeout`) | ✅ | Optional auto-stop after configured duration; 0 = disabled (default) |
 | Purge on steam stop | ✅ | Purge valve opens immediately when steam stops to flush steam path during cool-down |
 | Auto cool-down after steaming | ✅ | `set_target_temperature(steam_cool_down_to_)` on `IHeater`; temperature-gated COOLING→CLEANUP transition |
 | Temperature-gated COOLING→CLEANUP transition | ✅ | Waits for `get_current_temperature() <= steam_cool_down_to_`; falls back to immediate if no IHeater wired |

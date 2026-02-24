@@ -27,6 +27,8 @@ testing plan for the safety-critical C++ code paths.
 | Shot auto-termination at `flow_max` | orchestrator | ✅ Full | State machine checks `get_flow_total()` |
 | Pre-infusion hold | orchestrator | ✅ Full | Volume + timer gated phase |
 | Steam temperature ramp | mock_heater | ✅ Full | PID drives heater to steam setpoint |
+| Steam purge-before-steam (PURGING state) | orchestrator | ✅ Full | Pumps configured volume through purge valve; ensures dry steam |
+| Steam safety timeout | orchestrator | ✅ Full | Auto-stop after `timeout` ms if not manually stopped |
 | Post-steam cool-down | mock_heater | ✅ Full | Setpoint lowered; ODE cools naturally |
 | Pump restart mid-shot (flow reset) | mock_pump | ✅ Full | `run_time_` resets; `system_pressure_bar_` clears |
 | Scale / limescale flow restriction | mock_pump | ⚠️ Partial | Approximate by increasing `puck_pressure_bar` |
@@ -194,6 +196,8 @@ machine in a dangerous state, regardless of what the mock components return.
 | `Safety_BrewStopsAtFlowMax` | `flow_max` reached mid-shot | Brew sequence stops pump and closes valve | ✅ Implemented in orchestrator tests |
 | `Safety_ResidualFlowAfterStop` | Residual pressure drains after pump off | Volume does not overflow `flow_max + margin` | ⚠️ Planned |
 | `Safety_PurgeOnSteamStop` | Steam stopped by user | Purge valve opens; pressure safely released | ✅ Implemented in orchestrator tests |
+| `Safety_PurgeBeforeSteam` | Steam sequence started with `purge_volume > 0` | Purge valve open + pump on during PURGING; steam valve only opens after purge | ✅ Implemented (`SteamPurge.*` tests) |
+| `Safety_SteamTimeout` | Steaming runs past `timeout` duration | STEAMING auto-stops, enters COOLING | ✅ Implemented (`SteamTimeout.*` tests) |
 
 ### Priority 3 — Grinder Safety
 

@@ -28,9 +28,9 @@ partial / planned). A high-level summary:
 | **Vibration pump control** | ✅ Implemented | Relay (on/off) and dimmer (0–100 %) types |
 | **Grinder integration** | ✅ Implemented | Timed relay grind; adjustable from HA; brew/steam lockout ⬜ pending |
 | **Pre-infusion** | ✅ Implemented | Volume-driven pre-wet + configurable hold time |
-| **Brew state machine** | 🚧 Partial | All states present; heater setpoint wiring + cleanup pending |
-| **Steam mode** | 🚧 Partial | Valve + pump activation works; temperature-gating + flow control pending |
-| **Temperature surfing** | 🚧 Partial | Config accepted; climate setpoint not yet applied at runtime |
+| **Brew state machine** | ✅ Implemented | All states; heater setpoint wiring; temperature-gating; pre-infusion |
+| **Steam mode** | ✅ Implemented | Full sequence: HEATING → PURGING → STEAMING → COOLING → CLEANUP; temperature-gated; purge-before-steam; safety timeout |
+| **Temperature surfing** | ✅ Implemented | Configurable offset + ramp time; applied via `IHeater` on each brew tick |
 | **Cleanup scripts** | ⬜ Planned | Schema accepts block; execution wired in Phase 9 |
 | **Brew profiles** | ⬜ Planned | Multi-phase pressure/flow curves (Phase 12) |
 | **Home Assistant integration** | ✅ Implemented | All entities auto-discovered via native ESPHome API |
@@ -191,8 +191,10 @@ espresso_machine:
     valve: steam_valve
     purge_valve: purge_valve
     target_temperature: 135°C
+    purge_volume: 5ml      # flush residual water before opening steam valve
     flow_max: 2ml/s
     cool_down_to: 90°C
+    timeout: 5min          # optional safety auto-stop
 ```
 
 See [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) for the full annotated
