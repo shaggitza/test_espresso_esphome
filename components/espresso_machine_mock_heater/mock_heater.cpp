@@ -79,7 +79,7 @@ void MockHeaterNumber::control(float value) {
 // ---------------------------------------------------------------------------
 void MockHeater::set_target_temperature(float t) {
   target_temperature_ = t;
-  ESP_LOGI(TAG, "IHeater::set_target_temperature(%.1f°C) — wire PID climate to propagate", t);
+  ESP_LOGD(TAG, "IHeater::set_target_temperature(%.1f°C) — stored (use espresso_machine_heater to control PID)", t);
 }
 
 void MockHeater::setup() {

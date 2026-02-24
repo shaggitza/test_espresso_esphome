@@ -125,17 +125,17 @@ wifi:
 # External components — pulls all espresso_machine platforms from this repo
 # -----------------------------------------------------------------------------
 external_components:
-  - source:
-      type: local
-      path: ../components
+external_components:
+  - source: github://shaggitza/test_espresso_esphome@main
     components:
       - espresso_machine
       - espresso_machine_valve
       - espresso_machine_pump
       - espresso_machine_grinder
       - espresso_machine_flow_meter
-      - espresso_machine_mock_heater   # ← NEW: thermal simulation
-      - espresso_machine_mock_pump     # ← NEW: pump + flow simulation
+      - espresso_machine_heater        # production IHeater adapter for climate.pid
+      - espresso_machine_mock_heater   # ← thermal simulation (temp sensor + SSR output)
+      - espresso_machine_mock_pump     # ← pump + flow simulation
 
 # =============================================================================
 # MOCK HEATER — replaces physical thermocouple + slow_pwm + SPI
@@ -305,6 +305,17 @@ climate:
       threshold_low: -0.3
 
 # =============================================================================
+# HEATER CONTROLLER — IHeater adapter that wraps the PID climate entity
+#
+# The mock heater simulates temperature physics (sensor + SSR output).
+# This adapter controls the PID setpoint when the orchestrator calls
+# set_target_temperature() for brew/steam temperature changes.
+# =============================================================================
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
+
+# =============================================================================
 # VALVES — unchanged from real config (dummy GPIOs, no physical hardware)
 # =============================================================================
 espresso_machine_valve:
@@ -353,7 +364,7 @@ espresso_machine:
 
   brew:
     heater: main_heater
-    heater_controller: mock_heater   # IHeater — enables temperature-gated transitions and temperature surfing (P1-2/P1-3)
+    heater_controller: heater_ctrl   # IHeater adapter — controls PID setpoint for temperature-gated transitions (P1-2/P1-3)
     pump: main_pump
     valve: brew_valve
     purge_valve: purge_valve
@@ -380,7 +391,7 @@ espresso_machine:
 
   steam:
     heater: main_heater
-    heater_controller: mock_heater   # IHeater — enables temperature-gated transitions
+    heater_controller: heater_ctrl   # IHeater adapter — controls PID setpoint for temperature-gated transitions
     pump: main_pump
     valve: steam_valve
     purge_valve: purge_valve
