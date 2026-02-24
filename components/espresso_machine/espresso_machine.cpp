@@ -44,6 +44,7 @@ void EspressoMachine::setup() {
   if (temp_surf_switch_ != nullptr)
     temp_surf_switch_->publish_state(temp_surf_enabled_);
   safe_stop_all_();
+  publish_status_();
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,7 @@ void EspressoMachine::machine_off() {
       safe_stop_all_();
       brew_state_ = BrewState::IDLE;
       mode_ = EspressoMode::IDLE;
+      publish_status_();
       break;
 
     case EspressoMode::STEAMING:
@@ -117,6 +119,7 @@ void EspressoMachine::machine_off() {
       ESP_LOGI(TAG, "Machine OFF: stopping active flush");
       safe_stop_all_();
       mode_ = EspressoMode::IDLE;
+      publish_status_();
       break;
 
     case EspressoMode::IDLE:
@@ -147,6 +150,7 @@ void EspressoMachine::brew_start() {
   brew_state_ = BrewState::HEATING;
   brew_start_ms_ = millis();
   state_entered_ms_ = millis();
+  publish_status_();
 
   // Start with all valves closed and pump off until temperature is reached
   if (brew_valve_)
@@ -173,6 +177,7 @@ void EspressoMachine::brew_stop() {
   safe_stop_all_();
   brew_state_ = BrewState::IDLE;
   mode_ = EspressoMode::IDLE;
+  publish_status_();
 }
 
 void EspressoMachine::steam_start() {
@@ -192,6 +197,7 @@ void EspressoMachine::steam_start() {
   mode_ = EspressoMode::STEAMING;
   steam_state_ = SteamState::HEATING;
   state_entered_ms_ = millis();
+  publish_status_();
 
   // Close all valves and stop pump while heating to steam temperature
   if (steam_valve_)
@@ -222,6 +228,7 @@ void EspressoMachine::steam_stop() {
     safe_stop_all_();
     steam_state_ = SteamState::IDLE;
     mode_ = EspressoMode::IDLE;
+    publish_status_();
     return;
   }
   if (steam_state_ != SteamState::STEAMING) {
@@ -243,6 +250,7 @@ void EspressoMachine::steam_stop() {
   // Lower heater setpoint to cool-down temperature
   if (steam_heater_ctrl_)
     steam_heater_ctrl_->set_target_temperature(steam_cool_down_to_);
+  publish_status_();
 }
 
 void EspressoMachine::flush(float volume_ml) {
@@ -271,6 +279,7 @@ void EspressoMachine::flush(float volume_ml) {
   }
   if (brew_purge_valve_)
     brew_purge_valve_->open();
+  publish_status_();
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +308,7 @@ void EspressoMachine::advance_brew_() {
           brew_valve_->open();
         if (brew_pump_)
           brew_pump_->turn_on();
+        publish_status_();
       } else {
         ESP_LOGI(TAG, "Brew: HEATING → BREWING");
         enter_brewing_();
@@ -334,6 +344,7 @@ void EspressoMachine::advance_brew_() {
         safe_stop_all_();
         brew_state_ = BrewState::IDLE;
         mode_ = EspressoMode::IDLE;
+        publish_status_();
         break;
       }
 
@@ -373,6 +384,7 @@ void EspressoMachine::advance_brew_() {
           brew_pump_->turn_off();
         if (brew_valve_)
           brew_valve_->close();
+        publish_status_();
       }
       break;
     }
@@ -384,6 +396,7 @@ void EspressoMachine::advance_brew_() {
         brew_cleanup_fn_();
       brew_state_ = BrewState::CLEANUP;
       state_entered_ms_ = millis();
+      publish_status_();
       break;
 
     case BrewState::CLEANUP:
@@ -391,6 +404,7 @@ void EspressoMachine::advance_brew_() {
       ESP_LOGI(TAG, "Brew: CLEANUP → IDLE");
       brew_state_ = BrewState::IDLE;
       mode_ = EspressoMode::IDLE;
+      publish_status_();
       break;
 
     default:
@@ -428,6 +442,7 @@ void EspressoMachine::advance_steam_() {
           steam_purge_valve_->open();
         if (steam_pump_)
           steam_pump_->turn_on();
+        publish_status_();
       } else {
         // No purge configured: open steam valve immediately (backward compat).
         ESP_LOGI(TAG, "Steam: HEATING → STEAMING (%.1f°C)",
@@ -439,6 +454,7 @@ void EspressoMachine::advance_steam_() {
           steam_valve_->open();
         if (steam_pump_)
           steam_pump_->turn_on();
+        publish_status_();
       }
       break;
 
@@ -458,6 +474,7 @@ void EspressoMachine::advance_steam_() {
         if (steam_valve_)
           steam_valve_->open();
         // pump continues running for steaming
+        publish_status_();
       }
       break;
     }
@@ -505,6 +522,7 @@ void EspressoMachine::advance_steam_() {
                                   : steam_cool_down_to_);
       steam_state_ = SteamState::CLEANUP;
       state_entered_ms_ = millis();
+      publish_status_();
       break;
 
     case SteamState::CLEANUP:
@@ -516,6 +534,7 @@ void EspressoMachine::advance_steam_() {
         steam_purge_valve_->close();
       steam_state_ = SteamState::IDLE;
       mode_ = EspressoMode::IDLE;
+      publish_status_();
       break;
 
     default:
@@ -535,6 +554,7 @@ void EspressoMachine::advance_flush_() {
     if (brew_purge_valve_)
       brew_purge_valve_->close();
     mode_ = EspressoMode::IDLE;
+    publish_status_();
   }
 }
 
@@ -557,6 +577,7 @@ void EspressoMachine::enter_brewing_() {
     brew_pump_->turn_on();
   ESP_LOGI(TAG, "Brew: BREWING — target=%.1fml  temp_offset=%.1f°C",
            brew_flow_max_ml_, brew_temp_offset_);
+  publish_status_();
 }
 
 void EspressoMachine::safe_stop_all_() {
@@ -626,6 +647,52 @@ const char *EspressoMachine::mode_name() const {
     default:
       return "unknown";
   }
+}
+
+const char *EspressoMachine::status_name() const {
+  switch (mode_) {
+    case EspressoMode::IDLE:
+      return "Idle";
+    case EspressoMode::FLUSHING:
+      return "Flushing";
+    case EspressoMode::BREWING:
+      switch (brew_state_) {
+        case BrewState::HEATING:
+          return "Brew: Heating";
+        case BrewState::PRE_INFUSION:
+          return "Brew: Pre-infusion";
+        case BrewState::BREWING:
+          return "Brewing";
+        case BrewState::DONE:
+          return "Brew: Finishing";
+        case BrewState::CLEANUP:
+          return "Brew: Cleanup";
+        default:
+          return "Brewing";
+      }
+    case EspressoMode::STEAMING:
+      switch (steam_state_) {
+        case SteamState::HEATING:
+          return "Steam: Heating";
+        case SteamState::PURGING:
+          return "Steam: Purging";
+        case SteamState::STEAMING:
+          return "Steaming";
+        case SteamState::COOLING:
+          return "Steam: Cooling";
+        case SteamState::CLEANUP:
+          return "Steam: Cleanup";
+        default:
+          return "Steaming";
+      }
+    default:
+      return "Idle";
+  }
+}
+
+void EspressoMachine::publish_status_() {
+  if (status_sensor_ != nullptr)
+    status_sensor_->publish_state(status_name());
 }
 
 }  // namespace espresso_machine

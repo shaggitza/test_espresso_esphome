@@ -492,6 +492,14 @@ espresso_machine:
   id: my_espresso
   # active_profile: profile_classic_9bar   # ← PLANNED: uncomment when profiles are implemented
 
+  # Status sensor — reports detailed state to HA immediately on every state change.
+  # Values: "Idle" | "Brew: Heating" | "Brew: Pre-infusion" | "Brewing" |
+  #         "Brew: Finishing" | "Brew: Cleanup" | "Steam: Heating" |
+  #         "Steam: Purging" | "Steaming" | "Steam: Cooling" | "Steam: Cleanup" |
+  #         "Flushing"
+  status_sensor:
+    name: "Espresso Status"
+
   # ---------------------------------------------------------------------------
   # Brew mode — full espresso shot sequence
   # State machine: idle → heating → brewing → done → cleanup
@@ -732,6 +740,9 @@ number:
 # =============================================================================
 # TEXT SENSOR — exposes the current machine mode to HA
 # Values: "idle" | "brewing" | "steaming"
+# The status_sensor (wired directly in the espresso_machine block above)
+# provides more granular status updates pushed immediately on state changes.
+# This template sensor is kept as a polling fallback for the coarse mode.
 # =============================================================================
 text_sensor:
   - platform: template

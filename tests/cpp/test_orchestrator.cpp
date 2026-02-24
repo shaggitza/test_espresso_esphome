@@ -2,6 +2,7 @@
 #include <limits>
 #include "esphome/core/hal.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "espresso_machine/espresso_machine.h"
 #include "espresso_machine/interfaces.h"
 
@@ -1874,4 +1875,137 @@ TEST(CleanupCallback, SteamCleanupFnCalledAtCleanup) {
   f.machine.loop();  // CLEANUP → IDLE (cleanup fn fires here)
   EXPECT_EQ(called, 1);
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+// ---------------------------------------------------------------------------
+// status_name() and status_sensor publish-on-transition tests
+// ---------------------------------------------------------------------------
+
+TEST(StatusName, IdleReturnsIdle) {
+  OrchestratorFixture f;
+  EXPECT_STREQ(f.machine.status_name(), "Idle");
+}
+
+TEST(StatusName, BrewHeatingStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+  EXPECT_STREQ(f.machine.status_name(), "Brew: Heating");
+}
+
+TEST(StatusName, BrewingStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (no heater_ctrl wired)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  EXPECT_STREQ(f.machine.status_name(), "Brewing");
+}
+
+TEST(StatusName, BrewDoneStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+  EXPECT_STREQ(f.machine.status_name(), "Brew: Finishing");
+}
+
+TEST(StatusName, BrewCleanupStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE
+  f.machine.loop();  // DONE → CLEANUP
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+  EXPECT_STREQ(f.machine.status_name(), "Brew: Cleanup");
+}
+
+TEST(StatusName, SteamHeatingStatus) {
+  OrchestratorFixture f;
+  // Wire a heater controller that is not yet at target temperature
+  struct ColdHeater : public IHeater {
+    float get_current_temperature() const override { return 80.0f; }
+    void set_target_temperature(float) override {}
+  } cold_heater;
+  f.machine.set_steam_heater_ctrl(&cold_heater);
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  EXPECT_STREQ(f.machine.status_name(), "Steam: Heating");
+}
+
+TEST(StatusName, SteamingStatus) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (no heater_ctrl wired)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+  EXPECT_STREQ(f.machine.status_name(), "Steaming");
+}
+
+TEST(StatusName, SteamCoolingStatus) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_STREQ(f.machine.status_name(), "Steam: Cooling");
+}
+
+TEST(StatusName, FlushingStatus) {
+  OrchestratorFixture f;
+  f.machine.flush(30.0f);
+  EXPECT_STREQ(f.machine.status_name(), "Flushing");
+}
+
+TEST(StatusSensor, PublishesOnBrewStart) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.brew_start();
+  EXPECT_EQ(sens.state, "Brew: Heating");
+}
+
+TEST(StatusSensor, PublishesOnBrewingTransition) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  EXPECT_EQ(sens.state, "Brewing");
+}
+
+TEST(StatusSensor, PublishesOnBrewStop) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.brew_start();
+  f.machine.brew_stop();
+  EXPECT_EQ(sens.state, "Idle");
+}
+
+TEST(StatusSensor, PublishesOnSteamStart) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.steam_start();
+  EXPECT_EQ(sens.state, "Steam: Heating");
+}
+
+TEST(StatusSensor, PublishesOnFlush) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.flush(20.0f);
+  EXPECT_EQ(sens.state, "Flushing");
+}
+
+TEST(StatusSensor, PublishesIdleAfterFlushComplete) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.flush(20.0f);
+  f.brew_pump.volume = 20.0f;
+  f.machine.loop();  // Flush done → IDLE
+  EXPECT_EQ(sens.state, "Idle");
 }

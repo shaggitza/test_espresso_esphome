@@ -89,6 +89,7 @@ planned in this project.
 | Feature | Status | Notes |
 |---|---|---|
 | `espresso_machine.flush` action | ✅ | Pumps N ml through brew purge valve; only accepted when idle (P2-2) |
+| Status text sensor (`status_sensor`) | ✅ | Optional `text_sensor` entity in `espresso_machine:` block; publishes a detailed human-readable status string to HA immediately on every state transition (e.g. `"Brew: Heating"`, `"Brewing"`, `"Steam: Cooling"`); more informative than the coarse `mode_name()` template sensor |
 
 ---
 
