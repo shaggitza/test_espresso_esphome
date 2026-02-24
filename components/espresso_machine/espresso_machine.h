@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <functional>
+#include <string>
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -185,10 +186,14 @@ class EspressoMachine : public Component {
   // ----- Status accessors ---------------------------------------------------
   EspressoMode get_mode() const { return mode_; }
   const char *mode_name() const;
-  // Returns a human-readable status string combining mode and sub-state.
-  // More informative than mode_name(): e.g. "Brew: Heating", "Brewing",
-  // "Steam: Cooling", "Idle".  Updated at every state transition.
-  const char *status_name() const;
+  // Returns a verbose, human-readable status string combining mode, sub-state,
+  // and current sensor values (temperature, flow).  Published to the optional
+  // status_sensor text entity immediately on every state change and on every
+  // loop() tick so the user sees live progress without polling from HA.
+  // Examples: "Heating to 90.0°C — currently 85.3°C",
+  //           "Brewing: 15.2 ml / 40.0 ml",
+  //           "Cooling to 90.0°C — currently 125.3°C"
+  std::string status_name() const;
   BrewState get_brew_state() const { return brew_state_; }
   SteamState get_steam_state() const { return steam_state_; }
 
@@ -289,6 +294,9 @@ class EspressoMachine : public Component {
 
   // -- Status text sensor ----------------------------------------------------
   text_sensor::TextSensor *status_sensor_{nullptr};
+  // Last string sent to the status sensor; used to suppress duplicate publishes
+  // when status_name() is called on every loop() tick.
+  std::string last_published_status_;
 
   // -- Safety: over-temperature cutoff (P0-1 / P0-3) ------------------------
   IHeater *over_temp_sensor_{nullptr};       // sensor to monitor for cutoff

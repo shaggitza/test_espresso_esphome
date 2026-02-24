@@ -68,6 +68,9 @@ void EspressoMachine::loop() {
     default:
       break;
   }
+  // Publish verbose status on every tick; deduplication in publish_status_()
+  // ensures HA is only updated when the message actually changes.
+  publish_status_();
 }
 
 // ---------------------------------------------------------------------------
@@ -649,50 +652,105 @@ const char *EspressoMachine::mode_name() const {
   }
 }
 
-const char *EspressoMachine::status_name() const {
+std::string EspressoMachine::status_name() const {
+  // Maximum status string length: "Heating to steam 135.0°C (now 165.0°C)"
+  // is ~41 bytes; 128 bytes is a generous upper bound.
+  static constexpr size_t STATUS_BUF_SIZE = 128;
+  char buf[STATUS_BUF_SIZE];
+  int n = 0;
   switch (mode_) {
     case EspressoMode::IDLE:
       return "Idle";
-    case EspressoMode::FLUSHING:
-      return "Flushing";
+
+    case EspressoMode::FLUSHING: {
+      float pumped = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
+      n = snprintf(buf, STATUS_BUF_SIZE, "Flushing: %.1f ml / %.1f ml", pumped, flush_volume_ml_);
+      break;
+    }
+
     case EspressoMode::BREWING:
       switch (brew_state_) {
         case BrewState::HEATING:
-          return "Brew: Heating";
-        case BrewState::PRE_INFUSION:
-          return "Brew: Pre-infusion";
-        case BrewState::BREWING:
-          return "Brewing";
+          if (brew_heater_ctrl_) {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Heating to %.1f°C (now %.1f°C)",
+                         brew_target_temp_, brew_heater_ctrl_->get_current_temperature());
+          } else {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Heating to %.1f°C", brew_target_temp_);
+          }
+          break;
+        case BrewState::PRE_INFUSION: {
+          float vol = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
+          n = snprintf(buf, STATUS_BUF_SIZE, "Pre-infusion: %.1f ml / %.1f ml", vol, pre_infusion_volume_ml_);
+          break;
+        }
+        case BrewState::BREWING: {
+          float vol = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
+          n = snprintf(buf, STATUS_BUF_SIZE, "Brewing: %.1f ml / %.1f ml", vol, brew_flow_max_ml_);
+          break;
+        }
         case BrewState::DONE:
-          return "Brew: Finishing";
+          n = snprintf(buf, STATUS_BUF_SIZE, "Shot done: %.1f ml in %.1f s",
+                       last_shot_volume_ml_, last_shot_time_s_);
+          break;
         case BrewState::CLEANUP:
-          return "Brew: Cleanup";
+          return "Brew cleanup";
         default:
           return "Brewing";
       }
+      break;
+
     case EspressoMode::STEAMING:
       switch (steam_state_) {
         case SteamState::HEATING:
-          return "Steam: Heating";
-        case SteamState::PURGING:
-          return "Steam: Purging";
-        case SteamState::STEAMING:
-          return "Steaming";
+          if (steam_heater_ctrl_) {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Heating to steam %.1f°C (now %.1f°C)",
+                         steam_target_temp_, steam_heater_ctrl_->get_current_temperature());
+          } else {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Heating to steam %.1f°C", steam_target_temp_);
+          }
+          break;
+        case SteamState::PURGING: {
+          float purged = steam_pump_ ? steam_pump_->get_flow_total() : 0.0f;
+          n = snprintf(buf, STATUS_BUF_SIZE, "Purging: %.1f ml / %.1f ml", purged, steam_purge_volume_ml_);
+          break;
+        }
+        case SteamState::STEAMING: {
+          float rate = steam_pump_ ? steam_pump_->get_flow_rate() : 0.0f;
+          n = snprintf(buf, STATUS_BUF_SIZE, "Steaming: %.1f ml/s", rate);
+          break;
+        }
         case SteamState::COOLING:
-          return "Steam: Cooling";
+          if (steam_heater_ctrl_) {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Cooling to %.1f°C (now %.1f°C)",
+                         steam_cool_down_to_, steam_heater_ctrl_->get_current_temperature());
+          } else {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Cooling to %.1f°C", steam_cool_down_to_);
+          }
+          break;
         case SteamState::CLEANUP:
-          return "Steam: Cleanup";
+          return "Steam cleanup";
         default:
           return "Steaming";
       }
+      break;
+
     default:
       return "Idle";
   }
+
+  if (n < 0 || static_cast<size_t>(n) >= STATUS_BUF_SIZE)
+    ESP_LOGW(TAG, "status_name: output truncated (%d bytes)", n);
+  return buf;
 }
 
 void EspressoMachine::publish_status_() {
-  if (status_sensor_ != nullptr)
-    status_sensor_->publish_state(status_name());
+  if (status_sensor_ == nullptr)
+    return;
+  std::string current = status_name();
+  if (current != last_published_status_) {
+    last_published_status_ = current;
+    status_sensor_->publish_state(current);
+  }
 }
 
 }  // namespace espresso_machine

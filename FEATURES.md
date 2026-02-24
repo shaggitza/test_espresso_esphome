@@ -89,7 +89,7 @@ planned in this project.
 | Feature | Status | Notes |
 |---|---|---|
 | `espresso_machine.flush` action | ✅ | Pumps N ml through brew purge valve; only accepted when idle (P2-2) |
-| Status text sensor (`status_sensor`) | ✅ | Optional `text_sensor` entity in `espresso_machine:` block; publishes a detailed human-readable status string to HA immediately on every state transition (e.g. `"Brew: Heating"`, `"Brewing"`, `"Steam: Cooling"`); more informative than the coarse `mode_name()` template sensor |
+| Status text sensor (`status_sensor`) | ✅ | Optional `text_sensor` entity in `espresso_machine:` block; publishes a verbose, live status string to HA on every state transition and on every `loop()` tick (deduplicated); includes real-time values such as current/target temperature and flow volume, e.g. `"Heating to 90.0°C (now 85.3°C)"`, `"Brewing: 15.2 ml / 40.0 ml"`, `"Cooling to 90.0°C (now 125.3°C)"`, `"Flushing: 12.3 ml / 50.0 ml"` |
 
 ---
 

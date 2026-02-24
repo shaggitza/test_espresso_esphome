@@ -6,11 +6,12 @@ namespace esphome {
 namespace text_sensor {
 
 // Minimal TextSensor stub for unit tests.
-// publish_state() stores the value so tests can inspect it.
+// publish_state() is virtual so tests can subclass and intercept publishes.
 class TextSensor {
  public:
-  void publish_state(const std::string &value) { state = value; }
+  virtual void publish_state(const std::string &value) { state = value; }
   std::string state;
+  virtual ~TextSensor() = default;
 };
 
 }  // namespace text_sensor
