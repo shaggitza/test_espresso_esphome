@@ -239,19 +239,25 @@ It uses the `brew_purge_valve` and `brew_pump` configured in the `brew:` section
 
 ### Combining script: + flush for a full post-shot routine
 
+The `espresso_machine.flush` action is an ESPHome action, so it is called from ESPHome
+scripts. Home Assistant notifications can be triggered using the `homeassistant.service:` action.
+
 ```yaml
+# ESPHome script that flushes the group head and then notifies via Home Assistant
 script:
   - id: post_shot_routine
     sequence:
-      # 1. Wait for the shot to finish and machine to be idle
-      - wait_template: "{{ states('text_sensor.my_espresso_mode') == 'idle' }}"
-      # 2. Flush 30 mL through the group head
+      # 1. Flush 30 mL through the group head (ESPHome action)
       - espresso_machine.flush:
           id: my_espresso
           volume_ml: 30ml
-      # 3. Notify the user
-      - service: notify.mobile_app
-        data:
-          title: "☕ Shot complete"
-          message: "Group head flushed and ready for next shot."
+      # 2. Notify via Home Assistant service (requires HA API connection)
+      - homeassistant.service:
+          service: notify.mobile_app
+          data:
+            title: "☕ Shot complete"
+            message: "Group head flushed and ready for next shot."
 ```
+
+You can trigger `post_shot_routine` from a Home Assistant automation that watches for the
+`text_sensor.machine_mode` to return to `idle`, or attach it as an ESPHome `on_` trigger.

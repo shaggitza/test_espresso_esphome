@@ -1645,8 +1645,8 @@ TEST(SteamPumpMinOn, PumpTurnsOffAfterMinOnWindow) {
   f.steam_pump.rate = 2.0f;
 
   g_mock_millis = 2000;
-  f.machine.loop();  // Exactly at boundary — still within window (>=, not >)
-  // At t=2000 with pump_on_ms_=0: millis - pump_on_ms = 2000 >= 2000 → turns off
+  // At t=2000 with pump_on_ms=0: elapsed (2000) >= min_on_ms (2000) → pump turns off.
+  f.machine.loop();
   EXPECT_FALSE(f.steam_pump.running);
 }
 
