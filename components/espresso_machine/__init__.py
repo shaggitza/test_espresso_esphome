@@ -1,5 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome import automation
 from esphome.components import number, sensor
 from esphome.const import CONF_ID, UNIT_SECOND, STATE_CLASS_MEASUREMENT
 
@@ -9,6 +10,7 @@ AUTO_LOAD = ["number", "sensor"]
 espresso_machine_ns = cg.esphome_ns.namespace("espresso_machine")
 EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
 BrewFlowMaxNumber = espresso_machine_ns.class_("BrewFlowMaxNumber", number.Number)
+FlushAction = espresso_machine_ns.class_("FlushAction", automation.Action)
 
 # Keys for brew sub-schema
 CONF_BREW = "brew"
@@ -25,6 +27,8 @@ CONF_FLOW_OFFSET = "flow_offset"
 CONF_COOL_DOWN_TO = "cool_down_to"
 CONF_PURGE_VOLUME = "purge_volume"
 CONF_STEAM_TIMEOUT = "timeout"
+CONF_PUMP_MIN_ON_TIME = "pump_min_on_time"
+CONF_FLUSH_VOLUME = "volume_ml"
 
 # Temperature-surfing sub-schema keys
 CONF_TEMPERATURE_PROFILE = "temperature_profile"
@@ -124,6 +128,9 @@ STEAM_SCHEMA = cv.Schema(
         cv.Optional(CONF_PURGE_VOLUME): _validate_volume_ml,
         # Safety timeout: stop steaming after this duration (0 = disabled).
         cv.Optional(CONF_STEAM_TIMEOUT): cv.positive_time_period_milliseconds,
+        # Minimum time the pump must stay ON before it can be toggled off in
+        # bang-bang steam control.  Reduces pump wear. Default: 2 s. (P2-7)
+        cv.Optional(CONF_PUMP_MIN_ON_TIME, default="2s"): cv.positive_time_period_milliseconds,
         # Advanced fields validated in later phases; accepted here to avoid errors
         cv.Optional("cleanup_script"): cv.Any(),
     }
@@ -228,3 +235,29 @@ async def to_code(config):
 
         if CONF_STEAM_TIMEOUT in steam:
             cg.add(var.set_steam_timeout_ms(steam[CONF_STEAM_TIMEOUT]))
+
+        cg.add(var.set_steam_pump_min_on_ms(steam[CONF_PUMP_MIN_ON_TIME]))
+
+
+# ---------------------------------------------------------------------------
+# espresso_machine.flush action (P2-2)
+# Usage in YAML:
+#   - espresso_machine.flush:
+#       id: my_espresso
+#       volume_ml: 50ml
+# ---------------------------------------------------------------------------
+@automation.register_action(
+    "espresso_machine.flush",
+    FlushAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(EspressoMachine),
+            cv.Required(CONF_FLUSH_VOLUME): _validate_volume_ml,
+        }
+    ),
+)
+async def flush_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    cg.add(var.set_volume_ml(config[CONF_FLUSH_VOLUME]))
+    return var

@@ -30,8 +30,10 @@ partial / planned). A high-level summary:
 | **Pre-infusion** | ✅ Implemented | Volume-driven pre-wet + configurable hold time |
 | **Brew state machine** | ✅ Implemented | All states; heater setpoint wiring; temperature-gating; pre-infusion |
 | **Steam mode** | ✅ Implemented | Full sequence: HEATING → PURGING → STEAMING → COOLING → CLEANUP; temperature-gated; purge-before-steam; safety timeout |
+| **Steam pump minimum on-window** | ✅ Implemented | Bang-bang pump control with 2 s default minimum on-time to reduce pump wear (P2-7) |
 | **Temperature surfing** | ✅ Implemented | Configurable offset + ramp time; applied via `IHeater` on each brew tick |
-| **Cleanup scripts** | ⬜ Planned | Schema accepts block; execution wired in Phase 9 |
+| **Cleanup script callbacks** | ✅ Implemented | `cleanup_script:` fires at DONE/CLEANUP; reference any ESPHome script by id (P2-1) |
+| **Maintenance flush action** | ✅ Implemented | `espresso_machine.flush`: pumps N ml through purge valve on demand (P2-2) |
 | **Brew profiles** | ⬜ Planned | Multi-phase pressure/flow curves (Phase 12) |
 | **Home Assistant integration** | ✅ Implemented | All entities auto-discovered via native ESPHome API |
 | **OTA updates** | ✅ Implemented | Standard ESPHome OTA via Wi-Fi |
@@ -195,6 +197,7 @@ espresso_machine:
     flow_max: 2ml/s
     cool_down_to: 90°C
     timeout: 5min          # optional safety auto-stop
+    pump_min_on_time: 2s   # minimum pump on-time before toggling off (P2-7)
 ```
 
 See [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) for the full annotated

@@ -136,6 +136,7 @@ espresso_machine:
     flow_max: 2ml/s
     cool_down_to: 90°C
     timeout: 5min          # optional safety auto-stop
+    pump_min_on_time: 2s   # minimum pump on-time before toggling off (P2-7)
 ```
 
 ## Current Development Phase

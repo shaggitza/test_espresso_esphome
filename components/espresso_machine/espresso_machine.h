@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cmath>
+#include <functional>
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/core/automation.h"
 #include "interfaces.h"
 
 namespace esphome {
@@ -42,6 +44,7 @@ enum class EspressoMode : uint8_t {
   IDLE = 0,
   BREWING = 1,
   STEAMING = 2,
+  FLUSHING = 3,  // P2-2: maintenance flush (pump N ml through purge valve)
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +122,9 @@ class EspressoMachine : public Component {
   void set_steam_purge_volume_ml(float ml) { steam_purge_volume_ml_ = ml; }
   // Maximum steaming duration (ms). 0 = disabled (default).
   void set_steam_timeout_ms(uint32_t ms) { steam_timeout_ms_ = ms; }
+  // Minimum time (ms) the pump must stay ON before it can be toggled off in bang-bang
+  // steam control. Reduces pump wear from rapid on/off cycling. Default 2000 ms. (P2-7)
+  void set_steam_pump_min_on_ms(uint32_t ms) { steam_pump_min_on_ms_ = ms; }
 
   // ----- Safety: hard over-temperature cutoff (P0-1) -----------------------
   // When a temperature sensor exceeds the cutoff limit the orchestrator
@@ -152,6 +158,9 @@ class EspressoMachine : public Component {
   void brew_stop();
   void steam_start();
   void steam_stop();
+  // Flush: pump `volume_ml` ml through the brew purge valve (P2-2).
+  // Useful for group-head rinsing between shots. Only accepted when IDLE.
+  void flush(float volume_ml);
 
   // ----- Status accessors ---------------------------------------------------
   EspressoMode get_mode() const { return mode_; }
@@ -170,6 +179,12 @@ class EspressoMachine : public Component {
   void set_last_shot_time_sensor(sensor::Sensor *s) { last_shot_time_sensor_ = s; }
   void set_last_shot_volume_sensor(sensor::Sensor *s) { last_shot_volume_sensor_ = s; }
   void set_last_shot_yield_sensor(sensor::Sensor *s) { last_shot_yield_sensor_ = s; }
+
+  // ----- Cleanup action callbacks (P2-1) ------------------------------------
+  // Called in the brew/steam DONE→CLEANUP transition.  Set from Python codegen
+  // using a lambda or script reference via `cleanup_script:` in YAML.
+  void set_brew_cleanup_fn(std::function<void()> fn) { brew_cleanup_fn_ = std::move(fn); }
+  void set_steam_cleanup_fn(std::function<void()> fn) { steam_cleanup_fn_ = std::move(fn); }
 
   // ----- Safety query for grinder lockout -----------------------------------
   bool is_busy() const { return mode_ != EspressoMode::IDLE; }
@@ -219,10 +234,12 @@ class EspressoMachine : public Component {
   float steam_cool_down_to_{90.0f};       // °C — heater setpoint after steaming
   float steam_purge_volume_ml_{0.0f};     // ml to purge before steaming (0 = skip)
   uint32_t steam_timeout_ms_{0};          // max steaming duration ms (0 = disabled)
+  uint32_t steam_pump_min_on_ms_{2000};   // minimum pump on-time before toggling off (P2-7)
 
   // -- Internal state --------------------------------------------------------
   uint32_t state_entered_ms_{0};  // millis() when current brew/steam state was entered
   uint32_t steam_start_ms_{0};    // millis() when STEAMING state was entered
+  uint32_t steam_pump_on_ms_{0};  // millis() when pump last turned on in STEAMING (P2-7)
 
   // -- Brewing tracking (Phase 7) -------------------------------------------
   bool pre_infusion_flowing_{true};       // true=flowing phase, false=hold phase
@@ -247,14 +264,46 @@ class EspressoMachine : public Component {
   uint32_t brew_timeout_ms_{0};   // 0 = disabled
   uint32_t brew_start_ms_{0};     // millis() when brew_start() was called
 
+  // -- Flush state (P2-2) ---------------------------------------------------
+  float flush_volume_ml_{0.0f};   // target volume for current maintenance flush
+
+  // -- Cleanup callbacks (P2-1) ---------------------------------------------
+  std::function<void()> brew_cleanup_fn_;   // invoked in brew DONE→CLEANUP
+  std::function<void()> steam_cleanup_fn_;  // invoked in steam CLEANUP
+
   // -- Internal helpers ------------------------------------------------------
   void advance_brew_();
   void advance_steam_();
+  void advance_flush_();
   void enter_brewing_();
   void safe_stop_all_();
   // Returns true if an over-temperature or sensor-fault cutoff was triggered.
   // Called at the top of loop() before advancing any state machine.
   bool check_over_temp_safety_();
+};
+
+}  // namespace espresso_machine
+}  // namespace esphome
+
+// ---------------------------------------------------------------------------
+// FlushAction — ESPHome automation action for espresso_machine.flush (P2-2)
+// Usage in YAML:
+//   - espresso_machine.flush:
+//       id: my_espresso
+//       volume_ml: 50ml
+// ---------------------------------------------------------------------------
+namespace esphome {
+namespace espresso_machine {
+
+template<typename... Ts>
+class FlushAction : public Action<Ts...> {
+ public:
+  void set_parent(EspressoMachine *parent) { parent_ = parent; }
+  TEMPLATABLE_VALUE(float, volume_ml)
+  void play(Ts... x) override { this->parent_->flush(this->volume_ml_.value(x...)); }
+
+ private:
+  EspressoMachine *parent_{nullptr};
 };
 
 }  // namespace espresso_machine

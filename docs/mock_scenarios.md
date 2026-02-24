@@ -194,7 +194,7 @@ machine in a dangerous state, regardless of what the mock components return.
 |---|---|---|---|
 | `Safety_ValveInterlockEnforced` | Two valves open simultaneously | Second valve refused / first closed | ✅ Implemented in valve platform tests |
 | `Safety_BrewStopsAtFlowMax` | `flow_max` reached mid-shot | Brew sequence stops pump and closes valve | ✅ Implemented in orchestrator tests |
-| `Safety_ResidualFlowAfterStop` | Residual pressure drains after pump off | Volume does not overflow `flow_max + margin` | ⚠️ Planned |
+| `Safety_ResidualFlowAfterStop` | Residual pressure drains after pump off | Volume does not overflow `flow_max + margin` | ✅ Implemented (`Safety.ResidualFlowAfterStop` test) |
 | `Safety_PurgeOnSteamStop` | Steam stopped by user | Purge valve opens; pressure safely released | ✅ Implemented in orchestrator tests |
 | `Safety_PurgeBeforeSteam` | Steam sequence started with `purge_volume > 0` | Purge valve open + pump on during PURGING; steam valve only opens after purge | ✅ Implemented (`SteamPurge.*` tests) |
 | `Safety_SteamTimeout` | Steaming runs past `timeout` duration | STEAMING auto-stops, enters COOLING | ✅ Implemented (`SteamTimeout.*` tests) |

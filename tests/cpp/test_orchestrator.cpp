@@ -440,12 +440,17 @@ TEST(Orchestrator, SteamCleanupTransitionsToIdle) {
 TEST(Orchestrator, SteamPumpDutyCycleTurnsOffAtTargetFlowRate) {
   OrchestratorFixture f;
   f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING (pump on)
+  f.machine.loop();  // HEATING → STEAMING (pump on, steam_pump_on_ms_ = 0)
   EXPECT_TRUE(f.steam_pump.running);
 
-  // Simulate flow rate reaching target
+  // Simulate flow rate reaching target — but pump must stay on for min_on_ms first.
   f.steam_pump.rate = 2.0f;
-  f.machine.loop();  // STEAMING: rate >= target → pump off
+  f.machine.loop();  // STEAMING: rate >= target but min_on_ms not elapsed → pump stays on
+  EXPECT_TRUE(f.steam_pump.running);
+
+  // Advance time past the 2-second minimum on window.
+  g_mock_millis = 2001;
+  f.machine.loop();  // STEAMING: rate >= target AND min_on_ms elapsed → pump off
   EXPECT_FALSE(f.steam_pump.running);
 }
 
@@ -454,9 +459,10 @@ TEST(Orchestrator, SteamPumpDutyCycleTurnsOnBelowTargetFlowRate) {
   f.machine.steam_start();
   f.machine.loop();  // HEATING → STEAMING (pump on)
 
-  // Simulate flow above target so pump turns off
+  // Advance time so the minimum on-window expires, then raise rate to target.
+  g_mock_millis = 2001;
   f.steam_pump.rate = 2.0f;
-  f.machine.loop();  // STEAMING: rate >= target → pump off
+  f.machine.loop();  // STEAMING: rate >= target AND min_on_ms elapsed → pump off
   EXPECT_FALSE(f.steam_pump.running);
 
   // Drop rate below target
@@ -1605,5 +1611,215 @@ TEST(SteamPurgeWithHeater, SteamStopDuringPurgingResetsHeaterSetpoint) {
   f.machine.steam_stop();
   EXPECT_GT(f.heater_ctrl.set_target_count, count_before);
   EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+// ---------------------------------------------------------------------------
+// P2-7: Steam pump minimum on-window (2 s default)
+// ---------------------------------------------------------------------------
+
+// Pump must not turn off before the minimum on-window expires even if flow
+// rate exceeds the target immediately.
+TEST(SteamPumpMinOn, PumpStaysOnDuringMinOnWindow) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
+  EXPECT_TRUE(f.steam_pump.running);
+
+  // Rate already at target, but min_on_ms not elapsed — pump must stay on.
+  f.steam_pump.rate = 2.0f;
+  g_mock_millis = 500;
+  f.machine.loop();
+  EXPECT_TRUE(f.steam_pump.running);  // still within 2 s window
+
+  g_mock_millis = 1999;
+  f.machine.loop();
+  EXPECT_TRUE(f.steam_pump.running);  // still within 2 s window
+}
+
+// Pump turns off only after the minimum on-window has expired.
+TEST(SteamPumpMinOn, PumpTurnsOffAfterMinOnWindow) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.steam_pump.rate = 2.0f;
+
+  g_mock_millis = 2000;
+  f.machine.loop();  // Exactly at boundary — still within window (>=, not >)
+  // At t=2000 with pump_on_ms_=0: millis - pump_on_ms = 2000 >= 2000 → turns off
+  EXPECT_FALSE(f.steam_pump.running);
+}
+
+// Configuring a shorter minimum on-window via set_steam_pump_min_on_ms().
+TEST(SteamPumpMinOn, CustomMinOnWindowIsRespected) {
+  OrchestratorFixture f;
+  f.machine.set_steam_pump_min_on_ms(500);  // 500 ms custom window
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
+  f.steam_pump.rate = 2.0f;
+
+  g_mock_millis = 499;
+  f.machine.loop();
+  EXPECT_TRUE(f.steam_pump.running);  // not yet elapsed
+
+  g_mock_millis = 500;
+  f.machine.loop();  // 500 ms elapsed → pump off
+  EXPECT_FALSE(f.steam_pump.running);
+}
+
+// ---------------------------------------------------------------------------
+// P2-5: Safety — residual flow after pump stop
+// ---------------------------------------------------------------------------
+
+// When flow_max is reached the brew valve closes immediately. Even if the pump
+// mock reports additional "residual" volume (piping pressure bleed-off after
+// pump shutdown), the orchestrator must NOT re-open the valve.
+TEST(Safety, ResidualFlowAfterStop) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  EXPECT_TRUE(f.brew_valve.open_state);
+
+  // Flow reaches flow_max → pump stops and brew valve closes.
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+
+  // Simulate residual pressure: pump reports additional volume after stopping.
+  // Orchestrator must NOT re-open the valve or restart the pump.
+  f.brew_pump.volume = 45.0f;  // 5 mL of residual beyond flow_max
+  f.machine.loop();  // DONE → CLEANUP (valve stays closed)
+  EXPECT_FALSE(f.brew_valve.open_state);
+  EXPECT_FALSE(f.brew_pump.running);
+
+  f.machine.loop();  // CLEANUP → IDLE
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_valve.open_state);
+  EXPECT_FALSE(f.brew_pump.running);
+}
+
+// ---------------------------------------------------------------------------
+// P2-2: espresso_machine.flush helper action
+// ---------------------------------------------------------------------------
+
+TEST(Flush, FlushStartsWhenIdle) {
+  OrchestratorFixture f;
+  f.machine.flush(50.0f);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::FLUSHING);
+  EXPECT_STREQ(f.machine.mode_name(), "flushing");
+  EXPECT_TRUE(f.brew_pump.running);
+  EXPECT_TRUE(f.purge_valve.open_state);
+  EXPECT_FALSE(f.brew_valve.open_state);  // brew valve stays closed
+}
+
+TEST(Flush, FlushResetsPumpFlowCounter) {
+  OrchestratorFixture f;
+  f.brew_pump.volume = 20.0f;  // pre-existing volume
+  f.machine.flush(50.0f);
+  EXPECT_GT(f.brew_pump.reset_flow_count, 0);
+}
+
+TEST(Flush, FlushIgnoredWhenMachineIsOff) {
+  OrchestratorFixture f;
+  f.machine.machine_off();
+  f.machine.flush(50.0f);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+}
+
+TEST(Flush, FlushIgnoredWhenBrewing) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.flush(50.0f);  // should be ignored
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+TEST(Flush, FlushIgnoredForZeroVolume) {
+  OrchestratorFixture f;
+  f.machine.flush(0.0f);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Flush, FlushCompletesAtTargetVolume) {
+  OrchestratorFixture f;
+  f.machine.flush(50.0f);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::FLUSHING);
+
+  // Pump volume reaches target → flush ends, purge valve closes, pump stops.
+  f.brew_pump.volume = 50.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.purge_valve.open_state);
+}
+
+TEST(Flush, FlushDoesNotTerminateBeforeTarget) {
+  OrchestratorFixture f;
+  f.machine.flush(50.0f);
+
+  f.brew_pump.volume = 49.9f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::FLUSHING);
+  EXPECT_TRUE(f.brew_pump.running);
+}
+
+TEST(Flush, MachineOffDuringFlushStopsImmediately) {
+  OrchestratorFixture f;
+  f.machine.flush(50.0f);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::FLUSHING);
+
+  f.machine.machine_off();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.purge_valve.open_state);
+}
+
+// ---------------------------------------------------------------------------
+// P2-1: Cleanup callback fired in brew DONE → CLEANUP transition
+// ---------------------------------------------------------------------------
+
+TEST(CleanupCallback, BrewCleanupFnCalledAtDone) {
+  OrchestratorFixture f;
+  int called = 0;
+  f.machine.set_brew_cleanup_fn([&called]() { called++; });
+
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE (fn not yet called; state set to DONE)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+  EXPECT_EQ(called, 0);  // fn fires when DONE state is processed, not when entered
+
+  f.machine.loop();  // DONE → CLEANUP (cleanup fn fires here)
+  EXPECT_EQ(called, 1);
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+}
+
+TEST(CleanupCallback, BrewCleanupFnNotCalledWhenNotSet) {
+  OrchestratorFixture f;
+  // No cleanup fn set — should not crash.
+  f.machine.brew_start();
+  f.machine.loop();
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+}
+
+TEST(CleanupCallback, SteamCleanupFnCalledAtCleanup) {
+  OrchestratorFixture f;
+  int called = 0;
+  f.machine.set_steam_cleanup_fn([&called]() { called++; });
+
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  f.machine.loop();  // COOLING → CLEANUP (fn not yet called; state set to CLEANUP)
+  EXPECT_EQ(called, 0);
+
+  f.machine.loop();  // CLEANUP → IDLE (cleanup fn fires here)
+  EXPECT_EQ(called, 1);
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
 }

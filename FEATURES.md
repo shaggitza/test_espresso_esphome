@@ -50,7 +50,7 @@ planned in this project.
 | Auto-terminate at `flow_max` | ✅ | Shot stops when flow meter reports ≥ `flow_max` ml |
 | Shot stats (`last_shot_time_s`, `last_shot_volume_ml`) | ✅ | Stored on the orchestrator |
 | Shot stats as HA sensor entities | ✅ | `shot_stats.last_shot_time`, `last_shot_volume`, `last_shot_yield` in brew schema; published at BREWING→DONE (P1-5) |
-| Cleanup script after brew | ⬜ | Schema accepts block; not executed (Phase 9) |
+| Cleanup script callback after brew | ✅ | `set_brew_cleanup_fn()` called in DONE state; wired from YAML via `cleanup_script:` (P2-1) |
 | `brew_start` / `brew_stop` actions | ✅ | Available from YAML automations and HA services |
 
 ### Steam Mode
@@ -63,13 +63,14 @@ planned in this project.
 | Purge-before-steam (`purge_volume`) | ✅ | Pumps configured volume through purge valve to clear residual water; `purge_volume: 0` (default) skips phase (backward-compatible) |
 | Steam valve + pump activation | ✅ | Steam valve opens and pump starts in STEAMING state (after purge, if configured) |
 | Pump duty-cycle flow-rate control | ✅ | Bang-bang pump control to maintain `steam_flow_max_ml_per_s_` |
+| Steam pump minimum on-window (`pump_min_on_time`) | ✅ | Prevents rapid pump cycling; default 2 s; configurable via `pump_min_on_time:` in steam schema (P2-7) |
 | Steam safety timeout (`timeout`) | ✅ | Optional auto-stop after configured duration; 0 = disabled (default) |
 | Purge on steam stop | ✅ | Purge valve opens immediately when steam stops to flush steam path during cool-down |
 | Auto cool-down after steaming | ✅ | `set_target_temperature(steam_cool_down_to_)` on `IHeater`; temperature-gated COOLING→CLEANUP transition |
 | Temperature-gated COOLING→CLEANUP transition | ✅ | Waits for `get_current_temperature() <= steam_cool_down_to_`; falls back to immediate if no IHeater wired |
 | `IHeater` interface | ✅ | `get_current_temperature()` + `set_target_temperature()` in `interfaces.h`; `MockHeater` implements it |
 | `heater_controller:` YAML key | ✅ | Optional in steam schema; wires an `IHeater*` to the orchestrator |
-| Cleanup script after steam | ⬜ | Schema accepts block; not executed (Phase 9) |
+| Cleanup script callback after steam | ✅ | `set_steam_cleanup_fn()` called in CLEANUP state; wired from YAML via `cleanup_script:` (P2-1) |
 | `steam_start` / `steam_stop` actions | ✅ | Available from YAML automations and HA services |
 
 ### Safety Interlocks
@@ -82,6 +83,12 @@ planned in this project.
 | Hard over-temperature cutoff | 🚧 | Documented in example YAML via `on_value_range`; relies on native ESPHome climate action |
 | Watchdog (heater-off on reset) | ✅ | Native ESPHome watchdog; SSR GPIO defaults LOW on reset |
 | `safe_stop_all()` on brew/steam stop | ✅ | Closes all valves, stops all pumps immediately |
+
+### Maintenance
+
+| Feature | Status | Notes |
+|---|---|---|
+| `espresso_machine.flush` action | ✅ | Pumps N ml through brew purge valve; only accepted when idle (P2-2) |
 
 ---
 
@@ -108,6 +115,5 @@ configuration and documented in the example YAML.
 |---|---|---|
 | Brew profiles (`espresso_machine_profile:`) | Phase 12 | Multi-phase pressure/flow curves; runtime HA select |
 | Gaggiuino/GaggiaMate profile import | Phase 12 | Python CLI converter planned |
-| Cleanup scripts execution | Phase 9 | `cleanup_script:` blocks wired to ESPHome action lists |
 | Weight-based shot exit (scale) | Future | Requires HX711 / NAU7802 scale platform |
 | Pressure transducer | Future | Requires ADC + transducer hardware |
