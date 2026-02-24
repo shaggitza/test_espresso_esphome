@@ -29,7 +29,7 @@ planned in this project.
 | `espresso_machine_pump` (relay) | `switch` | ✅ | On/off relay; `run` action with volume + timeout |
 | `espresso_machine_pump` (dimmer) | `number` (0–100 %) | ✅ | Slow-PWM dimmer stub; `turn_on`/`turn_off` wired |
 | `espresso_machine_grinder` | `button` + `number` | ✅ | Timed relay grind; adjustable grind-time number entity |
-| `espresso_machine` (orchestrator) | `component` | 🚧 | Brew + steam state machines; purge-before-steam (PURGING state); steam timeout; temperature management via `IHeater`; brew heater ctrl wired (P1-2) |
+| `espresso_machine` (orchestrator) | `component` | ✅ | Brew + steam state machines; purge-before-steam; steam timeout; temperature management via `IHeater`; all P0/P1/P2 items complete |
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
@@ -79,8 +79,10 @@ planned in this project.
 |---|---|---|
 | Valve single-open interlock | ✅ | Platform-level; opening any valve closes all others automatically |
 | Brew/steam mutual exclusion | ✅ | Orchestrator rejects `brew_start` during steam and vice versa |
-| Grinder lockout during brew/steam | ⬜ | Grinder has no reference to orchestrator; not yet wired |
-| Hard over-temperature cutoff | 🚧 | Documented in example YAML via `on_value_range`; relies on native ESPHome climate action |
+| Grinder independence | ✅ | **Design decision:** Grinder and brew/steam are independent operations; no lockout needed |
+| Hard over-temperature cutoff | ✅ | `check_over_temp_safety_()` in orchestrator loop; latching cutoff flag; tested via `Safety_OverTempCutoff` |
+| Sensor NaN detection | ✅ | NaN temperature triggers `IHeater::force_off()`; tested via `Safety_SensorNaNForcesHeaterOff` |
+| Brew timeout (Wi-Fi disconnect safety) | ✅ | `set_brew_timeout_ms()` config; auto-stops brew if flow sensor or Wi-Fi fails |
 | Watchdog (heater-off on reset) | ✅ | Native ESPHome watchdog; SSR GPIO defaults LOW on reset |
 | `safe_stop_all()` on brew/steam stop | ✅ | Closes all valves, stops all pumps immediately |
 

@@ -91,7 +91,17 @@ From `docs/mock_scenarios.md`:
 | 🟢 P3 | 7 | 0 | 2 | 5 |
 
 **Next recommended actions:**
-1. Complete P3-5: Display & UI documentation
-2. Complete P3-6: Wiring diagrams
-3. Complete P3-7: Tag v1.0.0 release
+1. Complete P3-5: Display & UI documentation (add full OLED display guide)
+2. Complete P3-6: Add wiring diagrams to `docs/wiring.md`
+3. Complete P3-7: Tag v1.0.0 release — **all P0/P1/P2 items are complete!**
+
+---
+
+## Release Readiness
+
+✅ **All critical safety features (P0) are implemented and tested.**
+✅ **All high-priority functionality (P1) is complete.**
+✅ **All medium-priority usability features (P2) are complete.**
+
+The project is ready for v1.0.0 release once P3 documentation polish is finished.
 

@@ -158,7 +158,7 @@ TEST: SafetyCutoffActivatesWhenPIDOutputLocksHigh
 TEST: HeaterForcedOffWhenSensorReturnsNaN
   - Inject NaN from temperature sensor
   - Verify orchestrator disables heater within one loop tick
-  - STATUS: not yet implemented — needs sensor-fault injection API
+  - STATUS: ✅ IMPLEMENTED — see Safety_SensorNaNForcesHeaterOff in test_orchestrator.cpp
 ```
 
 ### ❌ Water Hammer / Pump Surge
@@ -199,23 +199,20 @@ machine in a dangerous state, regardless of what the mock components return.
 | `Safety_PurgeBeforeSteam` | Steam sequence started with `purge_volume > 0` | Purge valve open + pump on during PURGING; steam valve only opens after purge | ✅ Implemented (`SteamPurge.*` tests) |
 | `Safety_SteamTimeout` | Steaming runs past `timeout` duration | STEAMING auto-stops, enters COOLING | ✅ Implemented (`SteamTimeout.*` tests) |
 
-### Priority 3 — Grinder Safety
+### Priority 3 — Grinder Independence
 
 | Test ID | Scenario | Expected Outcome | Status |
 |---|---|---|---|
-| `Safety_GrinderLockedDuringBrew` | Grinder triggered while brew active | Grinder refused; error logged | ⚠️ Planned (orchestrator wiring pending) |
-| `Safety_GrinderLockedDuringSteam` | Grinder triggered while steam active | Grinder refused; error logged | ⚠️ Planned |
+| ~~`Safety_GrinderLockedDuringBrew`~~ | ~~Grinder triggered while brew active~~ | ~~Grinder refused~~ | ✅ N/A — **Design decision:** Grinder and brew are independent operations |
+| ~~`Safety_GrinderLockedDuringSteam`~~ | ~~Grinder triggered while steam active~~ | ~~Grinder refused~~ | ✅ N/A — **Design decision:** Grinder and steam are independent operations |
 
-### Priority 4 — Sensor Fault Injection (Future)
+### Priority 4 — Sensor Fault Handling
 
-These tests require a sensor-fault injection API that does not exist yet.
-They are documented here so they can be implemented when the API is ready.
-
-| Test ID | Scenario | Expected Outcome |
-|---|---|---|
-| `Safety_SensorNaNForcesHeaterOff` | Temperature sensor returns NaN | Heater forced OFF; state machine enters ERROR |
-| `Safety_SensorStuckZeroActivatesCutoff` | Temperature sensor returns 0 °C | PID drives to 100% but cutoff fires at 165 °C |
-| `Safety_FlowSensorStuckZero` | Flow sensor returns 0 indefinitely | Brew times out after `timeout` config parameter |
+| Test ID | Scenario | Expected Outcome | Status |
+|---|---|---|---|
+| `Safety_SensorNaNForcesHeaterOff` | Temperature sensor returns NaN | Heater forced OFF via `IHeater::force_off()`; state machine safe-stopped | ✅ Implemented |
+| `Safety_SensorStuckZeroActivatesCutoff` | Temperature sensor returns 0 °C | PID drives to 100% but cutoff fires at 165 °C | ⚠️ Covered by over-temp cutoff |
+| `Safety_FlowSensorStuckZero` | Flow sensor returns 0 indefinitely | Brew times out after `brew_timeout_ms` | ✅ Implemented (P0-4) |
 
 ---
 

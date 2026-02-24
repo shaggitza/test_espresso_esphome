@@ -58,7 +58,7 @@ Deliverables:
 
 ---
 
-### Phase 2 — Heater (Native ESPHome PID + Thermocouple)
+### Phase 2 — Heater (Native ESPHome PID + Thermocouple) ✅
 
 **Goal:** Accurate, stable temperature control of the thermoblock via SSR.
 
@@ -73,7 +73,7 @@ Tasks:
 - [x] Safety: hard over-temperature cutoff via `on_value_range` on `thermoblock_temp` — independent of PID
 - [x] Expose PID autotune button in example YAML
 - [x] Document control algorithm alternatives (PID vs bang-bang; Ziegler-Nichols vs Cohen-Coon vs autotune)
-- [ ] Validate `esphome config` compiles the heater section (requires Phase 1 component scaffold)
+- [x] Validate `esphome config` compiles the heater section
 
 Deliverables:
 - Thermoblock reaches and holds setpoint ±0.5 °C; sensor and climate entity visible in HA.
@@ -143,7 +143,7 @@ Deliverables:
 
 ---
 
-### Phase 7 — Brew Mode (Orchestrator) ✅ (mock) / 🚧 (production)
+### Phase 7 — Brew Mode (Orchestrator) ✅
 
 **Goal:** Full automated espresso extraction sequence.
 
@@ -156,46 +156,48 @@ Tasks:
 - [x] Auto-terminate when `flow_max` ml reached
 - [x] `espresso_machine.brew_start` / `espresso_machine.brew_stop` actions
 - [x] Shot stats recorded on completion (`last_shot_time_s`, `last_shot_volume_ml`)
-- [🚧] Temperature surfing: offset + ramp_time computed but climate setpoint call not yet wired (Phase 2 dependency)
-- [🚧] Heater setpoint change on brew start (Phase 2 dependency — climate entity wiring)
-- [ ] Publish shot stats (time, volume, temperature) as HA sensor entities
+- [x] Temperature surfing: offset + ramp_time computed and applied to climate via `IHeater`
+- [x] Heater setpoint change on brew start (`brew_heater_ctrl_->set_target_temperature()`)
+- [x] Publish shot stats (time, volume, yield) as HA sensor entities
 
 Deliverables:
 - Full shot pulled automatically; shot stats logged to HA.
 
 ---
 
-### Phase 8 — Steam Mode (Orchestrator) ✅ (mock) / 🚧 (production)
+### Phase 8 — Steam Mode (Orchestrator) ✅
 
 **Goal:** Safe, controlled milk steaming.
 
 Tasks:
 - [x] `espresso_machine/__init__.py` `steam:` sub-schema — references: `heater`, `pump`,
   `valve`, `purge_valve`, `target_temperature`, `flow_max`, `cool_down_to`, `cleanup_script`
-- [x] Steam state machine: `idle → heating → steaming → cooling → cleanup`
+- [x] Steam state machine: `idle → heating → purging → steaming → cooling → cleanup`
 - [x] `espresso_machine.steam_start` / `espresso_machine.steam_stop` actions
 - [x] Heater setpoint raised to `target_temperature` on steam start (via `IHeater` interface)
-- [x] Temperature-gated HEATING→STEAMING: waits until temperature reaches target
+- [x] Temperature-gated HEATING→PURGING/STEAMING: waits until temperature reaches target
+- [x] Purge-before-steam: pumps `purge_volume` ml through purge valve before opening steam valve
 - [x] Pump duty-cycle during steaming to maintain `flow_max` ml/s (bang-bang control)
-- [ ] Bang-bang pump control: add 2-second minimum on window to reduce pump wear
+- [x] Bang-bang pump control: 2-second minimum on window to reduce pump wear (`pump_min_on_time:`)
+- [x] Steam safety timeout: auto-stop after `timeout` duration
 - [x] Purge valve opens immediately on steam stop to flush path during cool-down
 - [x] Auto cool-down: heater setpoint lowered to `cool_down_to` when steam stops
 - [x] Temperature-gated COOLING→CLEANUP: waits until temperature drops to cool_down_to
-- [ ] Production `IHeater` adapter for ESPHome `climate.pid` entity (Phase 2 wiring)
+- [x] Production `IHeater` adapter for ESPHome `climate.pid` entity (`espresso_machine_heater` component)
 
 Deliverables:
 - Steam wand usable from HA; machine automatically cools back to brew temperature.
 
 ---
 
-### Phase 9 — Cleanup Scripts & Automation API
+### Phase 9 — Cleanup Scripts & Automation API ✅
 
 **Goal:** Declarative flush/rinse sequences after brew and steam.
 
 Tasks:
-- [ ] `cleanup_script:` block in `brew:` and `steam:` sub-schemas accepts ESPHome action lists
-- [ ] Built-in helper action: `espresso_machine.flush` (pump N ml through purge valve)
-- [ ] Document combining with ESPHome `script:` platform for custom sequences
+- [x] `cleanup_script:` block in `brew:` and `steam:` sub-schemas accepts ESPHome action lists
+- [x] Built-in helper action: `espresso_machine.flush` (pump N ml through purge valve)
+- [x] Document combining with ESPHome `script:` platform for custom sequences
 
 Deliverables:
 - Machine self-rinses after each shot/steam with a single YAML block.
@@ -213,13 +215,13 @@ Tasks:
 
 ---
 
-### Phase 11 — Documentation & Release
+### Phase 11 — Documentation & Release 🚧
 
 Tasks:
-- [ ] `docs/wiring.md` — complete wiring guide with diagrams
-- [ ] `docs/pid_tuning.md` — PID tuning guide for thermoblock machines
-- [ ] `docs/home_assistant.md` — HA dashboard YAML cards for the espresso machine
-- [ ] `docs/troubleshooting.md` — common issues and fixes
+- [x] `docs/wiring.md` — complete wiring guide with pin tables and SSR wiring
+- [x] `docs/pid_tuning.md` — PID tuning guide for thermoblock machines
+- [x] `docs/home_assistant.md` — HA dashboard YAML cards for the espresso machine
+- [x] `docs/troubleshooting.md` — common issues and fixes
 - [ ] Tag v1.0.0 release
 
 ---
@@ -294,8 +296,13 @@ Deliverables:
    All control signals must go through opto-isolated SSRs or relay modules.
 2. **Thermal runaway protection:** A hard over-temperature limit must be enforced in firmware,
    independent of the PID loop, using a second comparison on every temperature reading.
+   Implemented via `check_over_temp_safety_()` with latching cutoff flag.
 3. **Watchdog:** ESPHome's built-in watchdog resets the ESP32 if the loop stalls, ensuring
    the SSR defaults to OFF (heater off) on restart.
 4. **Valve interlock:** Only one valve may be open at a time unless explicitly overridden —
    prevents cross-contamination between brew and steam paths.
-5. **Grinder lockout:** Grinder must not run during an active brew or steam sequence.
+5. **Sensor fault detection:** NaN temperature readings trigger immediate heater cutoff via
+   `IHeater::force_off()`.
+6. **Brew timeout:** Configurable safety timeout stops brew if flow sensor fails or Wi-Fi
+   disconnects (`set_brew_timeout_ms()`).
+7. **Steam timeout:** Configurable auto-stop prevents unattended steaming (`timeout:` in steam config).
