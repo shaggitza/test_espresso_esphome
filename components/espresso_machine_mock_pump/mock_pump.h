@@ -190,7 +190,9 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   float puck_extraction_tau_{45.0f};
 
   // Simulation state
-  bool running_{false};\n  bool open_valve_mode_{false};       // If true, bypass puck model (valve open)\n  float run_time_{0.0f};              // Time since pump started [s]
+  bool running_{false};
+  bool open_valve_mode_{false};       // If true, bypass puck model (valve open)
+  float run_time_{0.0f};              // Time since pump started [s]
   float current_flow_rate_{0.0f};     // Instantaneous flow rate [mL/s]
   float total_volume_{0.0f};          // Accumulated pump volume [mL]
   float nozzle_total_volume_{0.0f};   // Accumulated nozzle output volume [mL]
