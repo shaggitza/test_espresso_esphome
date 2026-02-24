@@ -1,11 +1,11 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import number, sensor, switch
+from esphome.components import number, sensor, switch, text_sensor
 from esphome.const import CONF_ID, UNIT_SECOND, STATE_CLASS_MEASUREMENT
 
 CODEOWNERS = ["@shaggitza"]
-AUTO_LOAD = ["number", "sensor", "switch"]
+AUTO_LOAD = ["number", "sensor", "switch", "text_sensor"]
 
 espresso_machine_ns = cg.esphome_ns.namespace("espresso_machine")
 EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
@@ -48,6 +48,9 @@ CONF_SHOT_STATS = "shot_stats"
 CONF_SHOT_TIME_SENSOR = "last_shot_time"
 CONF_SHOT_VOLUME_SENSOR = "last_shot_volume"
 CONF_SHOT_YIELD_SENSOR = "last_shot_yield"
+
+# Status text sensor key
+CONF_STATUS_SENSOR = "status_sensor"
 
 # Validator for ml volumes (e.g. "40ml")
 _validate_volume_ml = cv.float_with_unit("volume", "ml")
@@ -148,6 +151,10 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(EspressoMachine),
         cv.Optional(CONF_BREW): BREW_SCHEMA,
         cv.Optional(CONF_STEAM): STEAM_SCHEMA,
+        # Optional text sensor that reports a detailed status string to HA on
+        # every state transition (e.g. "Brew: Heating", "Brewing", "Steam: Cooling").
+        # More informative than the template machine-mode sensor.
+        cv.Optional(CONF_STATUS_SENSOR): text_sensor.text_sensor_schema(),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -155,6 +162,10 @@ CONFIG_SCHEMA = cv.Schema(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+
+    if CONF_STATUS_SENSOR in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_STATUS_SENSOR])
+        cg.add(var.set_status_sensor(sens))
 
     if CONF_BREW in config:
         brew = config[CONF_BREW]

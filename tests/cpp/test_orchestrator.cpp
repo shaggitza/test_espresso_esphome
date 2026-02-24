@@ -2,6 +2,7 @@
 #include <limits>
 #include "esphome/core/hal.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "espresso_machine/espresso_machine.h"
 #include "espresso_machine/interfaces.h"
 
@@ -1874,4 +1875,225 @@ TEST(CleanupCallback, SteamCleanupFnCalledAtCleanup) {
   f.machine.loop();  // CLEANUP → IDLE (cleanup fn fires here)
   EXPECT_EQ(called, 1);
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+// ---------------------------------------------------------------------------
+// status_name() — verbose status strings including live sensor values
+// ---------------------------------------------------------------------------
+
+TEST(StatusName, IdleReturnsIdle) {
+  OrchestratorFixture f;
+  EXPECT_EQ(f.machine.status_name(), "Idle");
+}
+
+TEST(StatusName, BrewHeatingStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+  // No heater_ctrl wired → shows target only
+  EXPECT_EQ(f.machine.status_name(), "Heating to 90.0°C");
+}
+
+TEST(StatusName, BrewHeatingStatusWithHeaterCtrl) {
+  OrchestratorFixture f;
+  struct WarmHeater : public IHeater {
+    float get_current_temperature() const override { return 85.3f; }
+    void set_target_temperature(float) override {}
+  } heater;
+  f.machine.set_brew_heater_ctrl(&heater);
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+  // With heater_ctrl → shows target and current
+  EXPECT_EQ(f.machine.status_name(), "Heating to 90.0°C (now 85.3°C)");
+}
+
+TEST(StatusName, BrewingStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (no heater_ctrl wired)
+  f.brew_pump.volume = 15.2f;
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  EXPECT_EQ(f.machine.status_name(), "Brewing: 15.2 ml / 40.0 ml");
+}
+
+TEST(StatusName, BrewDoneStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+  // last_shot_time_s_ ≈ 0 in test (millis() returns 0)
+  EXPECT_EQ(f.machine.status_name(), "Shot done: 40.0 ml in 0.0 s");
+}
+
+TEST(StatusName, BrewCleanupStatus) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();  // BREWING → DONE
+  f.machine.loop();  // DONE → CLEANUP
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+  EXPECT_EQ(f.machine.status_name(), "Brew cleanup");
+}
+
+TEST(StatusName, SteamHeatingStatus) {
+  OrchestratorFixture f;
+  // Wire a heater controller that is not yet at target temperature
+  struct ColdHeater : public IHeater {
+    float get_current_temperature() const override { return 80.0f; }
+    void set_target_temperature(float) override {}
+  } cold_heater;
+  f.machine.set_steam_heater_ctrl(&cold_heater);
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  EXPECT_EQ(f.machine.status_name(), "Heating to steam 135.0°C (now 80.0°C)");
+}
+
+TEST(StatusName, SteamHeatingStatusNoCtrl) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  // loop() would transition immediately to STEAMING without heater_ctrl
+  // Check status while still in HEATING (before loop)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+  EXPECT_EQ(f.machine.status_name(), "Heating to steam 135.0°C");
+}
+
+TEST(StatusName, SteamingStatus) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (no heater_ctrl wired)
+  f.steam_pump.rate = 1.8f;
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+  EXPECT_EQ(f.machine.status_name(), "Steaming: 1.8 ml/s");
+}
+
+TEST(StatusName, SteamCoolingStatus) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  // No heater_ctrl → shows target only
+  EXPECT_EQ(f.machine.status_name(), "Cooling to 90.0°C");
+}
+
+TEST(StatusName, SteamCoolingStatusWithHeaterCtrl) {
+  OrchestratorFixture f;
+  struct MutableHeater : public IHeater {
+    float temp = 140.0f;  // above steam target → HEATING transitions immediately
+    float get_current_temperature() const override { return temp; }
+    void set_target_temperature(float) override {}
+  } heater;
+  f.machine.set_steam_heater_ctrl(&heater);
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (140.0 >= 135.0)
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::STEAMING);
+  heater.temp = 125.3f;  // simulate temp dropping after steam stops
+  f.machine.steam_stop();  // STEAMING → COOLING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  EXPECT_EQ(f.machine.status_name(), "Cooling to 90.0°C (now 125.3°C)");
+}
+
+TEST(StatusName, FlushingStatus) {
+  OrchestratorFixture f;
+  f.machine.flush(30.0f);
+  f.brew_pump.volume = 12.3f;
+  EXPECT_EQ(f.machine.status_name(), "Flushing: 12.3 ml / 30.0 ml");
+}
+
+// ---------------------------------------------------------------------------
+// status_sensor — publishes updated status on state transitions and loop ticks
+// ---------------------------------------------------------------------------
+
+TEST(StatusSensor, PublishesOnBrewStart) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.brew_start();
+  EXPECT_EQ(sens.state, "Heating to 90.0°C");
+}
+
+TEST(StatusSensor, PublishesOnBrewingTransition) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING; loop() also calls publish_status_()
+  EXPECT_EQ(sens.state, "Brewing: 0.0 ml / 40.0 ml");
+}
+
+TEST(StatusSensor, UpdatesLiveAsFlowIncreases) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.brew_start();
+  f.machine.loop();  // → BREWING
+
+  f.brew_pump.volume = 10.0f;
+  f.machine.loop();  // status should update
+  EXPECT_EQ(sens.state, "Brewing: 10.0 ml / 40.0 ml");
+
+  f.brew_pump.volume = 25.0f;
+  f.machine.loop();
+  EXPECT_EQ(sens.state, "Brewing: 25.0 ml / 40.0 ml");
+}
+
+TEST(StatusSensor, PublishesOnBrewStop) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.brew_start();
+  f.machine.brew_stop();
+  EXPECT_EQ(sens.state, "Idle");
+}
+
+TEST(StatusSensor, PublishesOnSteamStart) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.steam_start();
+  EXPECT_EQ(sens.state, "Heating to steam 135.0°C");
+}
+
+TEST(StatusSensor, PublishesOnFlush) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.flush(20.0f);
+  EXPECT_EQ(sens.state, "Flushing: 0.0 ml / 20.0 ml");
+}
+
+TEST(StatusSensor, PublishesIdleAfterFlushComplete) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  f.machine.set_status_sensor(&sens);
+  f.machine.flush(20.0f);
+  f.brew_pump.volume = 20.0f;
+  f.machine.loop();  // Flush done → IDLE; loop() publishes final state
+  EXPECT_EQ(sens.state, "Idle");
+}
+
+TEST(StatusSensor, DeduplicatesIdenticalUpdates) {
+  OrchestratorFixture f;
+  esphome::text_sensor::TextSensor sens;
+  int publish_count = 0;
+  // Wrap the TextSensor to count publishes
+  struct CountingSensor : public esphome::text_sensor::TextSensor {
+    int *count;
+    void publish_state(const std::string &v) {
+      (*count)++;
+      esphome::text_sensor::TextSensor::publish_state(v);
+    }
+  } counting_sens;
+  counting_sens.count = &publish_count;
+
+  f.machine.set_status_sensor(&counting_sens);
+  f.machine.brew_start();           // 1 publish: "Heating to 90.0°C"
+  int after_start = publish_count;
+  // Multiple loop ticks while still HEATING → value doesn't change → no re-publish
+  f.machine.loop();  // HEATING → BREWING and publish_status_ in loop → 1 more publish
+  f.machine.loop();  // pump still 0 → "Brewing: 0.0 ml / 40.0 ml" already published
+  EXPECT_EQ(publish_count, after_start + 1);  // only 1 extra for BREWING state entry
 }

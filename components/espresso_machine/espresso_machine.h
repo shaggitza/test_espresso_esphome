@@ -2,12 +2,14 @@
 
 #include <cmath>
 #include <functional>
+#include <string>
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/core/automation.h"
 #include "interfaces.h"
 
@@ -184,6 +186,14 @@ class EspressoMachine : public Component {
   // ----- Status accessors ---------------------------------------------------
   EspressoMode get_mode() const { return mode_; }
   const char *mode_name() const;
+  // Returns a verbose, human-readable status string combining mode, sub-state,
+  // and current sensor values (temperature, flow).  Published to the optional
+  // status_sensor text entity immediately on every state change and on every
+  // loop() tick so the user sees live progress without polling from HA.
+  // Examples: "Heating to 90.0°C — currently 85.3°C",
+  //           "Brewing: 15.2 ml / 40.0 ml",
+  //           "Cooling to 90.0°C — currently 125.3°C"
+  std::string status_name() const;
   BrewState get_brew_state() const { return brew_state_; }
   SteamState get_steam_state() const { return steam_state_; }
 
@@ -198,6 +208,12 @@ class EspressoMachine : public Component {
   void set_last_shot_time_sensor(sensor::Sensor *s) { last_shot_time_sensor_ = s; }
   void set_last_shot_volume_sensor(sensor::Sensor *s) { last_shot_volume_sensor_ = s; }
   void set_last_shot_yield_sensor(sensor::Sensor *s) { last_shot_yield_sensor_ = s; }
+
+  // ----- Status text sensor — updated on every state transition (optional) --
+  // When wired the orchestrator publishes its current detailed status string
+  // (e.g. "Brew: Heating", "Brewing", "Steam: Cooling") to Home Assistant
+  // immediately on every state change, giving real-time feedback to the user.
+  void set_status_sensor(text_sensor::TextSensor *s) { status_sensor_ = s; }
 
   // ----- Cleanup action callbacks (P2-1) ------------------------------------
   // Called in the brew/steam DONE→CLEANUP transition.  Set from Python codegen
@@ -276,6 +292,12 @@ class EspressoMachine : public Component {
   sensor::Sensor *last_shot_volume_sensor_{nullptr};
   sensor::Sensor *last_shot_yield_sensor_{nullptr};
 
+  // -- Status text sensor ----------------------------------------------------
+  text_sensor::TextSensor *status_sensor_{nullptr};
+  // Last string sent to the status sensor; used to suppress duplicate publishes
+  // when status_name() is called on every loop() tick.
+  std::string last_published_status_;
+
   // -- Safety: over-temperature cutoff (P0-1 / P0-3) ------------------------
   IHeater *over_temp_sensor_{nullptr};       // sensor to monitor for cutoff
   float over_temp_limit_{165.0f};            // °C — hard cutoff threshold
@@ -298,6 +320,9 @@ class EspressoMachine : public Component {
   void advance_flush_();
   void enter_brewing_();
   void safe_stop_all_();
+  // Publishes the current detailed status string to the status text sensor (if wired).
+  // Call immediately after every brew/steam/flush state transition.
+  void publish_status_();
   // Returns true if an over-temperature or sensor-fault cutoff was triggered.
   // Called at the top of loop() before advancing any state machine.
   bool check_over_temp_safety_();
