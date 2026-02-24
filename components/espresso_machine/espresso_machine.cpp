@@ -46,6 +46,9 @@ void EspressoMachine::loop() {
     case EspressoMode::STEAMING:
       advance_steam_();
       break;
+    case EspressoMode::FLUSHING:
+      advance_flush_();
+      break;
     case EspressoMode::IDLE:
     default:
       break;
@@ -93,6 +96,13 @@ void EspressoMachine::machine_off() {
         ESP_LOGI(TAG, "Machine OFF: steam purge already in progress — completing before shutdown");
       }
       // Do NOT force mode_ = IDLE here; the state machine loop must complete the purge.
+      break;
+
+    case EspressoMode::FLUSHING:
+      // Stop flush immediately — no pressure concern.
+      ESP_LOGI(TAG, "Machine OFF: stopping active flush");
+      safe_stop_all_();
+      mode_ = EspressoMode::IDLE;
       break;
 
     case EspressoMode::IDLE:
@@ -221,6 +231,34 @@ void EspressoMachine::steam_stop() {
     steam_heater_ctrl_->set_target_temperature(steam_cool_down_to_);
 }
 
+void EspressoMachine::flush(float volume_ml) {
+  if (!powered_on_) {
+    ESP_LOGW(TAG, "flush ignored: machine is off");
+    return;
+  }
+  if (over_temp_cutoff_triggered_) {
+    ESP_LOGW(TAG, "flush ignored: over-temperature safety cutoff is active — reboot required");
+    return;
+  }
+  if (mode_ != EspressoMode::IDLE) {
+    ESP_LOGW(TAG, "flush ignored: machine is %s", mode_name());
+    return;
+  }
+  if (volume_ml <= 0.0f) {
+    ESP_LOGW(TAG, "flush ignored: volume_ml must be > 0");
+    return;
+  }
+  ESP_LOGI(TAG, "Flush: pumping %.1fml through brew purge valve", volume_ml);
+  flush_volume_ml_ = volume_ml;
+  mode_ = EspressoMode::FLUSHING;
+  if (brew_pump_) {
+    brew_pump_->reset_flow();
+    brew_pump_->turn_on();
+  }
+  if (brew_purge_valve_)
+    brew_purge_valve_->open();
+}
+
 // ---------------------------------------------------------------------------
 // Brew state machine
 // ---------------------------------------------------------------------------
@@ -325,16 +363,16 @@ void EspressoMachine::advance_brew_() {
     }
 
     case BrewState::DONE:
-      // Phase 9: run cleanup_script here.
-      // Phase 7 placeholder: transition to CLEANUP immediately.
+      // Run the user-configured cleanup script (P2-1), then enter CLEANUP.
       ESP_LOGI(TAG, "Brew: DONE → CLEANUP");
+      if (brew_cleanup_fn_)
+        brew_cleanup_fn_();
       brew_state_ = BrewState::CLEANUP;
       state_entered_ms_ = millis();
       break;
 
     case BrewState::CLEANUP:
-      // Phase 9: cleanup_script runs here.
-      // Phase 7 placeholder: return to idle immediately.
+      // Phase 9 placeholder: return to idle immediately after cleanup.
       ESP_LOGI(TAG, "Brew: CLEANUP → IDLE");
       brew_state_ = BrewState::IDLE;
       mode_ = EspressoMode::IDLE;
@@ -416,17 +454,23 @@ void EspressoMachine::advance_steam_() {
         steam_stop();
         break;
       }
-      // Bang-bang flow rate control: toggle pump to maintain steam_flow_max_ml_per_s_.
+      // Bang-bang flow rate control with minimum on-time (P2-7): toggle pump to
+      // maintain steam_flow_max_ml_per_s_, but only turn OFF after the pump has
+      // been running for at least steam_pump_min_on_ms_ to reduce pump wear.
       // Falls back to continuous pump operation when no flow meter is wired
       // (get_flow_rate() returns 0 by default, keeping the pump on).
       if (steam_pump_) {
         float current_rate = steam_pump_->get_flow_rate();
         if (current_rate < steam_flow_max_ml_per_s_) {
-          if (!steam_pump_->is_running())
+          if (!steam_pump_->is_running()) {
             steam_pump_->turn_on();
+            steam_pump_on_ms_ = millis();
+          }
         } else {
-          if (steam_pump_->is_running())
+          if (steam_pump_->is_running() &&
+              (millis() - steam_pump_on_ms_) >= steam_pump_min_on_ms_) {
             steam_pump_->turn_off();
+          }
         }
       }
       break;
@@ -449,8 +493,10 @@ void EspressoMachine::advance_steam_() {
       break;
 
     case SteamState::CLEANUP:
-      // Close purge valve and return to idle.
+      // Run the user-configured cleanup script (P2-1), close purge valve and return to idle.
       ESP_LOGI(TAG, "Steam: CLEANUP → IDLE");
+      if (steam_cleanup_fn_)
+        steam_cleanup_fn_();
       if (steam_purge_valve_)
         steam_purge_valve_->close();
       steam_state_ = SteamState::IDLE;
@@ -459,6 +505,21 @@ void EspressoMachine::advance_steam_() {
 
     default:
       break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Flush state machine (P2-2)
+// ---------------------------------------------------------------------------
+void EspressoMachine::advance_flush_() {
+  float pumped = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
+  if (pumped >= flush_volume_ml_) {
+    ESP_LOGI(TAG, "Flush: DONE — pumped %.1fml through brew purge valve", pumped);
+    if (brew_pump_)
+      brew_pump_->turn_off();
+    if (brew_purge_valve_)
+      brew_purge_valve_->close();
+    mode_ = EspressoMode::IDLE;
   }
 }
 
@@ -545,6 +606,8 @@ const char *EspressoMachine::mode_name() const {
       return "brewing";
     case EspressoMode::STEAMING:
       return "steaming";
+    case EspressoMode::FLUSHING:
+      return "flushing";
     default:
       return "unknown";
   }

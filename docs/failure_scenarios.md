@@ -163,11 +163,45 @@ automatically.
 | HA/Wi-Fi disconnect during active brew | Brew continues until `flow_max`; no watchdog timeout | ✅ `set_brew_timeout_ms()` added; default 0 (disabled) | ✅ Done (P0-4) |
 | HA/Wi-Fi disconnect during steam cool-down | Purge continues autonomously (correct) | ✅ Handled by state machine | ✅ Done |
 | Thermocouple fault → PID drives 100% duty | Hard cutoff at 165 °C fires via `on_value_range` | ✅ `check_over_temp_safety_()` in C++ orchestrator; NaN detection added | ✅ Done (P0-1 / P0-3) |
-| Power ON with thermoblock already at steam temp | Brew actions allowed; caution expected from user | Future UX consideration | 🟡 P2 |
+| Power ON with thermoblock already at steam temp | Brew actions allowed; caution expected from user | Documented below (P2-6) | ✅ Documented |
 | Power OFF during pre-infusion hold | Pre-infusion is part of BREWING mode — stops immediately | ✅ Covered by "OFF during brew" | ✅ Done |
 | Grinder activated during brew/steam | ✅ Allowed by design — operations are independent | No action needed | ✅ N/A |
 
 ---
+
+### Power ON with Thermoblock Already at Steam Temperature (P2-6)
+
+**Scenario:** The user turns on the espresso machine shortly after a steaming session, while the
+thermoblock is still hot (e.g., 130–140 °C). The thermoblock has not yet cooled back to the
+brew target temperature of ~90 °C.
+
+**Why it matters:**
+If the user immediately presses "brew start", the machine will enter the HEATING state. Without
+a `heater_controller:` wired, the machine transitions immediately from HEATING to BREWING without
+verifying temperature. With a `heater_controller:` wired (recommended), the machine waits in
+HEATING until the temperature drops to `target_temperature` — which means it actually waits for
+the thermoblock to **cool down**, not heat up.
+
+**What the firmware does:**
+
+1. `brew_start()` is accepted (machine is IDLE and powered on — no interlock on temperature at start).
+2. If `heater_controller:` is wired, the HEATING state gates the HEATING→BREWING transition on
+   `get_current_temperature() < brew_target_temp_`. If the thermoblock is above brew temperature,
+   the state machine waits in HEATING until the block cools to the brew setpoint.
+3. If no `heater_controller:` is wired, the machine transitions to BREWING immediately. The resulting
+   shot will be extracted at higher temperature, which may over-extract or cause bitter flavour.
+   This is a **user experience concern, not a safety concern** — the machine operates correctly
+   and within hardware limits at any temperature below the over-temp cutoff (165 °C).
+
+**Recommended practice:** Always wire `heater_controller:` in the brew section of your YAML.
+This gives you proper temperature-gated transitions in both directions (too cold: waits to heat up;
+too hot: waits to cool down).
+
+**No firmware interlock added:** Adding a hard interlock that refuses brew when too hot would
+prevent legitimate use cases (e.g., pulling a second shot at a slightly elevated temperature
+when using temperature surfing). The user is responsible for timing their shots appropriately.
+
+
 
 ## C++ Test Coverage Reference
 

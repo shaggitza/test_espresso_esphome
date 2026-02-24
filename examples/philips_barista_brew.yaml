@@ -13,10 +13,12 @@
 #                    brew auto-termination at flow_max, PID climate (native ESPHome),
 #                    brew_start / brew_stop / steam_start / steam_stop actions,
 #                    steam temperature-gating (IHeater), purge-before-steam (purge_volume),
-#                    steam safety timeout, post-steam cool-down + purge sequence
+#                    steam safety timeout, post-steam cool-down + purge sequence,
+#                    steam pump 2s minimum on-window (P2-7), cleanup_script callbacks (P2-1),
+#                    espresso_machine.flush action (P2-2)
 #   🚧 Partial:      temperature surfing (config accepted; ramp applies via IHeater),
 #                    hard over-temperature cutoff (C++ + on_value_range)
-#   ⬜ Not yet:      cleanup_script execution, grinder lockout, brew profiles
+#   ⬜ Not yet:      grinder lockout, brew profiles
 #
 # DESIGN PHILOSOPHY:
 #   Every subsystem (heater, valves, pump, grinder, flow meter) is a first-class
@@ -532,8 +534,10 @@ espresso_machine:
         name: "Last Shot Yield"         # mL net yield (volume minus puck absorption)
 
     # Cleanup: automatically flush brew path after shot completes.
-    # NOTE: cleanup_script execution is planned for Phase 9. This block is
-    # accepted by the schema but NOT executed in the current firmware.
+    # The cleanup_script callback fires when the brew sequence enters CLEANUP.
+    # Reference a script: block by id to run custom rinse or flush sequences.
+    # Example: cleanup_script: my_brew_rinse_script
+    # For a simple group-head rinse use the espresso_machine.flush action instead.
     cleanup_script:
       - delay: 2s
       - espresso_machine_pump.run:
@@ -582,9 +586,16 @@ espresso_machine:
     # Protects against forgotten steaming sessions.  0 or omitted = disabled.
     timeout: 5min
 
+    # Minimum time the pump must stay ON before it can be toggled off in the
+    # bang-bang steam flow-rate controller.  Reducing this may cause rapid
+    # on/off cycling that wears out the pump solenoid.  Default: 2s. (P2-7)
+    pump_min_on_time: 2s
+
     # Cleanup: purge steam path after cool-down.
-    # NOTE: cleanup_script execution is planned for Phase 9. This block is
-    # accepted by the schema but NOT executed in the current firmware.
+    # The cleanup_script callback fires when the steam sequence enters CLEANUP.
+    # Reference a script: block by id to run custom rinse or flush sequences.
+    # Example: cleanup_script: my_steam_rinse_script
+    # For inline group-head flushing use the espresso_machine.flush action instead.
     cleanup_script:
       - espresso_machine_valve.open: purge_valve
       - espresso_machine_pump.run:

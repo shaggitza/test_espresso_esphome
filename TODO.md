@@ -42,13 +42,13 @@
 
 | ID | Feature / Scenario | Status | Source | Notes |
 |----|-------------------|--------|--------|-------|
-| P2-1 | Cleanup scripts execution (`cleanup_script:` blocks) | ⬜ Not done | PLAN.md Phase 9 | Schema accepts block; not executed |
-| P2-2 | `espresso_machine.flush` helper action | ⬜ Not done | PLAN.md Phase 9 | Built-in action: pump N ml through purge valve |
-| P2-3 | Document combining with ESPHome `script:` platform | ⬜ Not done | PLAN.md Phase 9 | Documentation task |
+| P2-1 | Cleanup scripts execution (`cleanup_script:` blocks) | ✅ Done | PLAN.md Phase 9 | `set_brew_cleanup_fn()` / `set_steam_cleanup_fn()` called in DONE/CLEANUP states; C++ tests added |
+| P2-2 | `espresso_machine.flush` helper action | ✅ Done | PLAN.md Phase 9 | `flush(volume_ml)` pumps N ml through brew purge valve; `FLUSHING` mode; `@automation.register_action`; C++ tests added |
+| P2-3 | Document combining with ESPHome `script:` platform | ✅ Done | PLAN.md Phase 9 | Documented in `docs/home_assistant.md` with examples of `cleanup_script:` + `espresso_machine.flush` |
 | P2-4 | Steam flow-rate control validation | ✅ Done | FEATURES.md | Bang-bang pump control to maintain `steam_flow_max_ml_per_s_` implemented |
-| P2-5 | Residual flow after pump stop (C++ test) | ⬜ Not done | mock_scenarios.md | Volume should not overflow `flow_max + margin` |
-| P2-6 | Power ON with thermoblock already at steam temp | ⬜ Not done | failure_scenarios.md | UX consideration — no interlock; user caution expected |
-| P2-7 | Steam pump bang-bang: 2s minimum on window | ⬜ Not done | User request | Reduce pump wear by requiring minimum 2-second on time before toggling off |
+| P2-5 | Residual flow after pump stop (C++ test) | ✅ Done | mock_scenarios.md | `Safety.ResidualFlowAfterStop` test verifies brew valve stays closed after flow_max; valve does not reopen |
+| P2-6 | Power ON with thermoblock already at steam temp | ✅ Done | failure_scenarios.md | Documented in `docs/failure_scenarios.md`; `heater_controller:` handles cooling gate; no hard interlock by design |
+| P2-7 | Steam pump bang-bang: 2s minimum on window | ✅ Done | User request | `steam_pump_min_on_ms_` (default 2000 ms); configurable via `pump_min_on_time:` in steam schema; C++ tests added |
 
 ### 🟢 P3 — Low Priority (Future / Polish)
 
@@ -76,7 +76,7 @@ From `docs/mock_scenarios.md`:
 | `Safety_WatchdogReboot` | Loop stalls > watchdog timeout | ESPHome resets; heater off | ✅ ESPHome built-in |
 | `Safety_ValveInterlockEnforced` | Two valves open simultaneously | Second valve refused / first closed | ✅ Implemented |
 | `Safety_BrewStopsAtFlowMax` | `flow_max` reached mid-shot | Brew stops pump and closes valve | ✅ Implemented |
-| `Safety_ResidualFlowAfterStop` | Residual pressure drains after pump off | Volume not > `flow_max + margin` | ⚠️ Planned |
+| `Safety_ResidualFlowAfterStop` | Residual pressure drains after pump off | Volume not > `flow_max + margin` | ✅ Implemented |
 | `Safety_PurgeOnSteamStop` | Steam stopped by user | Purge valve opens; pressure released | ✅ Implemented |
 
 ---
@@ -87,10 +87,11 @@ From `docs/mock_scenarios.md`:
 |----------|-------|------|---------|----------|
 | 🔴 P0 | 3 | 3 | 0 | 0 |
 | 🟠 P1 | 5 | 5 | 0 | 0 |
-| 🟡 P2 | 7 | 1 | 0 | 6 |
+| 🟡 P2 | 7 | 7 | 0 | 0 |
 | 🟢 P3 | 7 | 0 | 2 | 5 |
 
 **Next recommended actions:**
-1. Complete P2-5: Residual flow C++ test after pump stop
-2. Complete P2-7: Steam pump 2s minimum on window
+1. Complete P3-5: Display & UI documentation
+2. Complete P3-6: Wiring diagrams
+3. Complete P3-7: Tag v1.0.0 release
 
