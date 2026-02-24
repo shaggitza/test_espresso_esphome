@@ -36,6 +36,9 @@ void EspressoMachine::setup() {
 // Main loop — advance whichever state machine is active
 // ---------------------------------------------------------------------------
 void EspressoMachine::loop() {
+  if (check_over_temp_safety_())
+    return;  // cutoff fired; do not advance state machines this tick
+
   switch (mode_) {
     case EspressoMode::BREWING:
       advance_brew_();
@@ -106,6 +109,10 @@ void EspressoMachine::brew_start() {
     ESP_LOGW(TAG, "brew_start ignored: machine is off");
     return;
   }
+  if (over_temp_cutoff_triggered_) {
+    ESP_LOGW(TAG, "brew_start ignored: over-temperature safety cutoff is active — reboot required");
+    return;
+  }
   if (mode_ != EspressoMode::IDLE) {
     ESP_LOGW(TAG, "brew_start ignored: machine is %s", mode_name());
     return;
@@ -113,6 +120,7 @@ void EspressoMachine::brew_start() {
   ESP_LOGI(TAG, "Brew START — target=%.1f°C  flow_max=%.1fml", brew_target_temp_, brew_flow_max_ml_);
   mode_ = EspressoMode::BREWING;
   brew_state_ = BrewState::HEATING;
+  brew_start_ms_ = millis();
   state_entered_ms_ = millis();
 
   // Start with all valves closed and pump off until temperature is reached
@@ -143,6 +151,10 @@ void EspressoMachine::brew_stop() {
 void EspressoMachine::steam_start() {
   if (!powered_on_) {
     ESP_LOGW(TAG, "steam_start ignored: machine is off");
+    return;
+  }
+  if (over_temp_cutoff_triggered_) {
+    ESP_LOGW(TAG, "steam_start ignored: over-temperature safety cutoff is active — reboot required");
     return;
   }
   if (mode_ != EspressoMode::IDLE) {
@@ -249,6 +261,17 @@ void EspressoMachine::advance_brew_() {
     }
 
     case BrewState::BREWING: {
+      // Brew timeout (P0-4): stop the shot if it has been running too long.
+      // This protects against a stuck flow sensor returning 0 indefinitely
+      // (e.g. after a Wi-Fi disconnect prevents a manual stop from HA).
+      if (brew_timeout_ms_ > 0 && (millis() - brew_start_ms_) >= brew_timeout_ms_) {
+        ESP_LOGW(TAG, "Brew: TIMEOUT after %ums — stopping shot", brew_timeout_ms_);
+        safe_stop_all_();
+        brew_state_ = BrewState::IDLE;
+        mode_ = EspressoMode::IDLE;
+        break;
+      }
+
       // Temperature surfing: linearly ramp the desired setpoint from
       // (target + offset) back to target over brew_temp_ramp_time_ms_.
       // NOTE: actual climate setpoint call is wired in Phase 2.
@@ -408,6 +431,45 @@ void EspressoMachine::safe_stop_all_() {
     steam_valve_->close();
   if (steam_purge_valve_)
     steam_purge_valve_->close();
+}
+
+// ---------------------------------------------------------------------------
+// Safety: hard over-temperature cutoff (P0-1) and sensor NaN fault (P0-3)
+// ---------------------------------------------------------------------------
+bool EspressoMachine::check_over_temp_safety_() {
+  if (over_temp_sensor_ == nullptr)
+    return false;
+
+  // Already triggered — block all state machine activity until reboot.
+  if (over_temp_cutoff_triggered_)
+    return true;
+
+  float temp = over_temp_sensor_->get_current_temperature();
+
+  // P0-3: sensor fault — NaN means the thermocouple is disconnected or the
+  // ADC returned a stuck value.  The PID would drive to 100% duty because it
+  // computes a huge positive error.  Force the heater off immediately.
+  if (std::isnan(temp)) {
+    ESP_LOGE(TAG, "SAFETY: temperature sensor fault (NaN) — forcing heater OFF");
+    over_temp_cutoff_triggered_ = true;
+    safe_stop_all_();
+    over_temp_sensor_->force_off();
+    return true;
+  }
+
+  // P0-1: hard over-temperature cutoff — temperature exceeds the configured
+  // limit.  Latch the flag so the heater cannot be re-enabled by the PID
+  // until the device is rebooted.
+  if (temp >= over_temp_limit_) {
+    ESP_LOGE(TAG, "SAFETY: over-temperature cutoff at %.1f°C (limit %.1f°C) — forcing heater OFF",
+             temp, over_temp_limit_);
+    over_temp_cutoff_triggered_ = true;
+    safe_stop_all_();
+    over_temp_sensor_->force_off();
+    return true;
+  }
+
+  return false;
 }
 
 const char *EspressoMachine::mode_name() const {
