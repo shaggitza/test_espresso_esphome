@@ -5,29 +5,51 @@ Add it via **Settings → Dashboards → Edit Dashboard → Add Card → Manual*
 
 ## Entity Reference
 
-After flashing, these entities will appear in HA (prefix: `philips_barista_brew`):
+After flashing, these entities will appear in HA (prefix: `philips_barista_brew`).
+Entities are grouped by their `entity_category` on the HA device page:
+
+### Primary entities (no `entity_category` — shown at the top of the device page)
 
 | Domain | Entity | Description |
 |---|---|---|
 | `climate` | `main_heater` | PID heater — set any target temperature directly from HA |
+| `switch` | `machine_power` | Master on/off toggle for the espresso machine |
 | `text_sensor` | `machine_mode` | Current machine state: `idle` / `brewing` / `steaming` |
 | `button` | `brew_start` | Start an espresso shot sequence |
 | `button` | `brew_stop` | Abort the current shot immediately |
 | `button` | `steam_start` | Start a steam / milk-froth sequence |
 | `button` | `steam_stop` | Stop steaming and begin cool-down |
 | `button` | `grinder` | Trigger a one-shot timed grind |
-| `number` | `grind_time` | Adjust grind duration (ms) from HA |
+| `sensor` | `thermoblock_temperature` | Live thermoblock temperature (°C) |
 | `sensor` | `brew_flow_rate` | Live flow rate (mL/s) during extraction |
 | `sensor` | `brew_flow_total` | Accumulated volume this shot (mL) |
 | `sensor` | `last_shot_duration` | Duration of the last completed shot (s) |
 | `sensor` | `last_shot_yield` | Net yield of the last shot = volume − puck absorption (mL) |
-| `sensor` | `thermoblock_temperature` | Live thermoblock temperature (°C) |
-| `switch` | `brew_valve` | Brew solenoid valve (direct control) |
-| `switch` | `steam_valve` | Steam solenoid valve (direct control) |
-| `switch` | `purge_valve` | Purge / drain solenoid valve (direct control) |
-| `switch` | `vibration_pump` | Pump relay (direct control) |
-| `button` | `restart` | Restart the ESP32 |
+
+### Configuration entities (`entity_category: config` — shown under "Configuration")
+
+| Domain | Entity | Description |
+|---|---|---|
+| `number` | `brew_temperature` | Brew target temperature (°C) — syncs with PID setpoint |
+| `number` | `brew_flow_max` | Stop brew at this volume (mL) — adjustable without reflashing |
+| `number` | `grind_time` | Adjust grind duration (ms) from HA |
 | `button` | `pid_autotune` | Run PID autotune — see `docs/pid_tuning.md` |
+
+### Diagnostic entities (`entity_category: diagnostic` — shown under "Diagnostics")
+
+These are internal hardware controls and system metrics, separated from primary
+user-facing entities to keep the device page uncluttered.
+
+| Domain | Entity | Description |
+|---|---|---|
+| `switch` | `brew_valve` | Brew solenoid valve (direct hardware control) |
+| `switch` | `steam_valve` | Steam solenoid valve (direct hardware control) |
+| `switch` | `purge_valve` | Purge / drain solenoid valve (direct hardware control) |
+| `switch` | `vibration_pump` | Pump relay (direct hardware control) |
+| `button` | `restart` | Restart the ESP32 |
+| `sensor` | `uptime` | Device uptime |
+| `sensor` | `wi_fi_signal` | Wi-Fi signal strength (dBm) |
+| `sensor` | `esp32_temperature` | Internal ESP32 chip temperature |
 
 > **Tip — setting temperature above 90 °C:** Use the `climate.main_heater` entity card in HA.
 > Click the temperature dial and drag it to any value (e.g. 95 °C for lighter roasts or 135 °C
@@ -35,7 +57,41 @@ After flashing, these entities will appear in HA (prefix: `philips_barista_brew`
 
 ---
 
-## Main Control Card
+## Mock Device Entity Categories (`philips_barista_brew_mock`)
+
+The mock device adds simulation-specific entities on top of the real device entities.
+These are categorised as follows on the HA device page:
+
+### Mock Configuration entities (`entity_category: config`)
+
+| Domain | Entity | Description |
+|---|---|---|
+| `number` | `mock_heater_power` | Heater element power (W) |
+| `number` | `mock_thermal_mass` | Thermal mass of the thermoblock (J/°C) |
+| `number` | `mock_heat_loss` | Heat loss rate (W/°C) |
+| `number` | `mock_ambient_temperature` | Ambient room temperature (°C) |
+| `number` | `mock_nominal_flow` | Pump nominal flow rate (mL/s) |
+| `number` | `mock_pump_max_pressure` | Pump stall pressure (bar) |
+| `number` | `mock_puck_time_constant` | Puck wetting time constant (s) |
+| `number` | `mock_puck_density` | Puck resistance (1 = open, 100 = blocked) |
+| `number` | `mock_internal_volume` | Internal tubing volume (mL) — residual flow decay |
+| `button` | `puck_open_d_1` | Set puck density to 1 (fully open) |
+| `button` | `puck_soft_d_25` | Set puck density to 25 (soft puck) |
+| `button` | `puck_medium_d_50` | Set puck density to 50 (medium puck) |
+| `button` | `puck_hard_d_75` | Set puck density to 75 (hard puck) |
+| `button` | `puck_blocked_d_100` | Set puck density to 100 (blocked) |
+| `button` | `reset_flow` | Reset accumulated flow counter |
+
+### Mock Diagnostic entities (`entity_category: diagnostic`)
+
+| Domain | Entity | Description |
+|---|---|---|
+| `sensor` | `heater_ssr_duty` | Simulated SSR duty cycle (0–100%) |
+| `sensor` | `nozzle_flow_rate` | Estimated flow out of the group head nozzle (mL/s) |
+| `sensor` | `nozzle_flow_total` | Estimated total flow out of the group head nozzle (mL) |
+| `switch` | `brew_valve` | Brew solenoid valve (direct hardware control) |
+| `switch` | `steam_valve` | Steam solenoid valve (direct hardware control) |
+| `switch` | `purge_valve` | Purge / drain solenoid valve (direct hardware control) |
 
 ```yaml
 type: entities

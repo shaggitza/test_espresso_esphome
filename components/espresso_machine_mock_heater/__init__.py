@@ -50,6 +50,7 @@ from esphome.const import (
     CONF_ID,
     CONF_NAME,
     CONF_OUTPUT,
+    ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_CELSIUS,
     DEVICE_CLASS_TEMPERATURE,
     STATE_CLASS_MEASUREMENT,
@@ -132,6 +133,7 @@ CONFIG_SCHEMA = cv.Schema(
             unit_of_measurement="%",
             accuracy_decimals=1,
             state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         # Optional HA number entities for runtime tuning
         cv.Optional(CONF_POWER_NUMBER): number.number_schema(MockHeaterNumber).extend(

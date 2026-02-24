@@ -67,8 +67,12 @@
 #   Set internal_volume_ml = 0 to disable (legacy instant-decay behaviour).
 #
 # HA ENTITY CATEGORIES:
-#   Tuning number entities use entity_category: config so they appear in the
-#   "Configuration" section of the HA device page, separate from primary sensors.
+#   config     — Mock physics parameters, puck preset buttons, and other tuning
+#                knobs appear in the "Configuration" section of the HA device page.
+#   diagnostic — Mock-only estimated sensors (nozzle flow, SSR duty), valves,
+#                and system/uptime diagnostics appear in the "Diagnostics" section.
+#   (none)     — Primary user-facing sensors and controls (brew flow, temperature,
+#                start/stop buttons) appear at the top of the device page.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -191,7 +195,6 @@ espresso_machine_mock_heater:
   duty_sensor:
     name: "Heater SSR Duty"
     unit_of_measurement: "%"
-    entity_category: diagnostic
 
 # =============================================================================
 # MOCK PUMP — replaces physical relay pump + flow meter
@@ -271,25 +274,6 @@ sensor:
   - platform: internal_temperature
     name: "ESP32 Temperature"
     entity_category: diagnostic
-
-  # Shot statistics
-  - platform: template
-    id: last_shot_duration
-    name: "Last Shot Duration"
-    unit_of_measurement: "s"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_time_s();
-
-  - platform: template
-    id: last_shot_yield
-    name: "Last Shot Yield"
-    unit_of_measurement: "mL"
-    accuracy_decimals: 1
-    state_class: measurement
-    update_interval: 5s
-    lambda: return id(my_espresso).get_last_shot_yield_ml();
 
 # =============================================================================
 # HEATER PID — IDENTICAL to real config (uses same sensor/output IDs)

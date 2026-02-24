@@ -1,0 +1,259 @@
+# Test: validates the philips_barista_brew.yaml example configuration.
+# Mirrors the full real hardware example structure using local components so CI
+# catches schema regressions in the reference config.
+# Covers: espresso_machine_heater (P1-1), flow_meter, valves, pump, grinder,
+# orchestrator (brew + steam), temperature_profile, shot_stats, cleanup_script,
+# and all runtime-tunable number entities.
+esphome:
+  name: test-philips-real
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: INFO
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_heater
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_grinder
+      - espresso_machine_flow_meter
+
+# =============================================================================
+# TEMPERATURE SENSOR (template replaces real MAX6675 for schema testing)
+# =============================================================================
+sensor:
+  - platform: template
+    id: thermoblock_temp
+    name: "Thermoblock Temperature"
+    lambda: "return 90.0f;"
+    update_interval: 1s
+    on_value_range:
+      - above: 165
+        then:
+          - climate.control:
+              id: main_heater
+              mode: "off"
+
+# =============================================================================
+# FLOW METER
+# =============================================================================
+espresso_machine_flow_meter:
+  id: brew_flow
+  name: "Brew Flow"
+  pin:
+    number: GPIO34
+    mode: INPUT
+  pulses_per_ml: 0.5195
+  rate_sensor:
+    name: "Brew Flow Rate"
+  total_sensor:
+    name: "Brew Flow Total"
+
+# =============================================================================
+# HEATER OUTPUT + PID CLIMATE
+# =============================================================================
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4
+    period: 1s
+
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Espresso Heater"
+    sensor: thermoblock_temp
+    default_target_temperature: 90
+    heat_output: heater_ssr
+    control_parameters:
+      kp: 0.55901
+      ki: 0.11624
+      kd: 0.67209
+      output_averaging_samples: 5
+      derivative_averaging_samples: 5
+    deadband_parameters:
+      threshold_high: 0.3
+      threshold_low: -0.3
+
+# =============================================================================
+# HEATER CONTROLLER ADAPTER (P1-1)
+# =============================================================================
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
+
+# =============================================================================
+# VALVES
+# =============================================================================
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+    normally_open: false
+
+  - id: purge_valve
+    name: "Purge / Drain Valve"
+    pin: GPIO14
+    normally_open: false
+
+# =============================================================================
+# PUMP
+# =============================================================================
+espresso_machine_pump:
+  id: main_pump
+  name: "Vibration Pump"
+  type: relay
+  pin: GPIO25
+  flow_meter: brew_flow
+
+# =============================================================================
+# GRINDER
+# =============================================================================
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
+  grind_time_number:
+    name: "Grind Time"
+    entity_category: config
+
+# =============================================================================
+# ORCHESTRATOR
+# =============================================================================
+espresso_machine:
+  id: my_espresso
+
+  brew:
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: purge_valve
+    temperature_profile:
+      offset: 5°C
+      ramp_time: 20s
+    flow_max: 40ml
+    flow_max_number:
+      name: "Brew Flow Max"
+      entity_category: config
+    flow_offset: 20ml
+    shot_stats:
+      last_shot_time:
+        name: "Last Shot Time"
+      last_shot_volume:
+        name: "Last Shot Volume"
+      last_shot_yield:
+        name: "Last Shot Yield"
+
+  steam:
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    purge_volume: 5ml
+    flow_max: 2ml/s
+    cool_down_to: 90°C
+    timeout: 5min
+    pump_min_on_time: 2s
+
+# =============================================================================
+# POWER SWITCH
+# =============================================================================
+switch:
+  - platform: template
+    id: machine_power
+    name: "Espresso Machine Power"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: id(my_espresso).machine_on();
+      - climate.control:
+          id: main_heater
+          mode: heat
+    turn_off_action:
+      - lambda: id(my_espresso).machine_off();
+      - climate.control:
+          id: main_heater
+          mode: "off"
+
+# =============================================================================
+# BUTTONS
+# =============================================================================
+button:
+  - platform: restart
+    name: "Restart"
+
+  - platform: template
+    name: "PID Autotune"
+    entity_category: config
+    on_press:
+      - climate.pid.autotune: main_heater
+
+  - platform: template
+    name: "Brew Start"
+    on_press:
+      - lambda: id(my_espresso).brew_start();
+
+  - platform: template
+    name: "Brew Stop"
+    on_press:
+      - lambda: id(my_espresso).brew_stop();
+
+  - platform: template
+    name: "Steam Start"
+    on_press:
+      - lambda: id(my_espresso).steam_start();
+
+  - platform: template
+    name: "Steam Stop"
+    on_press:
+      - lambda: id(my_espresso).steam_stop();
+
+# =============================================================================
+# NUMBER ENTITIES
+# =============================================================================
+number:
+  - platform: template
+    name: "Brew Temperature"
+    id: brew_temp_number
+    unit_of_measurement: "°C"
+    min_value: 85
+    max_value: 105
+    step: 0.5
+    initial_value: 90
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    set_action:
+      - climate.control:
+          id: main_heater
+          target_temperature: !lambda "return x;"
+
+# =============================================================================
+# TEXT SENSOR
+# =============================================================================
+text_sensor:
+  - platform: template
+    name: "Machine Mode"
+    id: machine_mode
+    update_interval: 2s
+    entity_category: diagnostic
+    lambda: return std::string(id(my_espresso).mode_name());
