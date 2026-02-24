@@ -98,6 +98,11 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void turn_off() override { write_state(false); }
   bool is_running() const override { return running_; }
 
+  // Bypass mode — when pumping through steam/purge valves instead of a puck,
+  // there's virtually no resistance. This makes flow = nominal_flow and P = 0.
+  void set_bypass_mode(bool bypass) override { open_valve_mode_ = bypass; }
+  bool get_bypass_mode() const { return open_valve_mode_; }
+
   // Flow subsystem — simulated based on puck wetting model
   float get_flow_rate() const override { return current_flow_rate_; }
   float get_flow_total() const override { return total_volume_; }
@@ -185,8 +190,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   float puck_extraction_tau_{45.0f};
 
   // Simulation state
-  bool running_{false};
-  float run_time_{0.0f};              // Time since pump started [s]
+  bool running_{false};\n  bool open_valve_mode_{false};       // If true, bypass puck model (valve open)\n  float run_time_{0.0f};              // Time since pump started [s]
   float current_flow_rate_{0.0f};     // Instantaneous flow rate [mL/s]
   float total_volume_{0.0f};          // Accumulated pump volume [mL]
   float nozzle_total_volume_{0.0f};   // Accumulated nozzle output volume [mL]

@@ -35,7 +35,7 @@
 | P1-1 | Production `IHeater` adapter for ESPHome `climate.pid` | ✅ Done | PLAN.md Phase 8 | `espresso_machine_heater` component wraps `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()` |
 | P1-2 | Heater setpoint wiring for brew mode (climate call) | ✅ Done | PLAN.md Phase 7 | `brew_heater_ctrl_` (`IHeater*`) added; `set_target_temperature()` called in `brew_start()`; HEATING→BREWING gates on temperature when wired |
 | P1-3 | Temperature surfing: apply computed setpoint to climate | ✅ Done | FEATURES.md | Ramp setpoint computed and applied via `brew_heater_ctrl_->set_target_temperature()` in BREWING state |
-| P1-4 | `esphome config` validation of heater section | ✅ Done | PLAN.md Phase 2 | `heater_controller:` added to brew schema; `test_orchestrator.yaml` and `test_all_components.yaml` updated to validate `espresso_machine_heater` |
+| P1-4 | `esphome config` validation of heater section | ✅ Done | PLAN.md Phase 2 | `heater_controller:` added to brew schema; validated via example YAMLs in `examples/` |
 | P1-5 | Shot stats as HA sensor entities | ✅ Done | PLAN.md Phase 7 | `shot_stats.last_shot_time/volume/yield` in brew schema; `sensor::Sensor*` members published at BREWING→DONE |
 
 ### 🟡 P2 — Medium Priority (Usability / Completeness)

@@ -39,6 +39,12 @@ class IPump {
   virtual float get_flow_total() const { return 0.0f; }
   virtual void reset_flow() {}
 
+  // Bypass mode — when true, pump is flowing through an open valve (steam/purge)
+  // rather than through a puck. In bypass mode there is no resistance, so flow
+  // is at maximum and pressure stays near zero.
+  // Default no-op for pumps that don't model this. MockPump implements this.
+  virtual void set_bypass_mode(bool bypass) { (void)bypass; }
+
   virtual ~IPump() = default;
 };
 

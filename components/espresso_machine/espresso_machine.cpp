@@ -278,6 +278,7 @@ void EspressoMachine::flush(float volume_ml) {
   mode_ = EspressoMode::FLUSHING;
   if (brew_pump_) {
     brew_pump_->reset_flow();
+    brew_pump_->set_bypass_mode(true);  // No puck resistance through purge valve
     brew_pump_->turn_on();
   }
   if (brew_purge_valve_)
@@ -439,12 +440,13 @@ void EspressoMachine::advance_steam_() {
                                     : steam_target_temp_,
                  steam_purge_volume_ml_);
         steam_state_ = SteamState::PURGING;
-        if (steam_pump_)
+        if (steam_pump_) {
           steam_pump_->reset_flow();
+          steam_pump_->set_bypass_mode(true);  // No puck resistance through valve
+          steam_pump_->turn_on();
+        }
         if (steam_purge_valve_)
           steam_purge_valve_->open();
-        if (steam_pump_)
-          steam_pump_->turn_on();
         publish_status_();
       } else {
         // No purge configured: open steam valve immediately (backward compat).
@@ -455,8 +457,10 @@ void EspressoMachine::advance_steam_() {
         steam_start_ms_ = millis();
         if (steam_valve_)
           steam_valve_->open();
-        if (steam_pump_)
+        if (steam_pump_) {
+          steam_pump_->set_bypass_mode(true);  // No puck resistance through valve
           steam_pump_->turn_on();
+        }
         publish_status_();
       }
       break;
@@ -471,6 +475,7 @@ void EspressoMachine::advance_steam_() {
           steam_purge_valve_->close();
         if (steam_pump_)
           steam_pump_->reset_flow();  // reset so STEAMING tracks steam-only volume
+        // Stay in bypass mode — still pumping through steam valve
         steam_state_ = SteamState::STEAMING;
         steam_start_ms_ = millis();
         state_entered_ms_ = millis();
@@ -512,9 +517,16 @@ void EspressoMachine::advance_steam_() {
     }
 
     case SteamState::COOLING:
-      // Purge valve was opened by steam_stop(); keep purging while the
-      // thermoblock cools.  If a controller is wired, wait for the temperature
-      // to drop to cool_down_to_ before proceeding to CLEANUP.
+      // Purge valve was opened by steam_stop(); run the pump to actively
+      // cool the thermoblock by pushing cold water through.  The pump is
+      // in bypass mode (no puck resistance) so flow is maximum.
+      if (steam_pump_) {
+        if (!steam_pump_->is_running()) {
+          steam_pump_->set_bypass_mode(true);
+          steam_pump_->turn_on();
+        }
+      }
+      // Wait for temperature to drop to cool_down_to_ before proceeding.
       if (steam_heater_ctrl_) {
         if (steam_heater_ctrl_->get_current_temperature() > steam_cool_down_to_) {
           break;  // Still cooling — wait
@@ -523,6 +535,11 @@ void EspressoMachine::advance_steam_() {
       ESP_LOGI(TAG, "Steam: COOLING → CLEANUP (%.1f°C)",
                steam_heater_ctrl_ ? steam_heater_ctrl_->get_current_temperature()
                                   : steam_cool_down_to_);
+      // Stop pump and exit bypass mode before moving to CLEANUP
+      if (steam_pump_) {
+        steam_pump_->turn_off();
+        steam_pump_->set_bypass_mode(false);
+      }
       steam_state_ = SteamState::CLEANUP;
       state_entered_ms_ = millis();
       publish_status_();
@@ -552,8 +569,10 @@ void EspressoMachine::advance_flush_() {
   float pumped = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
   if (pumped >= flush_volume_ml_) {
     ESP_LOGI(TAG, "Flush: DONE — pumped %.1fml through brew purge valve", pumped);
-    if (brew_pump_)
+    if (brew_pump_) {
       brew_pump_->turn_off();
+      brew_pump_->set_bypass_mode(false);
+    }
     if (brew_purge_valve_)
       brew_purge_valve_->close();
     mode_ = EspressoMode::IDLE;
@@ -584,10 +603,14 @@ void EspressoMachine::enter_brewing_() {
 }
 
 void EspressoMachine::safe_stop_all_() {
-  if (brew_pump_)
+  if (brew_pump_) {
     brew_pump_->turn_off();
-  if (steam_pump_)
+    brew_pump_->set_bypass_mode(false);
+  }
+  if (steam_pump_) {
     steam_pump_->turn_off();
+    steam_pump_->set_bypass_mode(false);
+  }
   if (brew_valve_)
     brew_valve_->close();
   if (brew_purge_valve_)

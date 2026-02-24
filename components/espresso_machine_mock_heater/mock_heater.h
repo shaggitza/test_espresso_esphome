@@ -52,7 +52,7 @@ class MockHeaterTempSensor : public sensor::Sensor, public PollingComponent {
 // ---------------------------------------------------------------------------
 class MockHeaterNumber : public number::Number, public Component {
  public:
-  enum class ParamType { POWER, THERMAL_MASS, HEAT_LOSS, AMBIENT };
+  enum class ParamType { POWER, THERMAL_MASS, HEAT_LOSS, AMBIENT, HEAT_TRANSFER_K };
 
   void set_parent(MockHeater *parent) { parent_ = parent; }
   void set_param_type(ParamType type) { param_type_ = type; }
@@ -110,6 +110,10 @@ class MockHeater : public Component,
     ambient_number_ = num;
     if (num) num->set_param_type(MockHeaterNumber::ParamType::AMBIENT);
   }
+  void set_heat_transfer_k_number(MockHeaterNumber *num) {
+    heat_transfer_k_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::HEAT_TRANSFER_K);
+  }
 
   void setup() override;
   void loop() override;
@@ -125,11 +129,14 @@ class MockHeater : public Component,
   float get_ambient_temp() const { return ambient_temp_; }
   float get_water_inlet_temp() const { return water_inlet_temp_; }
   float get_flow_rate() const { return flow_rate_; }
+  float get_heat_transfer_k() const { return heat_transfer_k_; }
 
   void update_power_watts(float v) { power_watts_ = v; }
   void update_thermal_mass(float v) { thermal_mass_ = v; }
   void update_heat_loss(float v) { heat_loss_ = v; }
   void update_ambient_temp(float v) { ambient_temp_ = v; }
+  void update_heat_transfer_k(float v) { heat_transfer_k_ = v; }
+  void set_heat_transfer_k(float k) { heat_transfer_k_ = k; }
 
  protected:
   // Physics parameters
@@ -140,6 +147,12 @@ class MockHeater : public Component,
   float thermal_mass_{800.0f};     // Thermal mass [J/°C] (Al block + water)
   float heat_loss_{1.7f};          // Heat-loss coefficient [W/°C]
   float water_inlet_temp_{20.0f};  // Cold-water inlet temperature [°C]
+  // Heat transfer effectiveness constant [mL/s].
+  // At flow_rate = heat_transfer_k, effectiveness ≈ 63%.
+  // At higher flows, effectiveness drops (less time in contact).
+  // At lower flows, effectiveness approaches 100%.
+  // Typical thermoblock: 1.5–3.0 mL/s.
+  float heat_transfer_k_{2.0f};
 
   // Target temperature commanded via IHeater::set_target_temperature()
   // Used for tracking/logging; actual control driven by PID output.
@@ -158,6 +171,7 @@ class MockHeater : public Component,
   MockHeaterNumber *thermal_mass_number_{nullptr};
   MockHeaterNumber *heat_loss_number_{nullptr};
   MockHeaterNumber *ambient_number_{nullptr};
+  MockHeaterNumber *heat_transfer_k_number_{nullptr};
 
   // Timing for ODE integration
   uint32_t last_update_ms_{0};

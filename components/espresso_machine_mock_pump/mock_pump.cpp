@@ -111,18 +111,29 @@ void MockPump::loop() {
 
   float dt_s = dt_ms / 1000.0f;
 
+  // -------------------------------------------------------------------------
   // Puck density model:
   //   flow_fraction = (101 − D) / 100   →  1.0 at D=1,  0.01 at D=100
   //   Q_ss          = nominal_flow × flow_fraction
   //   P_equilibrium = pump_max_pressure × (D − 1) / 100
   //                   →  0 bar at D=1 (no restriction),  ~P_max at D=100 (blocked)
   //
-  // Puck extraction degradation: effective density decreases from puck_density_
-  // toward 1 with time constant puck_extraction_tau_. This represents coffee
-  // solubles dissolving and the puck structure weakening over the shot, causing
-  // flow to increase monotonically as time progresses. Disabled when tau = 0.
+  // Open valve mode: When pumping through steam/purge valve instead of a puck,
+  // there's virtually no resistance. In this mode we force D=1, which gives:
+  //   - Max flow (nominal_flow)
+  //   - Zero pressure
+  //   - No wetting delay
+  // -------------------------------------------------------------------------
   float effective_density = puck_density_;
-  if (running_ && puck_extraction_tau_ > 0.0f) {
+
+  // In open valve mode, bypass puck physics — no resistance
+  if (open_valve_mode_) {
+    effective_density = 1.0f;
+  } else if (running_ && puck_extraction_tau_ > 0.0f) {
+    // Puck extraction degradation: effective density decreases from puck_density_
+    // toward 1 with time constant puck_extraction_tau_. This represents coffee
+    // solubles dissolving and the puck structure weakening over the shot, causing
+    // flow to increase monotonically as time progresses. Disabled when tau = 0.
     effective_density = 1.0f + (puck_density_ - 1.0f) * std::exp(-run_time_ / puck_extraction_tau_);
   }
 
@@ -299,8 +310,10 @@ void MockPump::loop() {
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
     last_log_ms = now;
-    ESP_LOGD(TAG, "Pump %s, D_eff=%.1f, Q=%.2f mL/s, Qnoz=%.2f mL/s, V=%.1f mL, Nozzle=%.1f mL, Absorbed=%.1f mL, t=%.1f s, P_sys=%.2f bar",
-             running_ ? "ON" : "OFF", effective_density, current_flow_rate_, nozzle_flow_rate_, total_volume_,
+    ESP_LOGD(TAG, "Pump %s%s, D_eff=%.1f, Q=%.2f mL/s, Qnoz=%.2f mL/s, V=%.1f mL, Nozzle=%.1f mL, Absorbed=%.1f mL, t=%.1f s, P_sys=%.2f bar",
+             running_ ? "ON" : "OFF",
+             open_valve_mode_ ? " (bypass)" : "",
+             effective_density, current_flow_rate_, nozzle_flow_rate_, total_volume_,
              nozzle_total_volume_, absorbed_volume_, run_time_, system_pressure_bar_);
   }
 }

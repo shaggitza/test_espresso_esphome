@@ -41,6 +41,8 @@ espresso_machine_mock_heater:
     name: "Mock Heat Loss"
   ambient_number:
     name: "Mock Ambient Temperature"
+  heat_transfer_k_number:
+    name: "Mock Heat Transfer K"
 
 # --- Test: PID climate can reference mock heater (same as real config) ---
 climate:

@@ -7,7 +7,7 @@ between the mock and real hardware — it reads the same sensor ID and writes to
 the same output ID.
 
 Thermal Model:
-    dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × (T − T_inlet)) / C
+    dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × ε × (T − T_inlet)) / C
 
     duty     = 0.0–1.0 output from PID (heat_output)
     P        = heater power [W]
@@ -17,6 +17,15 @@ Thermal Model:
     Q        = water flow rate [mL/s] from mock pump (IFlowObserver)
     Cp       = 4.186 J/(mL·°C) (specific heat of water)
     T_inlet  = water inlet temperature [°C]
+    ε        = heat transfer effectiveness = 1 − exp(−k / Q)
+    k        = heat_transfer_k [mL/s] (default: 2.0)
+
+Heat Transfer Effectiveness:
+    At low flow rates (Q << k), effectiveness ε ≈ 1 (water fully absorbs heat).
+    At high flow rates (Q >> k), effectiveness ε ≈ k/Q (less efficient per mL).
+    The parameter k represents how efficiently the thermoblock transfers heat
+    to the water — a higher k means a better thermoblock design (larger surface
+    area, more turbulent flow, etc.).
 
 A duty_sensor can be wired to expose the SSR duty cycle (0–100%) to HA,
 showing how rapidly the SSR is switching during PID control.
@@ -81,6 +90,7 @@ CONF_POWER_WATTS = "power_watts"
 CONF_THERMAL_MASS_J_PER_C = "thermal_mass_j_per_c"
 CONF_HEAT_LOSS_W_PER_C = "heat_loss_w_per_c"
 CONF_WATER_INLET_TEMP_C = "water_inlet_temp_c"
+CONF_HEAT_TRANSFER_K = "heat_transfer_k"
 CONF_DUTY_SENSOR = "duty_sensor"
 
 # Number entity config keys for runtime tuning
@@ -88,6 +98,7 @@ CONF_POWER_NUMBER = "power_number"
 CONF_THERMAL_MASS_NUMBER = "thermal_mass_number"
 CONF_HEAT_LOSS_NUMBER = "heat_loss_number"
 CONF_AMBIENT_NUMBER = "ambient_number"
+CONF_HEAT_TRANSFER_K_NUMBER = "heat_transfer_k_number"
 
 OUTPUT_SCHEMA = cv.Schema(
     {
@@ -124,6 +135,10 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_THERMAL_MASS_J_PER_C, default=800.0): cv.positive_float,
         cv.Optional(CONF_HEAT_LOSS_W_PER_C, default=1.7): cv.positive_float,
         cv.Optional(CONF_WATER_INLET_TEMP_C, default=20.0): cv.float_,
+        # Heat transfer effectiveness constant [mL/s]
+        # At flow_rate = k, effectiveness ≈ 63% (water doesn't fully absorb heat)
+        # Lower k = more efficient thermoblock (water reaches block temp faster)
+        cv.Optional(CONF_HEAT_TRANSFER_K, default=2.0): cv.positive_float,
         # Output sub-entity (what the PID's heat_output references)
         cv.Required(CONF_OUTPUT): OUTPUT_SCHEMA,
         # Temperature sensor sub-entity (what the PID's sensor references)
@@ -148,6 +163,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_AMBIENT_NUMBER): number.number_schema(
             MockHeaterNumber
         ).extend(cv.COMPONENT_SCHEMA),
+        cv.Optional(CONF_HEAT_TRANSFER_K_NUMBER): number.number_schema(
+            MockHeaterNumber
+        ).extend(cv.COMPONENT_SCHEMA),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -163,6 +181,7 @@ async def to_code(config):
     cg.add(var.set_thermal_mass(config[CONF_THERMAL_MASS_J_PER_C]))
     cg.add(var.set_heat_loss(config[CONF_HEAT_LOSS_W_PER_C]))
     cg.add(var.set_water_inlet_temp(config[CONF_WATER_INLET_TEMP_C]))
+    cg.add(var.set_heat_transfer_k(config[CONF_HEAT_TRANSFER_K]))
 
     # Create and register the output sub-entity
     out_conf = config[CONF_OUTPUT]
@@ -219,4 +238,13 @@ async def to_code(config):
         )
         await cg.register_component(num_var, num_conf)
         cg.add(var.set_ambient_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_HEAT_TRANSFER_K_NUMBER in config:
+        num_conf = config[CONF_HEAT_TRANSFER_K_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.1, max_value=10.0, step=0.1
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_heat_transfer_k_number(num_var))
         cg.add(num_var.set_parent(var))

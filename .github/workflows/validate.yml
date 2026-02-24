@@ -33,16 +33,17 @@ jobs:
       fail-fast: false
       matrix:
         yaml:
+          # Per-component minimal tests
           - tests/test_flow_meter.yaml
           - tests/test_valve.yaml
           - tests/test_pump.yaml
           - tests/test_grinder.yaml
-          - tests/test_orchestrator.yaml
-          - tests/test_all_components.yaml
+          - tests/test_mock_heater.yaml
+          - tests/test_mock_pump.yaml
           - tests/test_compile.yaml
-          - tests/test_example.yaml
-          - tests/test_philips_real.yaml
-          - tests/test_philips_mock.yaml
+          # Full example configs (authoritative references)
+          - examples/philips_barista_brew.yaml
+          - examples/philips_barista_brew_mock.yaml
 
     steps:
       - uses: actions/checkout@v4

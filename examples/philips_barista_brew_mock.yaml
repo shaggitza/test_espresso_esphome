@@ -29,7 +29,7 @@
 #   - HA runtime tuning
 #
 # THERMAL MODEL (mock heater):
-#   dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × (T − T_inlet)) / C
+#   dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × ε × (T − T_inlet)) / C
 #     duty   = 0.0–1.0 from PID
 #     P      = power_watts
 #     C      = thermal_mass_j_per_c
@@ -39,6 +39,15 @@
 #     Q      = flow rate [mL/s] from mock pump (IFlowObserver)
 #     Cp     = 4.186 J/(mL·°C), specific heat of water
 #     T_inlet = water_inlet_temp_c
+#     ε      = heat transfer effectiveness = 1 − exp(−k / Q)
+#       At low flow rates (Q << k), ε ≈ 1 (water fully heats/cools)
+#       At high flow rates (Q >> k), ε ≈ k/Q (less efficient per mL)
+#       k      = heat_transfer_k (default 2.0 mL/s) — tunable parameter
+#
+# BYPASS MODE (mock pump):
+#   When the orchestrator calls set_bypass_mode(true), the pump simulates
+#   flowing through an open valve (steam/purge) instead of a puck.
+#   In bypass mode: D_eff = 1, flow = nominal_flow, pressure = 0 bar.
 #
 # PUCK DENSITY MODEL (mock pump):
 #   puck_density = 1..100  (1 = open, 100 = fully blocked)
@@ -148,6 +157,8 @@ external_components:
 #   thermal_mass_j_per_c: 800.0       — 800g Al (717.6) + 20mL H₂O (83.7)
 #   heat_loss_w_per_c: 1.7            — calibrated for realistic cooling rate
 #   water_inlet_temp_c: 20.0          — cold-water inlet temperature
+#   heat_transfer_k: 2.0              — heat transfer constant [mL/s]
+#                                       (at Q=k, effectiveness ≈ 63%)
 #
 # duty_sensor shows the SSR duty cycle (0–100%) in HA so you can see
 # how quickly the SSR is switching during PID control.
@@ -160,6 +171,7 @@ espresso_machine_mock_heater:
   thermal_mass_j_per_c: 800.0    # 800g Al block + 20mL water
   heat_loss_w_per_c: 1.7
   water_inlet_temp_c: 20.0
+  heat_transfer_k: 2.0           # Heat transfer effectiveness constant [mL/s]
 
   # Temperature sensor — same ID as physical max6675/max31855
   temperature_sensor:
@@ -193,6 +205,9 @@ espresso_machine_mock_heater:
     entity_category: config
   ambient_number:
     name: "Mock Ambient Temperature"
+    entity_category: config
+  heat_transfer_k_number:
+    name: "Mock Heat Transfer K"
     entity_category: config
 
   # Duty-cycle sensor — shows SSR switching intensity in HA (0–100%)

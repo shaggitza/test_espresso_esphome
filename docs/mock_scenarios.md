@@ -16,7 +16,9 @@ testing plan for the safety-critical C++ code paths.
 | Hard / easy puck variation | mock_pump | ✅ Full | Adjustable `puck_pressure_bar` |
 | Pump stall (puck ≥ stall pressure) | mock_pump | ✅ Full | Q = 0 when P_puck ≥ P_stall |
 | Residual pressure after pump stop | mock_pump | ✅ Full | `internal_volume_ml` governs decay τ |
-| Flow-based thermoblock cooling | mock_heater | ✅ Full | IFlowObserver coupling; Cp × ΔT term in ODE |
+| Bypass mode (valves open) | mock_pump | ✅ Full | D_eff = 1, max flow, zero pressure when pumping with valve open |
+| Flow-based thermoblock cooling | mock_heater | ✅ Full | Heat transfer effectiveness model; ε = 1 − exp(−k/Q) |
+| Heat transfer effectiveness tuning | mock_heater | ✅ Full | `heat_transfer_k` parameter, HA-tunable number entity |
 | Thermoblock thermal mass | mock_heater | ✅ Full | Al block + water thermal mass |
 | Ambient heat loss | mock_heater | ✅ Full | Newton cooling term h × (T − T_amb) |
 | PID heater control | native ESPHome PID | ✅ Full | Unchanged from real config |
@@ -79,6 +81,75 @@ effectively zero after ~25 s (5 × τ).
 
 **Setting `internal_volume_ml = 0` reverts to instant-decay** (pre-2025
 behaviour) for tests that don't need the pressure model.
+
+---
+
+### Heat Transfer Effectiveness Model
+
+**What it models:** When water flows through the thermoblock, it absorbs heat
+from the aluminium block. At low flow rates, water has time to reach thermal
+equilibrium with the block (high effectiveness). At high flow rates, water
+exits before fully heating (lower effectiveness per mL, but more total heat
+transfer due to higher volume).
+
+**Parameters:**
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `heat_transfer_k` | 2.0 mL/s | Characteristic flow rate for heat transfer. Lower → better transfer at low flows. |
+| `water_inlet_temp_c` | 20 °C | Temperature of incoming cold water. |
+
+**Model:**
+
+```
+ε = 1 − exp(−k / Q)                           # Heat transfer effectiveness
+Q_water = Q × Cp × ε × (T_block − T_inlet)    # Heat absorbed by water [W]
+
+where:
+  Q     = flow rate [mL/s]
+  k     = heat_transfer_k [mL/s]
+  Cp    = 4.186 J/(mL·°C)
+  ε     = effectiveness (0 to 1)
+```
+
+**Behaviour at limits:**
+- **Q << k:** ε ≈ 1 (water fully absorbs available heat)
+- **Q >> k:** ε ≈ k/Q (less efficient per mL; total heat flow ~ k × Cp × ΔT)
+- **Q = k:** ε ≈ 0.63 (63% effectiveness)
+
+**Applies during all flow scenarios:** brewing, steaming, flushing, cooling.
+The `loop()` function continuously calculates heat transfer whenever flow
+rate > 0, regardless of orchestrator state.
+
+**Runtime tuning:** Adjust `heat_transfer_k` via the HA number entity
+`"Mock Heat Transfer K"` to match your machine's actual thermoblock
+characteristics without reflashing.
+
+---
+
+### Bypass Mode (Open Valve Pumping)
+
+**What it models:** When pumping through an open valve (steam valve, purge
+valve), there is no puck resistance. Water flows freely with minimal pressure
+buildup — unlike brewing through a coffee puck which creates back-pressure.
+
+**When it activates:**
+- Steam PURGING state (pump + purge valve)
+- Steam STEAMING state (pump + steam valve)
+- Steam COOLING state (pump + purge valve for active cooling)
+- Flush action (pump + purge valve)
+
+**Model:**
+
+```
+D_eff = 1.0           # No puck resistance
+flow = nominal_flow   # Maximum flow rate
+pressure ≈ 0          # No back-pressure
+```
+
+**Implementation:** The orchestrator calls `IPump::set_bypass_mode(true)` when
+entering these states, and `set_bypass_mode(false)` when returning to normal
+operation or safe-stopping.
 
 ---
 
