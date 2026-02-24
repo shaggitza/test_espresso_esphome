@@ -383,8 +383,13 @@ espresso_machine:
     valve: steam_valve
     purge_valve: purge_valve
     target_temperature: 135°C
+    # Pump 5 ml through the purge valve before opening the steam valve to flush
+    # residual water so only dry steam exits the wand (PURGING state).
+    purge_volume: 5ml
     flow_max: 2ml/s
     cool_down_to: 90°C
+    # Safety timeout: stop steaming after 5 minutes even if not manually stopped.
+    timeout: 5min
     # cleanup_script not yet implemented — commented out for now
 
 # =============================================================================

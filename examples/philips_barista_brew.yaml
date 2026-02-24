@@ -11,11 +11,12 @@
 # IMPLEMENTATION STATUS (see FEATURES.md for the full list):
 #   ✅ Implemented:  flow meter, valves (with interlock), pump, grinder, pre-infusion,
 #                    brew auto-termination at flow_max, PID climate (native ESPHome),
-#                    brew_start / brew_stop / steam_start / steam_stop actions
-#   🚧 Partial:      brew/steam state machines (temperature-gating not yet live),
-#                    temperature surfing (config accepted; climate call not wired)
-#   ⬜ Not yet:      cleanup_script execution, steam flow-rate control, grinder lockout,
-#                    brew profiles, shot stats as HA sensor entities
+#                    brew_start / brew_stop / steam_start / steam_stop actions,
+#                    steam temperature-gating (IHeater), purge-before-steam (purge_volume),
+#                    steam safety timeout, post-steam cool-down + purge sequence
+#   🚧 Partial:      temperature surfing (config accepted; ramp applies via IHeater),
+#                    hard over-temperature cutoff (C++ + on_value_range)
+#   ⬜ Not yet:      cleanup_script execution, grinder lockout, brew profiles
 #
 # DESIGN PHILOSOPHY:
 #   Every subsystem (heater, valves, pump, grinder, flow meter) is a first-class
@@ -541,7 +542,17 @@ espresso_machine:
 
   # ---------------------------------------------------------------------------
   # Steam mode — milk steaming sequence
-  # State machine: idle → heating → steaming → cooling → cleanup
+  # State machine: idle → heating → purging → steaming → cooling → cleanup
+  #
+  # Correct sequence:
+  #   1. HEATING   — raise thermoblock to target_temperature; valves closed
+  #   2. PURGING   — pump water through purge_valve to flush residual water;
+  #                  ensures only dry steam reaches the wand
+  #   3. STEAMING  — close purge valve, open steam valve; bang-bang pump
+  #                  control maintains flow_max ml/s rate
+  #   4. COOLING   — on stop: close steam valve, reopen purge valve,
+  #                  lower heater to cool_down_to; wait for temp to drop
+  #   5. CLEANUP   — close purge valve; return to idle
   # ---------------------------------------------------------------------------
   steam:
     heater: main_heater           # id of the climate entity above
@@ -550,8 +561,13 @@ espresso_machine:
     valve: steam_valve            # id of the valve entity above
     purge_valve: purge_valve      # id of the valve entity above
 
-    # Temperature to reach before opening the steam valve
+    # Temperature to reach before starting the purge / opening the steam valve
     target_temperature: 135°C
+
+    # Volume (ml) to pump through the purge valve before opening the steam valve.
+    # This flushes residual water so only dry steam exits the wand.
+    # Remove or set to 0 to skip the purge phase (backward-compatible).
+    purge_volume: 5ml
 
     # Pump duty-cycle target during steaming (ml/s)
     # The pump pulses on/off to maintain this average flow rate.
@@ -561,6 +577,10 @@ espresso_machine:
     # After steaming, ramp the heater back to this temperature automatically
     # so the machine is ready for the next shot without manual intervention.
     cool_down_to: 90°C
+
+    # Safety timeout: automatically stop steaming after this duration.
+    # Protects against forgotten steaming sessions.  0 or omitted = disabled.
+    timeout: 5min
 
     # Cleanup: purge steam path after cool-down.
     # NOTE: cleanup_script execution is planned for Phase 9. This block is

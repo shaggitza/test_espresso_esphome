@@ -132,8 +132,10 @@ espresso_machine:
     valve: steam_valve
     purge_valve: purge_valve
     target_temperature: 135°C
+    purge_volume: 5ml      # flush residual water before opening steam valve
     flow_max: 2ml/s
     cool_down_to: 90°C
+    timeout: 5min          # optional safety auto-stop
 ```
 
 ## Current Development Phase
@@ -148,3 +150,24 @@ See `PLAN.md` for the full phased roadmap.
 - Do not hardcode pin numbers in C++ — always route through the Python schema.
 - Do not reinvent PID — delegate to `esphome::climate::PIDClimate`.
 - Do not add dependencies not already available in ESPHome core.
+
+## Documentation and YAML Files — Always Keep Updated
+
+> **Important:** Every code change that adds or modifies a feature **must** be accompanied by
+> updates to all of the following files in the same PR. Reviewers will check for this.
+
+| File | What to update |
+|---|---|
+| `FEATURES.md` | Feature status table (✅ / 🚧 / ⬜); add new rows for new features |
+| `README.md` | Feature summary table; YAML reference snippet |
+| `examples/philips_barista_brew.yaml` | Add new YAML config keys with inline comments |
+| `examples/philips_barista_brew_mock.yaml` | Mirror all steam/brew config changes from the real example |
+| `docs/failure_scenarios.md` | Add scenario rows; update C++ test coverage table |
+| `docs/mock_scenarios.md` | Update scenario coverage matrix and safety testing plan |
+| `.github/copilot-instructions.md` | Update YAML snippet when new top-level config keys are added |
+
+**Rule:** No feature may be described as ✅ in `FEATURES.md` unless:
+1. The C++ runtime code is complete and correct.
+2. Unit tests exist and pass (`tests/cpp/`).
+3. The feature is documented in the relevant docs files.
+4. The example YAML files show how to configure it.

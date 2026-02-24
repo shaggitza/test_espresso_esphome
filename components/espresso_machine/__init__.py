@@ -23,6 +23,8 @@ CONF_FLOW_MAX = "flow_max"
 CONF_FLOW_MAX_NUMBER = "flow_max_number"
 CONF_FLOW_OFFSET = "flow_offset"
 CONF_COOL_DOWN_TO = "cool_down_to"
+CONF_PURGE_VOLUME = "purge_volume"
+CONF_STEAM_TIMEOUT = "timeout"
 
 # Temperature-surfing sub-schema keys
 CONF_TEMPERATURE_PROFILE = "temperature_profile"
@@ -117,6 +119,11 @@ STEAM_SCHEMA = cv.Schema(
         cv.Required(CONF_COOL_DOWN_TO): cv.temperature,
         # Optional IHeater-implementing component for temperature-gated transitions
         cv.Optional(CONF_HEATER_CTRL): cv.use_id(cg.Component),
+        # Volume to pump through the purge valve before opening the steam valve.
+        # Clears residual water so only dry steam reaches the wand.
+        cv.Optional(CONF_PURGE_VOLUME): _validate_volume_ml,
+        # Safety timeout: stop steaming after this duration (0 = disabled).
+        cv.Optional(CONF_STEAM_TIMEOUT): cv.positive_time_period_milliseconds,
         # Advanced fields validated in later phases; accepted here to avoid errors
         cv.Optional("cleanup_script"): cv.Any(),
     }
@@ -215,3 +222,9 @@ async def to_code(config):
         if CONF_HEATER_CTRL in steam:
             heater_ctrl = await cg.get_variable(steam[CONF_HEATER_CTRL])
             cg.add(var.set_steam_heater_ctrl(heater_ctrl))
+
+        if CONF_PURGE_VOLUME in steam:
+            cg.add(var.set_steam_purge_volume_ml(steam[CONF_PURGE_VOLUME]))
+
+        if CONF_STEAM_TIMEOUT in steam:
+            cg.add(var.set_steam_timeout_ms(steam[CONF_STEAM_TIMEOUT]))

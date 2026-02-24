@@ -82,7 +82,8 @@ void EspressoMachine::machine_off() {
       break;
 
     case EspressoMode::STEAMING:
-      if (steam_state_ == SteamState::STEAMING || steam_state_ == SteamState::HEATING) {
+      if (steam_state_ == SteamState::STEAMING || steam_state_ == SteamState::HEATING ||
+          steam_state_ == SteamState::PURGING) {
         // Initiate cool-down + purge before shutting down (safety: prevents steam burns
         // if the user turns the machine off while steam pressure is still present).
         ESP_LOGI(TAG, "Machine OFF: initiating steam cool-down + purge sequence");
@@ -173,8 +174,10 @@ void EspressoMachine::steam_start() {
     steam_valve_->close();
   if (steam_purge_valve_)
     steam_purge_valve_->close();
-  if (steam_pump_)
+  if (steam_pump_) {
     steam_pump_->turn_off();
+    steam_pump_->reset_flow();  // reset for purge volume tracking
+  }
 
   // Raise heater setpoint to steam temperature if a controller is wired
   if (steam_heater_ctrl_)
@@ -186,9 +189,10 @@ void EspressoMachine::steam_stop() {
     ESP_LOGW(TAG, "steam_stop ignored: machine is %s", mode_name());
     return;
   }
-  if (steam_state_ == SteamState::HEATING) {
+  if (steam_state_ == SteamState::HEATING || steam_state_ == SteamState::PURGING) {
     // Cancel before steaming began — lower setpoint and stop immediately.
-    ESP_LOGI(TAG, "Steam STOP (cancelled during heat-up)");
+    const char *cancel_phase = (steam_state_ == SteamState::HEATING) ? "heat-up" : "purge";
+    ESP_LOGI(TAG, "Steam STOP (cancelled during %s)", cancel_phase);
     if (steam_heater_ctrl_)
       steam_heater_ctrl_->set_target_temperature(steam_cool_down_to_);
     safe_stop_all_();
@@ -355,18 +359,63 @@ void EspressoMachine::advance_steam_() {
           break;  // Still heating — wait
         }
       }
-      ESP_LOGI(TAG, "Steam: HEATING → STEAMING (%.1f°C)",
-               steam_heater_ctrl_ ? steam_heater_ctrl_->get_current_temperature()
-                                  : steam_target_temp_);
-      steam_state_ = SteamState::STEAMING;
       state_entered_ms_ = millis();
-      if (steam_valve_)
-        steam_valve_->open();
-      if (steam_pump_)
-        steam_pump_->turn_on();
+      if (steam_purge_volume_ml_ > 0.0f) {
+        // Purge first: pump water through the purge valve to clear the steam
+        // path before opening the steam valve.  This ensures only dry steam
+        // reaches the wand, not residual water from the thermoblock.
+        ESP_LOGI(TAG, "Steam: HEATING → PURGING (%.1f°C) — clearing %.1fml through purge valve",
+                 steam_heater_ctrl_ ? steam_heater_ctrl_->get_current_temperature()
+                                    : steam_target_temp_,
+                 steam_purge_volume_ml_);
+        steam_state_ = SteamState::PURGING;
+        if (steam_pump_)
+          steam_pump_->reset_flow();
+        if (steam_purge_valve_)
+          steam_purge_valve_->open();
+        if (steam_pump_)
+          steam_pump_->turn_on();
+      } else {
+        // No purge configured: open steam valve immediately (backward compat).
+        ESP_LOGI(TAG, "Steam: HEATING → STEAMING (%.1f°C)",
+                 steam_heater_ctrl_ ? steam_heater_ctrl_->get_current_temperature()
+                                    : steam_target_temp_);
+        steam_state_ = SteamState::STEAMING;
+        steam_start_ms_ = millis();
+        if (steam_valve_)
+          steam_valve_->open();
+        if (steam_pump_)
+          steam_pump_->turn_on();
+      }
       break;
 
+    case SteamState::PURGING: {
+      // Pump water through the purge valve until the target purge volume is
+      // reached, then close the purge valve and open the steam valve.
+      float purged = steam_pump_ ? steam_pump_->get_flow_total() : 0.0f;
+      if (purged >= steam_purge_volume_ml_) {
+        ESP_LOGI(TAG, "Steam: PURGING → STEAMING (purged %.1fml)", purged);
+        if (steam_purge_valve_)
+          steam_purge_valve_->close();
+        if (steam_pump_)
+          steam_pump_->reset_flow();  // reset so STEAMING tracks steam-only volume
+        steam_state_ = SteamState::STEAMING;
+        steam_start_ms_ = millis();
+        state_entered_ms_ = millis();
+        if (steam_valve_)
+          steam_valve_->open();
+        // pump continues running for steaming
+      }
+      break;
+    }
+
     case SteamState::STEAMING: {
+      // Auto-stop: safety timeout (e.g. Wi-Fi disconnect prevents manual stop).
+      if (steam_timeout_ms_ > 0 && (millis() - steam_start_ms_) >= steam_timeout_ms_) {
+        ESP_LOGW(TAG, "Steam: TIMEOUT after %ums — stopping", steam_timeout_ms_);
+        steam_stop();
+        break;
+      }
       // Bang-bang flow rate control: toggle pump to maintain steam_flow_max_ml_per_s_.
       // Falls back to continuous pump operation when no flow meter is wired
       // (get_flow_rate() returns 0 by default, keeping the pump on).
