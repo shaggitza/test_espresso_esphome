@@ -515,6 +515,10 @@ espresso_machine:
     temperature_profile:
       offset: 5°C               # °C above target_temperature at shot start
       ramp_time: 20s            # time to decay back to target_temperature
+      # Optional HA switch — enables/disables temperature surfing at runtime
+      # without reflashing.  Defaults to ON (surfing active) when the device boots.
+      temp_surf_switch:
+        name: "Temperature Surfing"   # switch entity in HA
 
     # Stop the shot when this many ml have passed the flow meter
     flow_max: 40ml

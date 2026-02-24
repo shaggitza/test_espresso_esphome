@@ -323,6 +323,22 @@ TEST(Orchestrator, TempSurfingSettingsAccepted) {
   EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
 }
 
+TEST(Orchestrator, TempSurfingDisabledViaSwitch) {
+  // When temp_surf_enabled_ is set to false the orchestrator must not apply
+  // the surfing ramp — even if offset and ramp_time are configured.
+  // Use the simple fixture (no heater controller) so the BREWING tick runs
+  // but no setpoint call is made regardless of the enabled flag.
+  OrchestratorFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+  f.machine.set_temp_surf_enabled(false);
+
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  // No heater controller wired — no crash and machine is still brewing.
+}
+
 // ---------------------------------------------------------------------------
 // Phase 7 — pre-infusion
 // ---------------------------------------------------------------------------
@@ -541,6 +557,42 @@ struct OrchestratorWithHeaterFixture {
     machine.machine_on();  // power on so brew/steam actions are accepted
   }
 };
+
+TEST(Orchestrator, TempSurfingEnabledRaisesSetpoint) {
+  // When temp_surf_enabled_ is true and offset > 0, the BREWING tick should
+  // apply the surfing ramp.  At t=0 elapsed the desired setpoint is
+  // target + offset (5+90=95°C).
+  OrchestratorWithHeaterFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+  f.machine.set_brew_heater_ctrl(&f.heater_ctrl);
+  f.machine.set_brew_target_temperature(90.0f);
+  f.machine.set_temp_surf_enabled(true);  // surfing enabled (default)
+
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING (transition; surfing tick not yet run)
+  f.machine.loop();  // BREWING tick fires; surfing applies setpoint = 90 + 5 = 95
+  // At t≈0 the surfing tick sets desired = 90 + 5*(1 - 0/20000) ≈ 95
+  EXPECT_GT(f.heater_ctrl.target_temp, 90.0f);
+}
+
+TEST(Orchestrator, TempSurfingDisabledViaFlagDoesNotRaiseSetpoint) {
+  // With surfing disabled, the heater target should stay at or below
+  // brew_target_temp_ even when offset/ramp_time are configured.
+  OrchestratorWithHeaterFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+  f.machine.set_brew_heater_ctrl(&f.heater_ctrl);
+  f.machine.set_brew_target_temperature(90.0f);
+  f.machine.set_temp_surf_enabled(false);  // surfing disabled
+
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  f.machine.loop();  // BREWING tick: surfing skipped because flag is false
+  EXPECT_LE(f.heater_ctrl.target_temp, 90.0f);
+}
 
 TEST(Orchestrator, SteamStartSetsHeaterTargetToSteamTemperature) {
   OrchestratorWithHeaterFixture f;

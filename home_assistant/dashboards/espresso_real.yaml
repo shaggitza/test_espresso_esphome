@@ -213,6 +213,19 @@ views:
             icon: mdi:timer-outline
 
       # -----------------------------------------------------------------------
+      # BREW CONTROLS — adjustable settings exposed as HA entities
+      # -----------------------------------------------------------------------
+      - type: entities
+        title: Brew Controls
+        entities:
+          - entity: switch.philips_barista_brew_temperature_surfing
+            name: Temperature Surfing
+            icon: mdi:thermometer-lines
+          - entity: number.philips_barista_brew_brew_flow_max
+            name: Flow Max (mL)
+            icon: mdi:water
+
+      # -----------------------------------------------------------------------
       # LIVE SHOT FLOW GRAPH — flow rate + total volume
       # -----------------------------------------------------------------------
       - type: custom:mini-graph-card
