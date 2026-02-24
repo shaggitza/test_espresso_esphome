@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import number, sensor
-from esphome.const import CONF_ID, UNIT_SECOND, UNIT_MILLILITER, STATE_CLASS_MEASUREMENT
+from esphome.const import CONF_ID, UNIT_SECOND, STATE_CLASS_MEASUREMENT
 
 CODEOWNERS = ["@shaggitza"]
 AUTO_LOAD = ["number", "sensor"]
@@ -90,12 +90,12 @@ BREW_SCHEMA = cv.Schema(
                     state_class=STATE_CLASS_MEASUREMENT,
                 ),
                 cv.Optional(CONF_SHOT_VOLUME_SENSOR): sensor.sensor_schema(
-                    unit_of_measurement=UNIT_MILLILITER,
+                    unit_of_measurement="mL",
                     accuracy_decimals=1,
                     state_class=STATE_CLASS_MEASUREMENT,
                 ),
                 cv.Optional(CONF_SHOT_YIELD_SENSOR): sensor.sensor_schema(
-                    unit_of_measurement=UNIT_MILLILITER,
+                    unit_of_measurement="mL",
                     accuracy_decimals=1,
                     state_class=STATE_CLASS_MEASUREMENT,
                 ),
