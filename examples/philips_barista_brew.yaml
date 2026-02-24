@@ -201,11 +201,14 @@ sensor:
   # Diagnostic sensors (standard ESPHome platforms)
   - platform: uptime
     name: "Uptime"
+    entity_category: diagnostic
   - platform: wifi_signal
     name: "Wi-Fi Signal"
     update_interval: 60s
+    entity_category: diagnostic
   - platform: internal_temperature
     name: "ESP32 Temperature"
+    entity_category: diagnostic
 
   # NOTE: Shot statistics (last shot time, volume, yield) are now declared
   # natively under espresso_machine: brew: shot_stats: (P1-5).
@@ -390,6 +393,7 @@ espresso_machine_grinder:
   default_grind_time: 7s      # adjustable from HA as a number entity
   grind_time_number:
     name: "Grind Time"        # number entity in HA (ms); 0.5–30 s adjustable
+    entity_category: config
 
 # =============================================================================
 # BREW PROFILES — espresso_machine_profile platform (PLANNED — not yet implemented)
@@ -513,6 +517,7 @@ espresso_machine:
     # Expose flow_max as a HA number entity — adjustable at runtime without reflashing
     flow_max_number:
       name: "Brew Flow Max"      # number entity in HA (mL); 10–200 mL adjustable
+      entity_category: config
     # ml absorbed by puck + basket; subtracted from flow reading for HA yield display
     flow_offset: 20ml
 
@@ -641,6 +646,7 @@ button:
   # Trigger ESPHome's built-in PID autotune from HA — see docs/pid_tuning.md
   - platform: template
     name: "PID Autotune"
+    entity_category: config
     on_press:
       - climate.pid.autotune: main_heater
 
@@ -684,6 +690,7 @@ number:
     initial_value: 90
     optimistic: true
     restore_value: true
+    entity_category: config
     set_action:
       - climate.control:
           id: main_heater
@@ -698,4 +705,5 @@ text_sensor:
     name: "Machine Mode"
     id: machine_mode
     update_interval: 2s
+    entity_category: diagnostic
     lambda: return std::string(id(my_espresso).mode_name());

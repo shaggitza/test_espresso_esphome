@@ -191,6 +191,7 @@ espresso_machine_mock_heater:
   duty_sensor:
     name: "Heater SSR Duty"
     unit_of_measurement: "%"
+    entity_category: diagnostic
 
 # =============================================================================
 # MOCK PUMP — replaces physical relay pump + flow meter
@@ -262,11 +263,14 @@ espresso_machine_mock_pump:
 sensor:
   - platform: uptime
     name: "Uptime"
+    entity_category: diagnostic
   - platform: wifi_signal
     name: "Wi-Fi Signal"
     update_interval: 60s
+    entity_category: diagnostic
   - platform: internal_temperature
     name: "ESP32 Temperature"
+    entity_category: diagnostic
 
   # Shot statistics
   - platform: template
@@ -440,6 +444,7 @@ button:
 
   - platform: template
     name: "PID Autotune"
+    entity_category: config
     on_press:
       - climate.pid.autotune: main_heater
 
@@ -466,6 +471,7 @@ button:
   # Additional button to reset flow counter for new shot
   - platform: template
     name: "Reset Flow"
+    entity_category: config
     on_press:
       - espresso_machine_mock_pump.reset: main_pump
 
@@ -478,6 +484,7 @@ button:
   #   D=100 (blocked) → Q ≈ 0.04 mL/s, P_eq ≈ 15 bar
   - platform: template
     name: "Puck: Open (D=1)"
+    entity_category: config
     on_press:
       - number.set:
           id: main_pump_puck_density
@@ -485,6 +492,7 @@ button:
 
   - platform: template
     name: "Puck: Soft (D=25)"
+    entity_category: config
     on_press:
       - number.set:
           id: main_pump_puck_density
@@ -492,6 +500,7 @@ button:
 
   - platform: template
     name: "Puck: Medium (D=50)"
+    entity_category: config
     on_press:
       - number.set:
           id: main_pump_puck_density
@@ -499,6 +508,7 @@ button:
 
   - platform: template
     name: "Puck: Hard (D=75)"
+    entity_category: config
     on_press:
       - number.set:
           id: main_pump_puck_density
@@ -506,6 +516,7 @@ button:
 
   - platform: template
     name: "Puck: Blocked (D=100)"
+    entity_category: config
     on_press:
       - number.set:
           id: main_pump_puck_density
@@ -527,6 +538,7 @@ number:
     initial_value: 90
     optimistic: true
     restore_value: true
+    entity_category: config
     set_action:
       - climate.control:
           id: main_heater
@@ -540,4 +552,5 @@ text_sensor:
     name: "Machine Mode"
     id: machine_mode
     update_interval: 2s
+    entity_category: diagnostic
     lambda: return std::string(id(my_espresso).mode_name());
