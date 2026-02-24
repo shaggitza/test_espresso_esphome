@@ -343,6 +343,14 @@ espresso_machine_grinder:
 espresso_machine:
   id: my_espresso
 
+  # Status sensor — reports detailed state to HA immediately on every state change.
+  # Values: "Idle" | "Brew: Heating" | "Brew: Pre-infusion" | "Brewing" |
+  #         "Brew: Finishing" | "Brew: Cleanup" | "Steam: Heating" |
+  #         "Steam: Purging" | "Steaming" | "Steam: Cooling" | "Steam: Cleanup" |
+  #         "Flushing"
+  status_sensor:
+    name: "Espresso Status"
+
   brew:
     heater: main_heater
     heater_controller: mock_heater   # IHeater — enables temperature-gated transitions and temperature surfing (P1-2/P1-3)
@@ -545,7 +553,8 @@ number:
           target_temperature: !lambda "return x;"
 
 # =============================================================================
-# TEXT SENSOR — same as real config
+# TEXT SENSOR — exposes the current machine mode to HA (polling fallback)
+# The status_sensor above provides push-on-change status with more detail.
 # =============================================================================
 text_sensor:
   - platform: template
