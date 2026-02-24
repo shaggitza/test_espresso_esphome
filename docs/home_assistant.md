@@ -1,5 +1,54 @@
 # Home Assistant Dashboard — Espresso Machine
 
+## Dashboards
+
+Two ready-to-paste Lovelace dashboards are provided:
+
+| File | Target | Description |
+|---|---|---|
+| `home_assistant/dashboards/dashboard.yaml` | Real hardware + simulation | Unified dashboard — Controls, Live Data, Advanced |
+| `home_assistant/dashboards/dashboard_mock.yaml` | Simulation only | Dedicated mock dashboard — Controls, Live Data, Advanced |
+
+**How to install:**
+1. Settings → Dashboards → Add Dashboard
+2. Name it (e.g. "Espresso Machine" or "Espresso Sim"), open it → three-dot menu → "Edit Dashboard"
+3. Three-dot menu again → "Raw configuration editor"
+4. Paste the full contents of the chosen file (starting from `title:`) → Save.
+
+**No HACS addons required** — both dashboards use only standard Home Assistant card types
+(`entities`, `glance`, `tile`, `button`, `gauge`, `history-graph`, `thermostat`,
+`horizontal-stack`, `vertical-stack`, `markdown`).
+
+### `dashboard.yaml` — Unified (Real + Simulation)
+
+| View | Layout | Description |
+|---|---|---|
+| ☕ Control | 3-column `horizontal-stack` | Controls (left) · Buttons + live sensors (centre) · Simulation physics (right) |
+| 📊 Live Data | Single column | Temperature gauge + history-graph charts for temperature, flow, SSR duty, pressure |
+| ⚙️ Advanced | Single column | Direct valve/pump control + system diagnostics |
+
+### `dashboard_mock.yaml` — Dedicated Simulation Dashboard
+
+| View | Layout | Description |
+|---|---|---|
+| 🧪 Control | 3-column `horizontal-stack` | Controls (left) · Buttons + live sensors (centre) · Puck presets + physics parameters (right) |
+| 📊 Live Data | Single column | Temperature gauge + history-graph charts for temperature, flow, SSR duty, pressure, nozzle |
+| ⚙️ Advanced | Single column | Direct valve/pump control + mock system diagnostics |
+
+> ⚡ **Maintenance rule:** Whenever a new entity is added to the ESPHome firmware, add the
+> corresponding card to both `dashboard.yaml` and `dashboard_mock.yaml` in the same PR.
+> Real-device cards use the prefix `philips_barista_brew`.
+> Mock-device cards use the prefix `philips_barista_brew_mock`.
+
+The legacy per-device dashboards (`espresso_real.yaml`, `espresso_mock.yaml`) are kept for
+reference. Use `dashboard.yaml` or `dashboard_mock.yaml` for new installations.
+
+---
+
+Below is a ready-to-paste Lovelace dashboard card configuration for the espresso machine.
+
+---
+
 Below is a ready-to-paste Lovelace dashboard card configuration for the espresso machine.
 Add it via **Settings → Dashboards → Edit Dashboard → Add Card → Manual**.
 

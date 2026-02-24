@@ -1,0 +1,439 @@
+# =============================================================================
+# Lovelace Dashboard — Espresso Machine Simulation (Mock Device)
+# Target device: philips_barista_brew_mock.yaml
+# =============================================================================
+#
+# HOW TO INSTALL
+# --------------
+# 1. Settings → Dashboards → Add Dashboard → name it "Espresso Sim", icon mdi:flask
+# 2. Open dashboard → three-dot menu → Edit Dashboard → Raw configuration editor
+# 3. Paste content below (starting from title:) → Save
+#
+# ⚡ MAINTENANCE RULE ⚡
+# Whenever a new entity is added to the ESPHome firmware, add it to this
+# dashboard in the same PR.
+#
+# NO HACS ADDONS REQUIRED — uses standard Home Assistant card types only.
+#
+# ENTITY PREFIXES
+# ---------------
+# Shared entities (buttons, valves, sensors):  philips_barista_brew
+# Simulation-specific:                          philips_barista_brew_mock
+# Simulation physics parameters:                philips_barista_brew_mock_mock
+# =============================================================================
+
+title: "\U0001F9EA Espresso Sim"
+views:
+
+  # ==========================================================================
+  # VIEW 1 — CONTROL
+  # Three-column layout using horizontal-stack:
+  #   Column 1 (left)  : Controls — power, settings, thermostat
+  #   Column 2 (centre): Buttons — brew / steam / grinder + live sensors
+  #   Column 3 (right) : Simulation — puck presets + physics parameters
+  # ==========================================================================
+  - title: Control
+    icon: mdi:coffee-maker
+    path: control
+    cards:
+
+      - type: horizontal-stack
+        cards:
+
+          # ── COLUMN 1: CONTROLS ────────────────────────────────────────────
+          - type: vertical-stack
+            cards:
+              - type: markdown
+                content: "## ⚙️ Controls"
+
+              - type: tile
+                entity: switch.philips_barista_brew_mock_espresso_machine_power
+                name: Machine Power
+                icon: mdi:power
+
+              - type: tile
+                entity: switch.philips_barista_brew_mock_temperature_surfing
+                name: Temperature Surfing
+                icon: mdi:thermometer-chevron-up
+
+              - type: entities
+                title: Settings
+                entities:
+                  - entity: number.philips_barista_brew_mock_brew_temperature
+                    name: Brew Temp (°C)
+                    icon: mdi:thermometer-chevron-up
+                  - entity: number.philips_barista_brew_mock_brew_flow_max
+                    name: Flow Max (mL)
+                    icon: mdi:cup-water
+                  - entity: number.philips_barista_brew_grind_time
+                    name: Grind Time (ms)
+                    icon: mdi:timer-outline
+
+              - type: thermostat
+                entity: climate.philips_barista_brew_espresso_heater
+                features:
+                  - type: climate-hvac-modes
+                    hvac_modes:
+                      - "off"
+                      - heat
+
+          # ── COLUMN 2: BUTTONS + LIVE SENSORS ─────────────────────────────
+          - type: vertical-stack
+            cards:
+              - type: markdown
+                content: "## ☕ Brew & Steam"
+
+              - type: horizontal-stack
+                cards:
+                  - type: button
+                    entity: button.philips_barista_brew_brew_start
+                    name: Brew Start
+                    icon: mdi:play-circle
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_brew_start
+                  - type: button
+                    entity: button.philips_barista_brew_brew_stop
+                    name: Brew Stop
+                    icon: mdi:stop-circle
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_brew_stop
+
+              - type: horizontal-stack
+                cards:
+                  - type: button
+                    entity: button.philips_barista_brew_steam_start
+                    name: Steam Start
+                    icon: mdi:play-circle-outline
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_steam_start
+                  - type: button
+                    entity: button.philips_barista_brew_steam_stop
+                    name: Steam Stop
+                    icon: mdi:stop-circle-outline
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_steam_stop
+
+              - type: horizontal-stack
+                cards:
+                  - type: button
+                    entity: button.philips_barista_brew_grinder
+                    name: Grinder
+                    icon: mdi:screw-machine-round-top
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_grinder
+                  - type: button
+                    entity: button.philips_barista_brew_mock_reset_flow
+                    name: Reset Flow
+                    icon: mdi:restart
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_mock_reset_flow
+
+              - type: horizontal-stack
+                cards:
+                  - type: button
+                    entity: button.philips_barista_brew_pid_autotune
+                    name: PID Autotune
+                    icon: mdi:tune-variant
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_pid_autotune
+                  - type: button
+                    entity: button.philips_barista_brew_restart
+                    name: Restart
+                    icon: mdi:restart-alert
+                    show_name: true
+                    hold_action:
+                      action: none
+                    tap_action:
+                      action: call-service
+                      service: button.press
+                      target:
+                        entity_id: button.philips_barista_brew_restart
+
+              - type: markdown
+                content: "## 📊 Live Sensors"
+
+              - type: glance
+                show_name: true
+                show_icon: true
+                show_state: true
+                columns: 2
+                entities:
+                  - entity: sensor.philips_barista_brew_machine_mode
+                    name: Mode
+                    icon: mdi:coffee-maker
+                  - entity: sensor.philips_barista_brew_thermoblock_temperature
+                    name: Temp (°C)
+                    icon: mdi:thermometer
+                  - entity: sensor.philips_barista_brew_brew_flow_rate
+                    name: Flow (mL/s)
+                    icon: mdi:water-pump
+                  - entity: sensor.philips_barista_brew_brew_flow_total
+                    name: Volume (mL)
+                    icon: mdi:water
+                  - entity: sensor.philips_barista_brew_mock_heater_ssr_duty
+                    name: SSR Duty (%)
+                    icon: mdi:lightning-bolt
+                  - entity: sensor.philips_barista_brew_mock_mock_brew_pump_pressure
+                    name: Pressure (bar)
+                    icon: mdi:gauge
+
+              - type: glance
+                title: Last Shot
+                show_name: true
+                show_icon: true
+                show_state: true
+                entities:
+                  - entity: sensor.philips_barista_brew_mock_last_shot_time
+                    name: Duration (s)
+                    icon: mdi:timer
+                  - entity: sensor.philips_barista_brew_mock_last_shot_volume
+                    name: Volume (mL)
+                    icon: mdi:water-outline
+                  - entity: sensor.philips_barista_brew_last_shot_yield
+                    name: Yield (mL)
+                    icon: mdi:cup
+
+              - type: gauge
+                entity: sensor.philips_barista_brew_thermoblock_temperature
+                name: Thermoblock Temperature
+                min: 0
+                max: 165
+                needle: true
+                segments:
+                  - from: 0
+                    color: "#27ae60"
+                  - from: 85
+                    color: "#f39c12"
+                  - from: 130
+                    color: "#e74c3c"
+
+          # ── COLUMN 3: SIMULATION PARAMETERS ──────────────────────────────
+          - type: vertical-stack
+            cards:
+              - type: markdown
+                content: "## 🧪 Simulation"
+
+              - type: entities
+                title: Puck Presets
+                entities:
+                  - entity: button.philips_barista_brew_mock_puck_open_d_1
+                    name: "Open  (D=1,  ~0 bar)"
+                    icon: mdi:coffee-outline
+                  - entity: button.philips_barista_brew_mock_puck_soft_d_25
+                    name: "Soft  (D=25, ~3.6 bar)"
+                    icon: mdi:coffee
+                  - entity: button.philips_barista_brew_mock_puck_medium_d_50
+                    name: "Medium (D=50, ~7.4 bar)"
+                    icon: mdi:coffee-maker
+                  - entity: button.philips_barista_brew_mock_puck_hard_d_75
+                    name: "Hard  (D=75, ~11.1 bar)"
+                    icon: mdi:coffee-maker-check
+                  - entity: button.philips_barista_brew_mock_puck_blocked_d_100
+                    name: "Blocked (D=100, ~15 bar)"
+                    icon: mdi:cancel
+                  - entity: number.philips_barista_brew_mock_mock_puck_density
+                    name: Puck Density (1–100)
+                    icon: mdi:coffee
+
+              - type: entities
+                title: Thermal Model
+                entities:
+                  - entity: number.philips_barista_brew_mock_mock_heater_power
+                    name: Heater Power (W)
+                    icon: mdi:lightning-bolt
+                  - entity: number.philips_barista_brew_mock_mock_thermal_mass
+                    name: Thermal Mass (J/°C)
+                    icon: mdi:weight
+                  - entity: number.philips_barista_brew_mock_mock_heat_loss
+                    name: Heat Loss (W/°C)
+                    icon: mdi:fire
+                  - entity: number.philips_barista_brew_mock_mock_ambient_temperature
+                    name: Ambient Temp (°C)
+                    icon: mdi:home-thermometer
+
+              - type: entities
+                title: Pump + Puck Model
+                entities:
+                  - entity: number.philips_barista_brew_mock_mock_nominal_flow
+                    name: Nominal Flow (mL/s)
+                    icon: mdi:water-pump
+                  - entity: number.philips_barista_brew_mock_mock_pump_max_pressure
+                    name: Max Pressure (bar)
+                    icon: mdi:gauge
+                  - entity: number.philips_barista_brew_mock_mock_puck_time_constant
+                    name: Puck Time Constant (s)
+                    icon: mdi:timer-sand
+                  - entity: number.philips_barista_brew_mock_mock_internal_volume
+                    name: Internal Volume (mL)
+                    icon: mdi:pipe
+
+              - type: glance
+                title: Nozzle Output
+                show_name: true
+                show_icon: true
+                show_state: true
+                entities:
+                  - entity: sensor.philips_barista_brew_mock_nozzle_flow_rate
+                    name: Rate (mL/s)
+                    icon: mdi:water-boiler
+                  - entity: sensor.philips_barista_brew_mock_nozzle_flow_total
+                    name: Total (mL)
+                    icon: mdi:cup
+
+  # ==========================================================================
+  # VIEW 2 — LIVE DATA GRAPHS
+  # Standard history-graph cards — no addons required
+  # ==========================================================================
+  - title: Live Data
+    icon: mdi:chart-line
+    path: graphs
+    cards:
+
+      - type: gauge
+        entity: sensor.philips_barista_brew_thermoblock_temperature
+        name: Thermoblock Temperature
+        min: 0
+        max: 165
+        needle: true
+        segments:
+          - from: 0
+            color: "#27ae60"
+          - from: 85
+            color: "#f39c12"
+          - from: 130
+            color: "#e74c3c"
+
+      - type: history-graph
+        title: Temperature (last 30 min)
+        entities:
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Thermoblock (°C)
+        hours_to_show: 0.5
+        refresh_interval: 5
+
+      - type: history-graph
+        title: Heater SSR Duty (last 30 min)
+        entities:
+          - entity: sensor.philips_barista_brew_mock_heater_ssr_duty
+            name: SSR Duty (%)
+        hours_to_show: 0.5
+        refresh_interval: 5
+
+      - type: history-graph
+        title: Brew Flow (last 5 min)
+        entities:
+          - entity: sensor.philips_barista_brew_brew_flow_rate
+            name: Flow Rate (mL/s)
+          - entity: sensor.philips_barista_brew_brew_flow_total
+            name: Volume (mL)
+        hours_to_show: 0.083
+        refresh_interval: 5
+
+      - type: history-graph
+        title: Pump Pressure + Nozzle (last 5 min)
+        entities:
+          - entity: sensor.philips_barista_brew_mock_mock_brew_pump_pressure
+            name: Pressure (bar)
+          - entity: sensor.philips_barista_brew_mock_nozzle_flow_rate
+            name: Nozzle (mL/s)
+        hours_to_show: 0.083
+        refresh_interval: 5
+
+      - type: history-graph
+        title: Temperature (last 24 hours)
+        entities:
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Thermoblock (°C)
+        hours_to_show: 24
+        refresh_interval: 60
+
+  # ==========================================================================
+  # VIEW 3 — ADVANCED / DIAGNOSTICS
+  # Direct hardware control — for debugging and maintenance only
+  # ==========================================================================
+  - title: Advanced
+    icon: mdi:wrench
+    path: advanced
+    cards:
+
+      - type: entities
+        title: Direct Hardware Control
+        entities:
+          - entity: switch.philips_barista_brew_brew_valve
+            name: Brew Valve
+            icon: mdi:valve
+          - entity: switch.philips_barista_brew_steam_valve
+            name: Steam Valve
+            icon: mdi:valve
+          - entity: switch.philips_barista_brew_mock_purge_drain_valve
+            name: Purge / Drain Valve
+            icon: mdi:valve
+          - entity: switch.philips_barista_brew_mock_mock_pump
+            name: Mock Pump (Direct)
+            icon: mdi:pump
+
+      - type: glance
+        title: System Diagnostics
+        show_name: true
+        show_icon: true
+        show_state: true
+        entities:
+          - entity: sensor.philips_barista_brew_uptime
+            name: Uptime
+            icon: mdi:clock
+          - entity: sensor.philips_barista_brew_wi_fi_signal
+            name: Wi-Fi (dBm)
+            icon: mdi:wifi
+          - entity: sensor.philips_barista_brew_esp32_temperature
+            name: ESP32 (°C)
+            icon: mdi:chip
+
+      - type: history-graph
+        title: Temperature (last 24 hours)
+        entities:
+          - entity: sensor.philips_barista_brew_thermoblock_temperature
+            name: Thermoblock (°C)
+        hours_to_show: 24
+        refresh_interval: 60

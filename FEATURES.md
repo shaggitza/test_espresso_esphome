@@ -106,6 +106,8 @@ configuration and documented in the example YAML.
 | OTA updates | ✅ | Standard ESPHome OTA via Wi-Fi |
 | OLED display (SSD1306) | ✅ | Optional; display lambda documented in example YAML |
 | PID autotune button | ✅ | Template button triggers `climate.pid.autotune` |
+| HA dashboard — unified (`dashboard.yaml`) | ✅ | 3-column Control view (controls · buttons+sensors · simulation) + Live Data graphs + Advanced; no HACS required; paste into HA raw config editor; see `home_assistant/dashboards/dashboard.yaml` |
+| HA dashboard — simulation (`dashboard_mock.yaml`) | ✅ | Dedicated mock dashboard: 3-column Control (controls · buttons+sensors · puck presets+physics) + Live Data graphs + Advanced; no HACS required; see `home_assistant/dashboards/dashboard_mock.yaml` |
 
 ---
 
