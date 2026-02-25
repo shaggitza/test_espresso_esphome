@@ -2,7 +2,6 @@
 
 #include <cstdio>
 #include <cstring>
-#include "esphome/core/defines.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 // Full orchestrator header — needed to call brew/steam methods.
