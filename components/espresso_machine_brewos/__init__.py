@@ -4,6 +4,9 @@ from esphome.const import CONF_ID
 
 CODEOWNERS = ["@shaggitza"]
 
+# This component requires WiFi to be configured (for WebSocket connectivity).
+DEPENDENCIES = ["wifi"]
+
 # Reference the EspressoMachine class by namespace (avoids Python circular import).
 espresso_machine_ns = cg.esphome_ns.namespace("espresso_machine")
 EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
@@ -33,13 +36,11 @@ async def to_code(config):
 
     machine = await cg.get_variable(config[CONF_ESPRESSO_MACHINE])
     cg.add(var.set_espresso_machine(machine))
-    # Note: the WebSocket client (links2004/WebSockets) and Preferences headers
-    # are only compiled under #ifdef ARDUINO.  Add the library to your
-    # platformio_options when targeting ESP32:
-    #
-    #   esphome:
-    #     platformio_options:
-    #       lib_deps:
-    #         - links2004/WebSockets@^2.4.0
-    cg.add_library("549", "2.4.0")      # WebSockets by Links2004
-    cg.add_library("64", "6.21.3")      # ArduinoJson by Benoit Blanchon
+
+    # WebSocket client library (only used in Arduino builds; guarded by #ifdef).
+    # Use the library name format that works with ESPHome's lib_ldf_mode=off.
+    cg.add_library("links2004/WebSockets", "^2.4.0")
+    # Arduino ESP32 framework libraries required by WebSockets — with lib_ldf_mode=off
+    # these must be added explicitly since PlatformIO won't auto-discover them.
+    cg.add_library("WiFi", None)
+    cg.add_library("NetworkClientSecure", None)  # WiFiClientSecure.h (ESP32 3.x)

@@ -2,19 +2,20 @@
 
 #include <cstdio>
 #include <cstring>
+#include "esphome/core/defines.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 // Full orchestrator header — needed to call brew/steam methods.
 #include "../espresso_machine/espresso_machine.h"
 
 // ---------------------------------------------------------------------------
-// ESP32 Arduino-only: WebSocket client + NVS device-key management.
+// ESP32 Arduino-only: WebSocket client.
 // All networking code is wrapped in #ifdef USE_ESP32_FRAMEWORK_ARDUINO so the
 // component can be compiled and unit-tested on the host without Arduino SDK.
 // ---------------------------------------------------------------------------
 #ifdef USE_ESP32_FRAMEWORK_ARDUINO
 #include <Arduino.h>
-#include <Preferences.h>
+#include <WiFi.h>  // Must be included before WebSocketsClient.h
 #include <WebSocketsClient.h>
 
 // Module-level WebSocket client — only one BrewOSConnector is expected.
@@ -72,24 +73,20 @@ static std::string base64url_encode(const uint8_t *data, size_t len) {
   return out;
 }
 
-// Load or generate the device key stored in NVS under "brewos_sec"/"devKey".
-// A new 32-byte cryptographically random key is generated on the first boot
-// and persisted so that subsequent connections reuse the same credentials.
-static std::string brewos_get_or_create_device_key() {
-  Preferences prefs;
-  prefs.begin("brewos_sec", false);
-  String stored = prefs.getString("devKey", "");
-  if (stored.length() > 0) {
-    prefs.end();
-    return std::string(stored.c_str());
-  }
+// Generate a device key derived from the chip MAC + a fixed salt.
+// This is deterministic (same on every boot) and unique per device.
+// The key is a 32-byte value encoded as base64url (~43 chars).
+static std::string brewos_derive_device_key() {
+  uint64_t mac = ESP.getEfuseMac();
+  // Simple key derivation: XOR MAC bytes with a salt pattern, then
+  // expand to 32 bytes by repeating with different rotations.
   uint8_t key_bytes[32];
-  esp_fill_random(key_bytes, sizeof(key_bytes));
-  std::string key = base64url_encode(key_bytes, sizeof(key_bytes));
-  prefs.putString("devKey", key.c_str());
-  prefs.end();
-  ESP_LOGI("brewos", "Generated new device key (stored in NVS)");
-  return key;
+  const uint8_t salt[] = {0xBE, 0xEF, 0xCA, 0xFE, 0xDE, 0xAD, 0xC0, 0xDE};
+  for (int i = 0; i < 32; i++) {
+    uint8_t mac_byte = (mac >> ((i % 8) * 8)) & 0xFF;
+    key_bytes[i] = mac_byte ^ salt[i % 8] ^ static_cast<uint8_t>(i * 7);
+  }
+  return base64url_encode(key_bytes, sizeof(key_bytes));
 }
 
 // Parse <url> (https://host[:port] or http://host[:port]) and open the
@@ -177,7 +174,7 @@ void BrewOSConnector::setup() {
 #ifdef USE_ESP32_FRAMEWORK_ARDUINO
   g_connector_ptr = this;
   std::string device_id = brewos_get_device_id();
-  std::string device_key = brewos_get_or_create_device_key();
+  std::string device_key = brewos_derive_device_key();
   ESP_LOGI(TAG, "BrewOS device ID : %s", device_id.c_str());
   ESP_LOGI(TAG, "BrewOS cloud URL : %s", url_.c_str());
   brewos_connect_ws(url_, device_id, device_key);

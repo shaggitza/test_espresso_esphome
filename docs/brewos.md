@@ -28,25 +28,19 @@ forwards JSON messages between your device and the app.  Latency is typically < 
 
 ## YAML Configuration
 
-Add the following blocks to your ESPHome device configuration. The `platformio_options` entry installs the WebSocket client library that the cloud connector uses at runtime; the `espresso_machine_brewos:` block goes **after** the `espresso_machine:` block:
+Add the `espresso_machine_brewos:` block **after** the `espresso_machine:` block:
 
 ```yaml
-esphome:
-  name: my_espresso
-  # WebSocket client library required for BrewOS cloud connectivity.
-  # Remove if you are not using espresso_machine_brewos.
-  platformio_options:
-    lib_deps:
-      - links2004/WebSockets@^2.4.0
-
 espresso_machine_brewos:
   url: https://cloud.brewos.io    # BrewOS cloud base URL (change for self-hosting)
   espresso_machine: my_espresso   # id: of your espresso_machine: block
 ```
 
-The `platformio_options` entry tells PlatformIO to install the `links2004/WebSockets` library when compiling for ESP32. Without it you will see an `UnknownPackageError` or a missing-header compile error. The library is only referenced inside `#ifdef ARDUINO` blocks so it has no effect on schema validation or host-platform test builds.
+The component automatically installs its library dependencies (`links2004/WebSockets`, `WiFi`, `NetworkClientSecure`) via ESPHome's `cg.add_library()` — no manual `platformio_options` are required.
 
-That is all that is required. Device credentials are managed automatically (see below).
+The WebSocket library is only referenced inside `#ifdef USE_ESP32_FRAMEWORK_ARDUINO` blocks, so schema validation and host-platform test builds are unaffected.
+
+Device credentials are managed automatically (see below).
 
 ---
 
