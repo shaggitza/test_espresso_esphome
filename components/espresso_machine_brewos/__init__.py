@@ -44,3 +44,8 @@ async def to_code(config):
     # these must be added explicitly since PlatformIO won't auto-discover them.
     cg.add_library("WiFi", None)
     cg.add_library("NetworkClientSecure", None)  # WiFiClientSecure.h (ESP32 3.x)
+
+    # SAFETY: Reduce WebSocket TCP timeout from default 5000ms to 500ms.
+    # This limits how long the control loop can be blocked during reconnection.
+    # See docs/brewos_integration_analysis.md for details.
+    cg.add_build_flag("-DWEBSOCKETS_TCP_TIMEOUT=500")

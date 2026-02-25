@@ -183,10 +183,25 @@ void BrewOSConnector::setup() {
 
 // ---------------------------------------------------------------------------
 // loop() — drive the WebSocket and send periodic status updates.
+//
+// SAFETY: When the machine is busy (brewing, steaming, flushing), we skip
+// calling g_ws_client.loop() because it can block for up to
+// WEBSOCKETS_TCP_TIMEOUT ms during reconnection attempts. This ensures the
+// PID and orchestrator state machines are never starved.
+//
+// Trade-off: Cloud commands are not processed during active operations.
+// This is acceptable because:
+//   1. The machine should not accept conflicting commands mid-brew anyway.
+//   2. Local (HA API) commands still work.
+//   3. Status updates resume immediately after the operation completes.
 // ---------------------------------------------------------------------------
 void BrewOSConnector::loop() {
 #ifdef USE_ESP32_FRAMEWORK_ARDUINO
-  g_ws_client.loop();
+  // Skip potentially-blocking WS handling during critical operations.
+  bool machine_busy = (machine_ != nullptr) && machine_->is_busy();
+  if (!machine_busy) {
+    g_ws_client.loop();
+  }
   connected_ = g_ws_connected_flag;
 
   uint32_t now = millis();
