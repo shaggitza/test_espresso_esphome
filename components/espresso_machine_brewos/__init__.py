@@ -41,3 +41,5 @@ async def to_code(config):
     #     platformio_options:
     #       lib_deps:
     #         - links2004/WebSockets@^2.4.0
+    cg.add_library("549", "2.4.0")      # WebSockets by Links2004
+    cg.add_library("64", "6.21.3")      # ArduinoJson by Benoit Blanchon
