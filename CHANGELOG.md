@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `espresso_machine_brewos`: Added missing Arduino framework library dependencies (`WiFi`, `NetworkClientSecure`) to fix compilation with ESPHome's `lib_ldf_mode=off` — resolves `WiFi.h` / `WiFiClientSecure.h` not found errors
+- `espresso_machine_brewos`: Changed library reference from PlatformIO ID `549` to owner/repo format `links2004/WebSockets` for better compatibility
+
 ### Added
 - Initial project structure: README, PLAN, structure, CONTRIBUTING, NOTICE, CHANGELOG
 - GitHub Copilot instructions (`.github/copilot-instructions.md`)

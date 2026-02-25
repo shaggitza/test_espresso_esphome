@@ -1,5 +1,6 @@
 #include "mock_heater.h"
 #include <algorithm>
+#include <cmath>
 #include "esphome/core/hal.h"
 
 namespace esphome {

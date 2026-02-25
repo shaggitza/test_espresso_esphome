@@ -96,6 +96,11 @@ esphome:
   name: philips_barista_brew_mock
   friendly_name: "Philips Barista Brew (Mock)"
   comment: "Simulated espresso machine — no physical hardware required"
+  # Required when using espresso_machine_brewos — WebSocket client for BrewOS cloud.
+  # Remove this block if you are not using cloud connectivity.
+  platformio_options:
+    lib_deps:
+      - links2004/WebSockets@^2.4.0
 
 esp32:
   board: esp32dev
@@ -144,6 +149,7 @@ external_components:
       - espresso_machine_heater        # production IHeater adapter for climate.pid
       - espresso_machine_mock_heater   # ← thermal simulation (temp sensor + SSR output)
       - espresso_machine_mock_pump     # ← pump + flow simulation
+      - espresso_machine_brewos        # BrewOS cloud connectivity (optional)
 
 # =============================================================================
 # MOCK HEATER — replaces physical thermocouple + slow_pwm + SPI
@@ -422,6 +428,19 @@ espresso_machine:
     pump_min_on_time: 2s
     # cleanup_script fires when steam enters CLEANUP. Reference a script by id.
     # cleanup_script: my_steam_rinse_script
+
+# =============================================================================
+# BREWOS CLOUD CONNECTIVITY (optional) — mirrors real config
+#
+# Works identically in the mock build: the connector sends simulated machine
+# state to the cloud and dispatches cloud commands to the mock orchestrator.
+# Useful for end-to-end integration testing without physical hardware.
+#
+# See examples/philips_barista_brew.yaml for full documentation.
+# =============================================================================
+espresso_machine_brewos:
+  url: https://cloud.brewos.io    # ← CHANGE ME if self-hosting
+  espresso_machine: my_espresso   # same orchestrator ID as the real config
 
 # =============================================================================
 # DISPLAY — optional (same as real config)

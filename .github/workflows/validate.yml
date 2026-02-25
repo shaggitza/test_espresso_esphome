@@ -41,6 +41,7 @@ jobs:
           - tests/test_mock_heater.yaml
           - tests/test_mock_pump.yaml
           - tests/test_compile.yaml
+          - tests/test_brewos.yaml
           # Full example configs (authoritative references)
           - examples/philips_barista_brew.yaml
           - examples/philips_barista_brew_mock.yaml
@@ -55,8 +56,36 @@ jobs:
       - name: Install ESPHome
         run: pip install esphome
 
+      - name: Prepare example config for CI
+        if: startsWith(matrix.yaml, 'examples/')
+        run: |
+          # Generate a minimal secrets.yaml with a valid base64 API key
+          python3 -c "
+          import base64
+          key = base64.b64encode(b'\x00' * 32).decode()
+          open('examples/secrets.yaml', 'w').write(
+              'wifi_ssid: CI_TEST\n'
+              'wifi_password: CI_TEST_1\n'
+              'ha_api_key: ' + key + '\n'
+              'ota_password: CI_TEST\n'
+          )
+          "
+          # Rewrite external_components source from github://main to local path
+          # so the PR branch components are used instead of the merged-to-main copy.
+          YAML="${{ matrix.yaml }}"
+          CI_YAML="examples/ci_$(basename "$YAML")"
+          sed 's|source: github://shaggitza/test_espresso_esphome@main|source:\n      type: local\n      path: ../components|' \
+            "$YAML" > "$CI_YAML"
+
       - name: Validate ${{ matrix.yaml }}
-        run: esphome config ${{ matrix.yaml }}
+        run: |
+          YAML="${{ matrix.yaml }}"
+          CI_YAML="examples/ci_$(basename "$YAML")"
+          if [ -f "$CI_YAML" ]; then
+            esphome config "$CI_YAML"
+          else
+            esphome config "$YAML"
+          fi
 
   compile:
     name: ESPHome compile — host platform
