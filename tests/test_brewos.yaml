@@ -1,0 +1,76 @@
+# Test: espresso_machine_brewos — validates the BrewOS cloud connector schema.
+esphome:
+  name: test-brewos
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_brewos
+
+# --- Minimal PID heater (required by orchestrator brew: heater:) ---
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4
+    period: 1s
+
+sensor:
+  - platform: template
+    id: thermoblock_temp
+    lambda: return 90.0;
+    update_interval: 1s
+
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Test Heater"
+    sensor: thermoblock_temp
+    default_target_temperature: 90
+    heat_output: heater_ssr
+    control_parameters:
+      kp: 0.55901
+      ki: 0.11624
+      kd: 0.67209
+
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+  - id: purge_valve
+    name: "Purge Valve"
+    pin: GPIO14
+    normally_open: false
+
+espresso_machine_pump:
+  id: main_pump
+  type: relay
+  pin: GPIO25
+
+# --- Orchestrator ---
+espresso_machine:
+  id: my_espresso
+  brew:
+    heater: main_heater
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: purge_valve
+    flow_max: 40ml
+    flow_offset: 20ml
+
+# --- Component under test ---
+espresso_machine_brewos:
+  url: https://cloud.brewos.io
+  espresso_machine: my_espresso

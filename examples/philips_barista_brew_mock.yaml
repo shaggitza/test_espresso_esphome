@@ -96,6 +96,11 @@ esphome:
   name: philips_barista_brew_mock
   friendly_name: "Philips Barista Brew (Mock)"
   comment: "Simulated espresso machine — no physical hardware required"
+  # Required when using espresso_machine_brewos — WebSocket client for BrewOS cloud.
+  # Remove this block if you are not using cloud connectivity.
+  platformio_options:
+    lib_deps:
+      - links2004/WebSockets@^2.4.0
 
 esp32:
   board: esp32dev

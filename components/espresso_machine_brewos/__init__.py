@@ -33,9 +33,11 @@ async def to_code(config):
 
     machine = await cg.get_variable(config[CONF_ESPRESSO_MACHINE])
     cg.add(var.set_espresso_machine(machine))
-
-    # Arduino library dependencies for WebSocket client and JSON serialisation.
-    # These are only used in the production (Arduino framework) build; the test
-    # build guards all platform-specific code with #ifdef ARDUINO.
-    cg.add_library("links2004/WebSockets", "2.4.0")
-    cg.add_library("bblanchon/ArduinoJson", "6.21.3")
+    # Note: the WebSocket client (links2004/WebSockets) and Preferences headers
+    # are only compiled under #ifdef ARDUINO.  Add the library to your
+    # platformio_options when targeting ESP32:
+    #
+    #   esphome:
+    #     platformio_options:
+    #       lib_deps:
+    #         - links2004/WebSockets@^2.4.0
