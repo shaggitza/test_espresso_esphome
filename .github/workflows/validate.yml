@@ -59,25 +59,23 @@ jobs:
       - name: Prepare example config for CI
         if: startsWith(matrix.yaml, 'examples/')
         run: |
-          python3 - << 'PYEOF'
-          import base64, os
-          # Generate a valid dummy 32-byte base64 API key for ESPHome validation
-          dummy_key = base64.b64encode(b'\x00' * 32).decode()
-          with open("examples/secrets.yaml", "w") as f:
-              f.write(
-                  "wifi_ssid: CI_TEST\n"
-                  "wifi_password: CI_TEST_1\n"
-                  f"ha_api_key: {dummy_key}\n"
-                  "ota_password: CI_TEST\n"
-              )
-          src = "${{ matrix.yaml }}"
-          dst = "examples/ci_" + os.path.basename(src)
-          content = open(src).read().replace(
-              "source: github://shaggitza/test_espresso_esphome@main",
-              "source:\n      type: local\n      path: ../components",
+          # Generate a minimal secrets.yaml with a valid base64 API key
+          python3 -c "
+          import base64
+          key = base64.b64encode(b'\x00' * 32).decode()
+          open('examples/secrets.yaml', 'w').write(
+              'wifi_ssid: CI_TEST\n'
+              'wifi_password: CI_TEST_1\n'
+              'ha_api_key: ' + key + '\n'
+              'ota_password: CI_TEST\n'
           )
-          open(dst, "w").write(content)
-          PYEOF
+          "
+          # Rewrite external_components source from github://main to local path
+          # so the PR branch components are used instead of the merged-to-main copy.
+          YAML="${{ matrix.yaml }}"
+          CI_YAML="examples/ci_$(basename "$YAML")"
+          sed 's|source: github://shaggitza/test_espresso_esphome@main|source:\n      type: local\n      path: ../components|' \
+            "$YAML" > "$CI_YAML"
 
       - name: Validate ${{ matrix.yaml }}
         run: |

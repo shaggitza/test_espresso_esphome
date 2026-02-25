@@ -235,7 +235,7 @@ espresso_machine_flow_meter:
   name: "Brew Flow"
   pin:
     number: GPIO34            # ← CHANGE ME (input-capable GPIO; GPIO34–39 on ESP32)
-    mode: INPUT_PULLDOWN
+    mode: INPUT               # GPIO34–39 are input-only, no internal pull-up/down
   pulses_per_ml: 0.5195       # ← calibrate for your flow meter (AB32: ~0.5195)
   rate_sensor:
     name: "Brew Flow Rate"    # ml/s — appears in HA as sensor entity

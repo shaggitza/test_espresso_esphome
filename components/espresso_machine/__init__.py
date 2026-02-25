@@ -117,8 +117,8 @@ BREW_SCHEMA = cv.Schema(
                 ),
             }
         ),
-        # cleanup_script wired in Phase 9
-        cv.Optional("cleanup_script"): cv.Any(),
+        # cleanup_script wired in Phase 9; accept any YAML value for now
+        cv.Optional("cleanup_script"): lambda v: v,
     }
 )
 
@@ -142,7 +142,7 @@ STEAM_SCHEMA = cv.Schema(
         # bang-bang steam control.  Reduces pump wear. Default: 2 s. (P2-7)
         cv.Optional(CONF_PUMP_MIN_ON_TIME, default="2s"): cv.positive_time_period_milliseconds,
         # Advanced fields validated in later phases; accepted here to avoid errors
-        cv.Optional("cleanup_script"): cv.Any(),
+        cv.Optional("cleanup_script"): lambda v: v,
     }
 )
 

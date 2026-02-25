@@ -5,7 +5,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 // Full orchestrator header — needed to call brew/steam methods.
-#include "espresso_machine/espresso_machine.h"
+#include "../espresso_machine/espresso_machine.h"
 
 // ---------------------------------------------------------------------------
 // Arduino-only: WebSocket client + NVS device-key management.
