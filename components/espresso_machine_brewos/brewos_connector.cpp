@@ -8,11 +8,11 @@
 #include "../espresso_machine/espresso_machine.h"
 
 // ---------------------------------------------------------------------------
-// Arduino-only: WebSocket client + NVS device-key management.
-// All networking code is wrapped in #ifdef ARDUINO so the component can be
-// compiled and unit-tested on the host without Arduino SDK headers.
+// ESP32 Arduino-only: WebSocket client + NVS device-key management.
+// All networking code is wrapped in #ifdef USE_ESP32_FRAMEWORK_ARDUINO so the
+// component can be compiled and unit-tested on the host without Arduino SDK.
 // ---------------------------------------------------------------------------
-#ifdef ARDUINO
+#ifdef USE_ESP32_FRAMEWORK_ARDUINO
 #include <Arduino.h>
 #include <Preferences.h>
 #include <WebSocketsClient.h>
@@ -132,7 +132,7 @@ static void brewos_connect_ws(const std::string &base_url,
   g_ws_client.onEvent(ws_event);
   g_ws_client.setReconnectInterval(5000);
 }
-#endif  // ARDUINO
+#endif  // USE_ESP32_FRAMEWORK_ARDUINO
 
 // ---------------------------------------------------------------------------
 // Minimal JSON helpers — no external dependencies, work in test builds.
@@ -174,7 +174,7 @@ static const char *const TAG = "brewos";
 // setup() — open the WebSocket connection (Arduino builds only).
 // ---------------------------------------------------------------------------
 void BrewOSConnector::setup() {
-#ifdef ARDUINO
+#ifdef USE_ESP32_FRAMEWORK_ARDUINO
   g_connector_ptr = this;
   std::string device_id = brewos_get_device_id();
   std::string device_key = brewos_get_or_create_device_key();
@@ -188,7 +188,7 @@ void BrewOSConnector::setup() {
 // loop() — drive the WebSocket and send periodic status updates.
 // ---------------------------------------------------------------------------
 void BrewOSConnector::loop() {
-#ifdef ARDUINO
+#ifdef USE_ESP32_FRAMEWORK_ARDUINO
   g_ws_client.loop();
   connected_ = g_ws_connected_flag;
 
@@ -270,7 +270,7 @@ std::string BrewOSConnector::build_status_json() const {
 // send_raw() — write a JSON string over the WebSocket.
 // ---------------------------------------------------------------------------
 void BrewOSConnector::send_raw(const std::string &json) {
-#ifdef ARDUINO
+#ifdef USE_ESP32_FRAMEWORK_ARDUINO
   if (g_ws_connected_flag) {
     g_ws_client.sendTXT(json.c_str(), json.size());
   }
