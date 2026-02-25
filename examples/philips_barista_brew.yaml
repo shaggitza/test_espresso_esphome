@@ -90,6 +90,7 @@ external_components:
       - espresso_machine_pump      # vibration pump (relay or dimmer)
       - espresso_machine_grinder   # timed relay grinder with lockout
       - espresso_machine_flow_meter  # pulse-counting volumetric sensor
+      - espresso_machine_brewos    # BrewOS cloud connectivity (optional)
 
 # -----------------------------------------------------------------------------
 # SPI bus — used by the MAX6675/MAX31855 thermocouple board
@@ -614,6 +615,44 @@ espresso_machine:
           id: main_pump
           volume_ml: 10ml
       - espresso_machine_valve.close: purge_valve
+
+# =============================================================================
+# BREWOS CLOUD CONNECTIVITY (optional)
+#
+# Registers the machine with the BrewOS cloud relay so you can monitor and
+# control it remotely from anywhere — even when Home Assistant is offline.
+#
+# HOW IT WORKS:
+#   1. On first boot the connector generates a unique device ID (BRW-XXXXXXXX,
+#      derived from the ESP32 chip MAC) and a 32-byte random device key, stored
+#      in NVS so they survive reboots.
+#   2. A persistent WebSocket connection is opened to
+#        wss://<url>/ws/device?id=<device_id>&key=<device_key>
+#   3. A JSON status message is sent to the cloud every 5 seconds.
+#   4. Commands received from the cloud (brew_start, brew_stop, steam_start,
+#      steam_stop, machine_on, machine_off, flush) are forwarded to the
+#      espresso_machine: orchestrator.
+#   5. On disconnect the connector reconnects automatically with exponential
+#      back-off (5 s → 60 s maximum).
+#
+# PAIRING:
+#   Use the BrewOS web or mobile app and scan the QR code shown at
+#   <device_ip>/pairing (provided by the companion BrewOS firmware web UI).
+#   Once paired, the cloud relays commands and status between the device and
+#   the app; no port-forwarding or VPN required.
+#
+# SELF-HOSTING:
+#   You can run your own BrewOS cloud relay.  See:
+#   https://github.com/brewos-io/cloud/blob/main/docs/Deployment.md
+#   Then set url: to your own instance (e.g. https://brewos.yourdomain.com).
+#
+# OFFLINE OPERATION:
+#   Cloud connectivity is fully optional.  Removing or commenting out this
+#   block has no effect on local operation via Home Assistant.
+# =============================================================================
+espresso_machine_brewos:
+  url: https://cloud.brewos.io    # ← CHANGE ME if self-hosting
+  espresso_machine: my_espresso   # id of the espresso_machine: orchestrator above
 
 # =============================================================================
 # DISPLAY (optional) — native ESPHome SSD1306 via I2C

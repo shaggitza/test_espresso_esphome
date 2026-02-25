@@ -34,6 +34,7 @@ planned in this project.
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
 | `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()` |
+| `espresso_machine_brewos` | `component` | ✅ | BrewOS cloud connectivity; persistent WebSocket relay; auto device-key management; remote brew/steam/flush commands; 5 s status heartbeat |
 
 ---
 
@@ -122,3 +123,17 @@ configuration and documented in the example YAML.
 | Gaggiuino/GaggiaMate profile import | Phase 12 | Python CLI converter planned |
 | Weight-based shot exit (scale) | Future | Requires HX711 / NAU7802 scale platform |
 | Pressure transducer | Future | Requires ADC + transducer hardware |
+
+---
+
+## Cloud Integration (BrewOS)
+
+| Feature | Status | Notes |
+|---|---|---|
+| WebSocket connection to BrewOS cloud relay | ✅ | Persistent WSS connection; reconnects with exponential back-off |
+| Auto device ID from chip MAC (`BRW-XXXXXXXX`) | ✅ | Derived in `setup()` |
+| Auto device key generation + NVS persistence | ✅ | 32-byte random key, base64url-encoded, stored under `brewos_sec/devKey` |
+| Periodic status heartbeat (`pico_status` JSON) | ✅ | Sent every 5 s; includes mode, brew/steam state, busy, powered-on |
+| Remote command dispatch | ✅ | `brew_start`, `brew_stop`, `steam_start`, `steam_stop`, `machine_on`, `machine_off`, `flush` |
+| Offline / local fallback | ✅ | Cloud is entirely optional; machine operates normally when cloud unreachable |
+| Unit tests for command dispatch + status JSON | ✅ | 18 tests in `tests/cpp/test_brewos.cpp` |

@@ -37,6 +37,7 @@ partial / planned). A high-level summary:
 | **Brew profiles** | ⬜ Planned | Multi-phase pressure/flow curves (Phase 12) |
 | **Home Assistant integration** | ✅ Implemented | All entities auto-discovered via native ESPHome API |
 | **OTA updates** | ✅ Implemented | Standard ESPHome OTA via Wi-Fi |
+| **BrewOS cloud connectivity** | ✅ Implemented | Optional remote access via BrewOS WebSocket relay; remote brew/steam/flush commands; 5 s status heartbeat |
 
 ---
 
