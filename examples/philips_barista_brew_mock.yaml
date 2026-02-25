@@ -110,6 +110,12 @@ logger:
   # level: DEBUG  # Uncomment to see detailed thermal/flow simulation logs
 
 # -----------------------------------------------------------------------------
+# Debug component — exposes MCU memory and loop-time metrics to HA
+# -----------------------------------------------------------------------------
+debug:
+  update_interval: 30s
+
+# -----------------------------------------------------------------------------
 # Home Assistant API
 # -----------------------------------------------------------------------------
 api:
@@ -293,6 +299,13 @@ sensor:
   - platform: internal_temperature
     name: "ESP32 Temperature"
     entity_category: diagnostic
+  - platform: debug
+    free:
+      name: "Heap Free"
+      entity_category: diagnostic
+    loop_time:
+      name: "Loop Time"
+      entity_category: diagnostic
 
 # =============================================================================
 # HEATER PID — IDENTICAL to real config (uses same sensor/output IDs)
