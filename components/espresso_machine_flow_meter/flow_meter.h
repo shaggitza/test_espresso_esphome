@@ -16,9 +16,10 @@ class FlowMeter : public Component, public espresso_machine::IFlowMeter {
   void set_pulses_per_ml(float pulses_per_ml) { pulses_per_ml_ = pulses_per_ml; }
 
   // Child sensor setters — called from generated code when the user declares
-  // rate_sensor: / total_sensor: sub-blocks in YAML.
+  // rate_sensor: / total_sensor: / avg_rate_sensor: sub-blocks in YAML.
   void set_rate_sensor(sensor::Sensor *s) { rate_sensor_ = s; }
   void set_total_sensor(sensor::Sensor *s) { total_sensor_ = s; }
+  void set_avg_rate_sensor(sensor::Sensor *s) { avg_rate_sensor_ = s; }
 
   void setup() override;
   void loop() override;
@@ -27,6 +28,8 @@ class FlowMeter : public Component, public espresso_machine::IFlowMeter {
   float get_total_volume() const { return total_volume_; }
   // For use in display lambdas
   float total_volume() const { return total_volume_; }
+  // 3-second rolling average of the flow rate (30 × 100 ms samples)
+  float get_avg_rate_3s() const { return avg_rate_3s_; }
   void reset();
 
   // Adjust pulses_per_ml so that the pulses counted since the last reset
@@ -48,8 +51,16 @@ class FlowMeter : public Component, public espresso_machine::IFlowMeter {
   float rate_{0.0f};
   float total_volume_{0.0f};
 
+  // 3-second rolling average (30 samples × 100 ms loop interval)
+  static constexpr uint8_t AVG_WINDOW_SIZE = 30;
+  float avg_buf_[AVG_WINDOW_SIZE]{};
+  uint8_t avg_buf_idx_{0};
+  uint8_t avg_buf_count_{0};
+  float avg_rate_3s_{0.0f};
+
   sensor::Sensor *rate_sensor_{nullptr};
   sensor::Sensor *total_sensor_{nullptr};
+  sensor::Sensor *avg_rate_sensor_{nullptr};
 };
 
 // ---------------------------------------------------------------------------

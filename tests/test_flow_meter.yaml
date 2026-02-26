@@ -27,3 +27,5 @@ espresso_machine_flow_meter:
     name: "Brew Flow Rate"
   total_sensor:
     name: "Brew Flow Total"
+  avg_rate_sensor:
+    name: "Brew Flow Rate (3s avg)"

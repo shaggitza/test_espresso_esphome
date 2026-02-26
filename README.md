@@ -140,6 +140,12 @@ espresso_machine_flow_meter:
   name: "Brew Flow"
   pin: GPIO34
   pulses_per_ml: 0.5195
+  rate_sensor:
+    name: "Brew Flow Rate"        # ml/s — instantaneous rate
+  total_sensor:
+    name: "Brew Flow Total"       # mL accumulated this shot
+  avg_rate_sensor:
+    name: "Brew Flow Rate (3s avg)"  # ml/s — 3-second rolling average
 
 # Valves — espresso_machine_valve platform (first-class citizens)
 # Each valve is its own switch entity in HA; interlock is enforced by the platform.

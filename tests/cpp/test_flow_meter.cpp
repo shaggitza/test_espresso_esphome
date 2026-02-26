@@ -165,3 +165,84 @@ TEST(FlowMeter, SensorsReceivePublishedValues) {
   EXPECT_FLOAT_EQ(total_sens.state, 20.0f);
   EXPECT_FLOAT_EQ(rate_sens.state, 20.0f);  // 20 ml in 1 s
 }
+
+TEST(FlowMeter, AvgRate3sIsZeroInitially) {
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+  EXPECT_FLOAT_EQ(fm.get_avg_rate_3s(), 0.0f);
+}
+
+TEST(FlowMeter, AvgRate3sMatchesRateForSingleSample) {
+  // With one loop tick at 50 ml/s the avg should equal that rate.
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+  fm.add_pulses(50);
+  g_mock_millis = 1000;
+  fm.loop();
+  EXPECT_FLOAT_EQ(fm.get_avg_rate_3s(), fm.get_rate());
+}
+
+TEST(FlowMeter, AvgRate3sAveragesMultipleSamples) {
+  // Two ticks: 20 ml/s then 40 ml/s → average = 30 ml/s
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+
+  fm.add_pulses(20);
+  g_mock_millis = 1000;
+  fm.loop();  // rate = 20 ml/s
+
+  fm.add_pulses(40);
+  g_mock_millis = 2000;
+  fm.loop();  // rate = 40 ml/s
+
+  EXPECT_FLOAT_EQ(fm.get_avg_rate_3s(), 30.0f);
+}
+
+TEST(FlowMeter, AvgRate3sWindowEvictsOldSamples) {
+  // Fill the 30-sample window with rate=10, then inject rate=40 for 30 more ticks.
+  // After 30 new ticks the window should contain only 40 ml/s samples → avg ≈ 40.
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+
+  // First 30 ticks at 10 ml/s (1000 ms each, 10 pulses each)
+  for (int i = 1; i <= 30; i++) {
+    fm.add_pulses(10);
+    g_mock_millis = static_cast<uint32_t>(i * 1000);
+    fm.loop();
+  }
+
+  // Next 30 ticks at 40 ml/s (1000 ms each, 40 pulses each)
+  for (int i = 31; i <= 60; i++) {
+    fm.add_pulses(40);
+    g_mock_millis = static_cast<uint32_t>(i * 1000);
+    fm.loop();
+  }
+
+  EXPECT_FLOAT_EQ(fm.get_avg_rate_3s(), 40.0f);
+}
+
+TEST(FlowMeter, AvgRate3sClearedOnReset) {
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+  fm.add_pulses(50);
+  g_mock_millis = 1000;
+  fm.loop();
+  EXPECT_GT(fm.get_avg_rate_3s(), 0.0f);
+
+  fm.reset();
+  EXPECT_FLOAT_EQ(fm.get_avg_rate_3s(), 0.0f);
+}
+
+TEST(FlowMeter, AvgRateSensorReceivesPublishedValues) {
+  GPIOPin pin;
+  FlowMeter fm = make_flow_meter(pin, 1.0f);
+
+  Sensor avg_sens;
+  fm.set_avg_rate_sensor(&avg_sens);
+
+  fm.add_pulses(30);
+  g_mock_millis = 1000;
+  fm.loop();  // rate = 30 ml/s, avg (1 sample) = 30 ml/s
+
+  EXPECT_FLOAT_EQ(avg_sens.state, 30.0f);
+}
