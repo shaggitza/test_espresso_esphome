@@ -29,6 +29,7 @@ CONF_COOL_DOWN_TO = "cool_down_to"
 CONF_PURGE_VOLUME = "purge_volume"
 CONF_STEAM_TIMEOUT = "timeout"
 CONF_PUMP_MIN_ON_TIME = "pump_min_on_time"
+CONF_PUMP_MIN_OFF_TIME = "pump_min_off_time"
 CONF_FLUSH_VOLUME = "volume_ml"
 
 # Temperature-surfing sub-schema keys
@@ -97,6 +98,10 @@ BREW_SCHEMA = cv.Schema(
             unit_of_measurement="mL",
         ),
         cv.Optional(CONF_PRE_INFUSION): PRE_INFUSION_SCHEMA,
+        # Minimum time the pump must stay ON/OFF before toggling in any bang-bang
+        # brew control.  Reduces pump wear.  Default: 500 ms.
+        cv.Optional(CONF_PUMP_MIN_ON_TIME, default="500ms"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_PUMP_MIN_OFF_TIME): cv.positive_time_period_milliseconds,
         # Shot statistics exposed as HA sensor entities (P1-5)
         cv.Optional(CONF_SHOT_STATS): cv.Schema(
             {
@@ -139,8 +144,11 @@ STEAM_SCHEMA = cv.Schema(
         # Safety timeout: stop steaming after this duration (0 = disabled).
         cv.Optional(CONF_STEAM_TIMEOUT): cv.positive_time_period_milliseconds,
         # Minimum time the pump must stay ON before it can be toggled off in
-        # bang-bang steam control.  Reduces pump wear. Default: 2 s. (P2-7)
-        cv.Optional(CONF_PUMP_MIN_ON_TIME, default="2s"): cv.positive_time_period_milliseconds,
+        # bang-bang steam control.  Reduces pump wear. Default: 500 ms. (P2-7)
+        cv.Optional(CONF_PUMP_MIN_ON_TIME, default="500ms"): cv.positive_time_period_milliseconds,
+        # Minimum time the pump must stay OFF before it can be turned on again in
+        # bang-bang steam control.  Reduces pump wear. (P2-7)
+        cv.Optional(CONF_PUMP_MIN_OFF_TIME): cv.positive_time_period_milliseconds,
         # Advanced fields validated in later phases; accepted here to avoid errors
         cv.Optional("cleanup_script"): cv.Any(),
     }
@@ -217,6 +225,10 @@ async def to_code(config):
             cg.add(var.set_pre_infusion_volume_ml(pi[CONF_PRE_INFUSION_VOLUME]))
             cg.add(var.set_pre_infusion_hold_time_ms(pi[CONF_PRE_INFUSION_HOLD_TIME]))
 
+        cg.add(var.set_brew_pump_min_on_ms(brew[CONF_PUMP_MIN_ON_TIME]))
+        if CONF_PUMP_MIN_OFF_TIME in brew:
+            cg.add(var.set_brew_pump_min_off_ms(brew[CONF_PUMP_MIN_OFF_TIME]))
+
         if CONF_SHOT_STATS in brew:
             stats = brew[CONF_SHOT_STATS]
             if CONF_SHOT_TIME_SENSOR in stats:
@@ -259,6 +271,8 @@ async def to_code(config):
             cg.add(var.set_steam_timeout_ms(steam[CONF_STEAM_TIMEOUT]))
 
         cg.add(var.set_steam_pump_min_on_ms(steam[CONF_PUMP_MIN_ON_TIME]))
+        if CONF_PUMP_MIN_OFF_TIME in steam:
+            cg.add(var.set_steam_pump_min_off_ms(steam[CONF_PUMP_MIN_OFF_TIME]))
 
 
 # ---------------------------------------------------------------------------

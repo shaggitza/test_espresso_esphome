@@ -1681,13 +1681,13 @@ TEST(SteamPumpMinOn, PumpStaysOnDuringMinOnWindow) {
 
   // Rate already at target, but min_on_ms not elapsed — pump must stay on.
   f.steam_pump.rate = 2.0f;
-  g_mock_millis = 500;
+  g_mock_millis = 250;
   f.machine.loop();
-  EXPECT_TRUE(f.steam_pump.running);  // still within 2 s window
+  EXPECT_TRUE(f.steam_pump.running);  // still within 500 ms window
 
-  g_mock_millis = 1999;
+  g_mock_millis = 499;
   f.machine.loop();
-  EXPECT_TRUE(f.steam_pump.running);  // still within 2 s window
+  EXPECT_TRUE(f.steam_pump.running);  // still within 500 ms window
 }
 
 // Pump turns off only after the minimum on-window has expired.
@@ -1697,27 +1697,91 @@ TEST(SteamPumpMinOn, PumpTurnsOffAfterMinOnWindow) {
   f.machine.loop();  // HEATING → STEAMING
   f.steam_pump.rate = 2.0f;
 
-  g_mock_millis = 2000;
-  // At t=2000 with pump_on_ms=0: elapsed (2000) >= min_on_ms (2000) → pump turns off.
+  g_mock_millis = 500;
+  // At t=500 with pump_on_ms=0: elapsed (500) >= min_on_ms (500) → pump turns off.
   f.machine.loop();
   EXPECT_FALSE(f.steam_pump.running);
 }
 
-// Configuring a shorter minimum on-window via set_steam_pump_min_on_ms().
+// Configuring a longer minimum on-window via set_steam_pump_min_on_ms().
 TEST(SteamPumpMinOn, CustomMinOnWindowIsRespected) {
   OrchestratorFixture f;
-  f.machine.set_steam_pump_min_on_ms(500);  // 500 ms custom window
+  f.machine.set_steam_pump_min_on_ms(2000);  // 2000 ms custom window
   f.machine.steam_start();
   f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
   f.steam_pump.rate = 2.0f;
 
-  g_mock_millis = 499;
+  g_mock_millis = 1999;
   f.machine.loop();
   EXPECT_TRUE(f.steam_pump.running);  // not yet elapsed
 
-  g_mock_millis = 500;
-  f.machine.loop();  // 500 ms elapsed → pump off
+  g_mock_millis = 2000;
+  f.machine.loop();  // 2000 ms elapsed → pump off
   EXPECT_FALSE(f.steam_pump.running);
+}
+
+// ---------------------------------------------------------------------------
+// P2-7: Steam pump minimum OFF time
+// ---------------------------------------------------------------------------
+
+// Pump must not turn on again until the minimum off-window has elapsed.
+TEST(SteamPumpMinOff, PumpStaysOffDuringMinOffWindow) {
+  OrchestratorFixture f;
+  f.machine.set_steam_pump_min_on_ms(0);   // no min-on delay for this test
+  f.machine.set_steam_pump_min_off_ms(500);
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
+  EXPECT_TRUE(f.steam_pump.running);
+
+  // Flow exceeds target → pump turns off (min_on=0 so it turns off immediately).
+  f.steam_pump.rate = 3.0f;
+  f.machine.loop();
+  EXPECT_FALSE(f.steam_pump.running);
+
+  // Flow drops below target, but min_off not elapsed — pump must stay off.
+  f.steam_pump.rate = 0.0f;
+  g_mock_millis = 499;
+  f.machine.loop();
+  EXPECT_FALSE(f.steam_pump.running);  // still within 500 ms off window
+}
+
+// Pump turns on again only after the minimum off-window has expired.
+TEST(SteamPumpMinOff, PumpTurnsOnAfterMinOffWindow) {
+  OrchestratorFixture f;
+  f.machine.set_steam_pump_min_on_ms(0);   // no min-on delay for this test
+  f.machine.set_steam_pump_min_off_ms(500);
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
+
+  // Flow exceeds target → pump turns off.
+  f.steam_pump.rate = 3.0f;
+  f.machine.loop();
+  EXPECT_FALSE(f.steam_pump.running);
+
+  // After min_off_ms elapsed, flow below target → pump turns on.
+  f.steam_pump.rate = 0.0f;
+  g_mock_millis = 500;
+  f.machine.loop();
+  EXPECT_TRUE(f.steam_pump.running);
+}
+
+// With min_off_ms == 0 (default), pump turns on immediately when needed.
+TEST(SteamPumpMinOff, ZeroMinOffAllowsImmediateTurnOn) {
+  OrchestratorFixture f;
+  f.machine.set_steam_pump_min_on_ms(0);   // no min-on for clarity
+  // min_off is 0 by default — no constraint
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
+
+  // Flow exceeds target → pump turns off.
+  f.steam_pump.rate = 3.0f;
+  f.machine.loop();
+  EXPECT_FALSE(f.steam_pump.running);
+
+  // Flow drops → pump turns on immediately (no off-time constraint).
+  f.steam_pump.rate = 0.0f;
+  f.machine.loop();
+  EXPECT_TRUE(f.steam_pump.running);
 }
 
 // ---------------------------------------------------------------------------

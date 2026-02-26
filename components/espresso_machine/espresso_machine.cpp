@@ -494,15 +494,19 @@ void EspressoMachine::advance_steam_() {
         steam_stop();
         break;
       }
-      // Bang-bang flow rate control with minimum on-time (P2-7): toggle pump to
+      // Bang-bang flow rate control with minimum on-time and off-time (P2-7): toggle pump to
       // maintain steam_flow_max_ml_per_s_, but only turn OFF after the pump has
-      // been running for at least steam_pump_min_on_ms_ to reduce pump wear.
+      // been running for at least steam_pump_min_on_ms_, and only turn ON after
+      // the pump has been off for at least steam_pump_min_off_ms_ (if non-zero).
+      // Reduces pump wear from rapid on/off cycling.
       // Falls back to continuous pump operation when no flow meter is wired
       // (get_flow_rate() returns 0 by default, keeping the pump on).
       if (steam_pump_) {
         float current_rate = steam_pump_->get_flow_rate();
         if (current_rate < steam_flow_max_ml_per_s_) {
-          if (!steam_pump_->is_running()) {
+          if (!steam_pump_->is_running() &&
+              (steam_pump_min_off_ms_ == 0 ||
+               (millis() - steam_pump_off_ms_) >= steam_pump_min_off_ms_)) {
             steam_pump_->turn_on();
             steam_pump_on_ms_ = millis();
           }
@@ -510,6 +514,7 @@ void EspressoMachine::advance_steam_() {
           if (steam_pump_->is_running() &&
               (millis() - steam_pump_on_ms_) >= steam_pump_min_on_ms_) {
             steam_pump_->turn_off();
+            steam_pump_off_ms_ = millis();
           }
         }
       }
