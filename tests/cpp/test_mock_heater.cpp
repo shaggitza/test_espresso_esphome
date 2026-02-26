@@ -182,6 +182,47 @@ TEST(MockHeater, SensorEventuallyConvergesWithBlockAtSteadyState) {
   EXPECT_NEAR(block_temp, sensor_temp, 2.0f);
 }
 
+TEST(MockHeater, DiffusionChainProvidesSpatialAveraging) {
+  // The finite-difference diffusion chain must produce stronger initial
+  // attenuation (dead-time zone) than a simple 1st-order RC coupling.
+  //
+  // Physics: 1D heat diffusion impulse response at position x peaks at
+  //   t_peak = x²/(6α)  (for Al: α ≈ 82.6 mm²/s, x=10mm → t_peak ≈ 0.2s)
+  // At very early times the response is near-zero — the "dead zone" before the
+  // diffusion wavefront arrives. A simple RC would show immediate response.
+  //
+  // Chain segment time constant: τ_seg = (d/N)² / α ≈ (2.5mm)² / 82.6 ≈ 76ms
+  // Dead-time zone: t << N × τ_seg ≈ 227ms
+  //
+  // Test setup: small block (C=42 J/°C) for fast cooling, high flow (50 mL/s)
+  // to drive block down rapidly, sensor 10mm away through Al chain.
+
+  // At 200ms (within dead-time zone, << 3×τ_seg ≈ 227ms):
+  // block drops ~3°C, sensor response is suppressed by chain to < 5% of block drop.
+  // Threshold: sensor/block ratio < 10% confirms dead-zone behaviour.
+  static constexpr float DEAD_ZONE_SUPPRESSION_RATIO = 0.10f;
+  // At 700ms, sensor must have started to engage but still lag block significantly.
+  static constexpr float LATE_TIME_LAG_RATIO = 0.70f;
+
+  MockHeaterDistFixture f(90.0f, 25.0f, 42.0f, 0.0f, 10.0f, 0.0f);
+  f.heater.set_water_inlet_temp(25.0f);
+  f.heater.set_flow_rate(50.0f);  // aggressive flow to cool block fast
+
+  f.advance_time_ms(200);
+  float block_drop_200 = 90.0f - f.heater.get_temperature();
+  float sensor_drop_200 = 90.0f - f.heater.get_sensor_temperature();
+  EXPECT_GT(block_drop_200, 2.0f);         // block has cooled noticeably
+  EXPECT_LT(sensor_drop_200, block_drop_200 * DEAD_ZONE_SUPPRESSION_RATIO);
+
+  // At 700ms (past dead zone), sensor starts catching up but is still well below block
+  f.advance_time_ms(500);  // total 700ms
+  float block_drop_700 = 90.0f - f.heater.get_temperature();
+  float sensor_drop_700 = 90.0f - f.heater.get_sensor_temperature();
+  EXPECT_GT(block_drop_700, 7.0f);         // block has cooled significantly
+  EXPECT_LT(sensor_drop_700, block_drop_700 * LATE_TIME_LAG_RATIO);  // still lags
+  EXPECT_GT(sensor_drop_700, 0.5f);        // but has started to respond
+}
+
 
 
 TEST(MockHeater, NoHeatingAtZeroDuty) {

@@ -10,6 +10,12 @@
 namespace esphome {
 namespace espresso_machine_mock_heater {
 
+// Number of finite-difference segments per thermal diffusion chain path.
+// Higher values approximate 1D heat diffusion more accurately (closer to the
+// Gaussian impulse response of the true heat equation) at the cost of more
+// intermediate state; 4 provides a good balance for embedded use.
+static constexpr int N_THERMAL_SEGS = 4;
+
 class MockHeater;
 
 // ---------------------------------------------------------------------------
@@ -187,13 +193,21 @@ class MockHeater : public Component,
   float heat_transfer_k_{2.0f};
 
   // Thermal distance parameters [mm] — aluminium thermoblock geometry.
-  // Each non-zero distance creates a separate thermal node connected through
-  // aluminium (K_Al=200 W/(m·K), A_ref=1 cm²), introducing a lag that makes
-  // PID control harder and more realistic.
-  // Set to 0 (default) to disable the corresponding lag (backward compatible).
+  // Each non-zero distance creates a finite-difference diffusion chain through
+  // aluminium (K_Al=200 W/(m·K), A_ref=1 cm²), introducing both lag AND
+  // spatial temperature averaging that make PID control harder and more realistic.
+  // Set to 0 (default) to disable the corresponding path (backward compatible).
   float dist_water_to_heater_mm_{0.0f};  // Heater element → water contact
   float dist_water_to_sensor_mm_{0.0f};  // Water contact → sensor probe
   float dist_sensor_to_heater_mm_{0.0f}; // Heater element → sensor probe (direct path)
+
+ protected:
+  // Intermediate node temperatures for the Al diffusion chains.
+  // Each array holds N_THERMAL_SEGS-1 temperatures between the two endpoint nodes.
+  // Initialized to initial_temperature in setup(); updated by integrate_chain().
+  float hw_nodes_[N_THERMAL_SEGS - 1]{};  // H→W path (water_to_heater)
+  float ws_nodes_[N_THERMAL_SEGS - 1]{};  // W→S path (water_to_sensor)
+  float hs_nodes_[N_THERMAL_SEGS - 1]{};  // H→S path (sensor_to_heater)
 
   // Additional temperature nodes for the 3-node thermal model.
   // When all distances = 0, these equal temperature_ (original 1-node model).
