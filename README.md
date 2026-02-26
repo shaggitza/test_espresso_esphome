@@ -26,7 +26,7 @@ partial / planned). A high-level summary:
 | **Volumetric shot control** | ✅ Implemented | Flow meter with ISR pulse counter; auto-terminates at target volume |
 | **Valve management + interlock** | ✅ Implemented | Named valves; single-open safety interlock at platform level |
 | **Vibration pump control** | ✅ Implemented | Relay (on/off) and dimmer (0–100 %) types |
-| **Grinder integration** | ✅ Implemented | Timed relay grind; adjustable from HA; brew/steam lockout ⬜ pending |
+| **Grinder integration** | ✅ Implemented | Timed relay grind; adjustable from HA; no brew/steam lockout by design — grinder is an independent entity |
 | **Pre-infusion** | ✅ Implemented | Volume-driven pre-wet + configurable hold time |
 | **Brew temperature cooldown** | ✅ Implemented | Pre-brew cooldown when thermoblock is above target (e.g. after aborted steam): purge valve + pump active until temp drops to target, then HEATING proceeds |
 | **Brew state machine** | ✅ Implemented | All states; heater setpoint wiring; temperature-gating; pre-infusion; optional temperature cooldown |
@@ -204,7 +204,8 @@ espresso_machine:
     flow_max: 2ml/s        # pump targets this flow rate via bang-bang in its own loop()
     cool_down_to: 90°C
     timeout: 5min          # optional safety auto-stop
-    pump_min_on_time: 2s   # minimum pump on-time enforced by pump hardware (P2-7)
+    # NOTE: pump_min_on_time is configured on the espresso_machine_pump: entity,
+    #       not here.  See the espresso_machine_pump: block below for that setting.
 ```
 
 See [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) for the full annotated

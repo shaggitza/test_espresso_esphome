@@ -15,10 +15,10 @@
 #                    steam temperature-gating (IHeater), purge-before-steam (purge_volume),
 #                    steam safety timeout, post-steam cool-down + purge sequence,
 #                    steam pump 500ms minimum on-window (P2-7), cleanup_script callbacks (P2-1),
-#                    espresso_machine.flush action (P2-2)
-#   🚧 Partial:      temperature surfing (config accepted; ramp applies via IHeater),
-#                    hard over-temperature cutoff (C++ + on_value_range)
-#   ⬜ Not yet:      grinder lockout, brew profiles
+#                    espresso_machine.flush action (P2-2),
+#                    temperature surfing (offset + ramp via IHeater; HA switch to enable/disable),
+#                    hard over-temperature cutoff (C++ orchestrator + on_value_range)
+#   ⬜ Not yet:      brew profiles (Phase 12)
 #
 # DESIGN PHILOSOPHY:
 #   Every subsystem (heater, valves, pump, grinder, flow meter) is a first-class

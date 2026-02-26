@@ -65,7 +65,7 @@ planned in this project.
 | Purge-before-steam (`purge_volume`) | ✅ | Pumps configured volume through purge valve to clear residual water; `purge_volume: 0` (default) skips phase (backward-compatible) |
 | Steam valve + pump activation | ✅ | Steam valve opens and pump starts in STEAMING state (after purge, if configured) |
 | Pump duty-cycle flow-rate control (delegated to pump) | ✅ | Orchestrator calls `pump->set_target_flow(steam_flow_max_ml_per_s_)` when entering STEAMING; pump's `loop()` does bang-bang on/off to maintain the rate, honouring `pump_min_on_time` / `pump_min_off_time` |
-| Steam pump minimum on-window (`pump_min_on_time`) | ✅ | Prevents rapid pump cycling; default 2 s; configurable via `pump_min_on_time:` in steam schema (P2-7) |
+| Steam pump minimum on-window (`pump_min_on_time`) | ✅ | Prevents rapid pump cycling; default 500 ms; configurable via `pump_min_on_time:` in the `espresso_machine_pump:` component block (P2-7) |
 | Steam safety timeout (`timeout`) | ✅ | Optional auto-stop after configured duration; 0 = disabled (default) |
 | Purge on steam stop | ✅ | Purge valve opens immediately when steam stops to flush steam path during cool-down |
 | Auto cool-down after steaming | ✅ | `set_target_temperature(steam_cool_down_to_)` on `IHeater`; temperature-gated COOLING→CLEANUP transition |

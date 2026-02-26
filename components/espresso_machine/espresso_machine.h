@@ -212,7 +212,10 @@ class EspressoMachine : public Component {
   float get_last_shot_time_s() const { return last_shot_time_s_; }
   float get_last_shot_volume_ml() const { return last_shot_volume_ml_; }
   float get_last_shot_yield_ml() const {
-    return last_shot_volume_ml_ > 0.0f ? last_shot_volume_ml_ - brew_flow_offset_ml_ : 0.0f;
+    if (last_shot_volume_ml_ <= 0.0f)
+      return 0.0f;
+    float yield = last_shot_volume_ml_ - brew_flow_offset_ml_;
+    return yield > 0.0f ? yield : 0.0f;
   }
 
   // ----- Shot stat HA sensor entities (P1-5) --------------------------------

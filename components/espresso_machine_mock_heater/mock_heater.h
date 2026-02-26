@@ -201,7 +201,6 @@ class MockHeater : public Component,
   float dist_water_to_sensor_mm_{0.0f};  // Water contact → sensor probe
   float dist_sensor_to_heater_mm_{0.0f}; // Heater element → sensor probe (direct path)
 
- protected:
   // Intermediate node temperatures for the Al diffusion chains.
   // Each array holds N_THERMAL_SEGS-1 temperatures between the two endpoint nodes.
   // Initialized to initial_temperature in setup(); updated by integrate_chain().
