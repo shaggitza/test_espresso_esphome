@@ -94,6 +94,7 @@ planned in this project.
 |---|---|---|
 | `espresso_machine.flush` action | ✅ | Pumps N ml through brew purge valve; only accepted when idle (P2-2) |
 | Status text sensor (`status_sensor`) | ✅ | Optional `text_sensor` entity in `espresso_machine:` block; publishes a verbose, live status string to HA on every state transition and on every `loop()` tick (deduplicated); includes real-time values such as current/target temperature and flow volume, e.g. `"Heating to 90.0°C (now 85.3°C)"`, `"Brewing: 15.2 ml / 40.0 ml"`, `"Cooling to 90.0°C (now 125.3°C)"`, `"Flushing: 12.3 ml / 50.0 ml"` |
+| Idle auto-off (`idle_timeout`) | ✅ | Automatically calls `machine_off()` when the machine has been powered on but idle for `idle_timeout` (default 30 min). Set to `0` to disable. Config-only — not adjustable at runtime from HA. Idle timer resets on `machine_on()` and on every transition back to IDLE (after brew, steam, or flush completes). |
 
 ---
 

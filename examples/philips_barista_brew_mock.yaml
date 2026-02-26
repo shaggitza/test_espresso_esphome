@@ -427,6 +427,10 @@ espresso_machine:
   status_sensor:
     name: "Espresso Status"
 
+  # Auto power-off when idle for this duration.  Default: 30 min.
+  # Set to 0 to disable.  Adjustable only via YAML (not at runtime from HA).
+  idle_timeout: 30min
+
   brew:
     heater: main_heater
     heater_controller: heater_ctrl   # IHeater adapter — controls PID setpoint for temperature-gated transitions (P1-2/P1-3)

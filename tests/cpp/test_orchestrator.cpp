@@ -2502,3 +2502,124 @@ TEST(BrewTemperatureCooldown, NoCoolingInsertedAfterDoneWhenEnabled) {
   f.machine.loop();                     // DONE → CLEANUP (not COOLING)
   EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
 }
+
+// ---------------------------------------------------------------------------
+// Idle auto-off
+// ---------------------------------------------------------------------------
+
+// Fixture for idle timeout tests: short 5-second timeout to keep tests fast.
+struct IdleTimeoutFixture {
+  static constexpr uint32_t kTimeoutMs = 5000;
+
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  EspressoMachine machine;
+
+  IdleTimeoutFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    machine.set_idle_timeout_ms(kTimeoutMs);
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// Machine powers off automatically when idle for longer than idle_timeout_ms.
+TEST(IdleTimeout, MachineAutoOffAfterIdleTimeout) {
+  IdleTimeoutFixture f;
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  // Advance time past the timeout while in IDLE
+  g_mock_millis = IdleTimeoutFixture::kTimeoutMs + 1;
+  f.machine.loop();
+
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// Machine does NOT power off before the timeout has elapsed.
+TEST(IdleTimeout, MachineStaysOnBeforeIdleTimeout) {
+  IdleTimeoutFixture f;
+
+  g_mock_millis = IdleTimeoutFixture::kTimeoutMs - 1;
+  f.machine.loop();
+
+  EXPECT_TRUE(f.machine.is_powered_on());
+}
+
+// After a brew completes and returns to IDLE, the idle timer is reset —
+// the machine should not power off until another full timeout has passed.
+TEST(IdleTimeout, IdleTimerResetAfterBrewCompletes) {
+  IdleTimeoutFixture f;
+
+  // Start a brew and complete it
+  f.machine.brew_start();
+  f.machine.loop();          // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();          // BREWING → DONE
+  f.machine.loop();          // DONE → CLEANUP
+  g_mock_millis = 100;
+  f.machine.loop();          // CLEANUP → IDLE (idle timer reset here)
+
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  // Advance just under one full timeout from when IDLE was re-entered
+  g_mock_millis = 100 + IdleTimeoutFixture::kTimeoutMs - 1;
+  f.machine.loop();
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  // Now advance past the timeout
+  g_mock_millis = 100 + IdleTimeoutFixture::kTimeoutMs + 1;
+  f.machine.loop();
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// Idle timeout = 0 means disabled: machine stays on indefinitely when idle.
+TEST(IdleTimeout, TimeoutZeroDisablesAutoOff) {
+  OrchestratorFixture f;  // uses default idle_timeout_ms (30 min); override to 0
+  f.machine.set_idle_timeout_ms(0);
+
+  // Advance an absurdly long time
+  g_mock_millis = 10u * 60u * 60u * 1000u;  // 10 hours
+  f.machine.loop();
+
+  EXPECT_TRUE(f.machine.is_powered_on());
+}
+
+// machine_on() resets the idle timer so the machine has a full timeout from power-on.
+TEST(IdleTimeout, TimerResetOnMachineOn) {
+  IdleTimeoutFixture f;
+
+  // Power off then back on after partial time has elapsed
+  g_mock_millis = IdleTimeoutFixture::kTimeoutMs - 1000;  // near timeout
+  f.machine.machine_off();
+  f.machine.machine_on();  // should reset idle timer
+
+  // Advance just under one full timeout from machine_on()
+  g_mock_millis += IdleTimeoutFixture::kTimeoutMs - 1;
+  f.machine.loop();
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  // Now past the timeout
+  g_mock_millis += 2;
+  f.machine.loop();
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
