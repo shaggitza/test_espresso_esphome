@@ -59,6 +59,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_pressure_sensor(sensor::Sensor *s) { pressure_sensor_ = s; }
   void set_nozzle_rate_sensor(sensor::Sensor *s) { nozzle_rate_sensor_ = s; }
   void set_nozzle_total_sensor(sensor::Sensor *s) { nozzle_total_sensor_ = s; }
+  void set_avg_rate_sensor(sensor::Sensor *s) { avg_rate_sensor_ = s; }
 
   // Runtime tuning number entities
   void set_nominal_flow_number(MockPumpNumber *num) {
@@ -131,6 +132,8 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Nozzle flow accessors (flow exiting the puck into the cup)
   float get_nozzle_flow_rate() const { return nozzle_flow_rate_; }
   float get_nozzle_flow_total() const { return nozzle_total_volume_; }
+  // 3-second rolling average of the pump flow rate (12 × 250 ms publish intervals)
+  float get_avg_rate_3s() const { return avg_rate_3s_; }
 
  protected:
   void write_state(bool state) override;
@@ -206,6 +209,14 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   sensor::Sensor *pressure_sensor_{nullptr};
   sensor::Sensor *nozzle_rate_sensor_{nullptr};
   sensor::Sensor *nozzle_total_sensor_{nullptr};
+  sensor::Sensor *avg_rate_sensor_{nullptr};
+
+  // 3-second rolling average (12 samples × 250 ms publish interval)
+  static constexpr uint8_t AVG_WINDOW_SIZE = 12;
+  float avg_buf_[AVG_WINDOW_SIZE]{};
+  uint8_t avg_buf_idx_{0};
+  uint8_t avg_buf_count_{0};
+  float avg_rate_3s_{0.0f};
   MockPumpNumber *nominal_flow_number_{nullptr};
   MockPumpNumber *puck_time_constant_number_{nullptr};
   MockPumpNumber *puck_density_number_{nullptr};

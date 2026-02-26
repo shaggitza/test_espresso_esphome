@@ -37,6 +37,8 @@ espresso_machine_mock_pump:
     name: "Nozzle Flow Rate"
   nozzle_total_sensor:
     name: "Nozzle Flow Total"
+  avg_rate_sensor:
+    name: "Brew Flow Rate (3s avg)"
 
   # Optional runtime tuning numbers
   nominal_flow_number:

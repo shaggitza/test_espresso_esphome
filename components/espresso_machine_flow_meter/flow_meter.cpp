@@ -38,7 +38,7 @@ void FlowMeter::loop() {
   float sum = 0.0f;
   for (uint8_t i = 0; i < avg_buf_count_; i++)
     sum += avg_buf_[i];
-  avg_rate_3s_ = (avg_buf_count_ > 0) ? (sum / static_cast<float>(avg_buf_count_)) : 0.0f;
+  avg_rate_3s_ = sum / static_cast<float>(avg_buf_count_);
 
   if (rate_sensor_ != nullptr)
     rate_sensor_->publish_state(rate_);

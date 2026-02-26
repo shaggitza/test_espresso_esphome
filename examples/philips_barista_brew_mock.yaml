@@ -257,6 +257,8 @@ espresso_machine_mock_pump:
     name: "Brew Flow Rate"
   total_sensor:
     name: "Brew Flow Total"
+  avg_rate_sensor:
+    name: "Brew Flow Rate (3s avg)"  # 3-second rolling average to smooth jitter
   pressure_sensor:
     name: "Mock Brew Pump Pressure"
 
