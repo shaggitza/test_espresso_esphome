@@ -30,7 +30,7 @@ partial / planned). A high-level summary:
 | **Pre-infusion** | ✅ Implemented | Volume-driven pre-wet + configurable hold time |
 | **Brew state machine** | ✅ Implemented | All states; heater setpoint wiring; temperature-gating; pre-infusion |
 | **Steam mode** | ✅ Implemented | Full sequence: HEATING → PURGING → STEAMING → COOLING → CLEANUP; temperature-gated; purge-before-steam; safety timeout |
-| **Steam pump minimum on-window** | ✅ Implemented | Bang-bang pump control with 2 s default minimum on-time to reduce pump wear (P2-7) |
+| **Steam pump minimum on-window** | ✅ Implemented | Pump owns bang-bang flow-rate control: orchestrator calls `set_target_flow()`; pump modulates on/off in its `loop()`, respecting `pump_min_on_time` / `pump_min_off_time` (P2-7) |
 | **Temperature surfing** | ✅ Implemented | Configurable offset + ramp time; applied via `IHeater` on each brew tick |
 | **Cleanup script callbacks** | ✅ Implemented | `cleanup_script:` fires at DONE/CLEANUP; reference any ESPHome script by id (P2-1) |
 | **Maintenance flush action** | ✅ Implemented | `espresso_machine.flush`: pumps N ml through purge valve on demand (P2-2) |
@@ -200,10 +200,10 @@ espresso_machine:
     purge_valve: purge_valve
     target_temperature: 135°C
     purge_volume: 5ml      # flush residual water before opening steam valve
-    flow_max: 2ml/s
+    flow_max: 2ml/s        # pump targets this flow rate via bang-bang in its own loop()
     cool_down_to: 90°C
     timeout: 5min          # optional safety auto-stop
-    pump_min_on_time: 2s   # minimum pump on-time before toggling off (P2-7)
+    pump_min_on_time: 2s   # minimum pump on-time enforced by pump hardware (P2-7)
 ```
 
 See [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) for the full annotated

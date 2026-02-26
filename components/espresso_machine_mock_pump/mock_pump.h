@@ -104,6 +104,11 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   void set_bypass_mode(bool bypass) override { open_valve_mode_ = bypass; }
   bool get_bypass_mode() const { return open_valve_mode_; }
 
+  // Flow-rate bang-bang control: stores the target rate; loop() modulates
+  // write_state(true/false) to maintain it.  Set to 0 to disable.
+  void set_target_flow(float ml_per_s) override { target_flow_rate_ = ml_per_s; }
+  float get_target_flow() const { return target_flow_rate_; }
+
   // Flow subsystem — simulated based on puck wetting model
   float get_flow_rate() const override { return current_flow_rate_; }
   float get_flow_total() const override { return total_volume_; }
@@ -195,6 +200,7 @@ class MockPump : public switch_::Switch, public Component, public espresso_machi
   // Simulation state
   bool running_{false};
   bool open_valve_mode_{false};       // If true, bypass puck model (valve open)
+  float target_flow_rate_{0.0f};      // 0 = disabled; >0 = bang-bang target [mL/s]
   float run_time_{0.0f};              // Time since pump started [s]
   float current_flow_rate_{0.0f};     // Instantaneous flow rate [mL/s]
   float total_volume_{0.0f};          // Accumulated pump volume [mL]

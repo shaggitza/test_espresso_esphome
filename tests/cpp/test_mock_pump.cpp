@@ -1015,3 +1015,77 @@ TEST(MockPump, PressureAlsoDecreasesDuringDegradation) {
   EXPECT_LT(f.pump.get_system_pressure(), initial_p_eq);
 }
 
+
+// ---------------------------------------------------------------------------
+// MockPump — flow-rate bang-bang control (set_target_flow)
+//
+// The mock pump implements IPump::set_target_flow() so the orchestrator can
+// delegate bang-bang control to it, just as it does with the real PumpSwitch.
+// ---------------------------------------------------------------------------
+
+struct MockPumpTargetFlowFixture {
+  // Open-valve (bypass) mode: D=1, τ=0 → instant full flow = nominal_flow
+  // This avoids waiting for puck wetting in target-flow tests.
+  MockPumpTargetFlowFixture() {
+    g_mock_millis = 0;
+    pump.set_nominal_flow(4.0f);
+    pump.set_puck_time_constant(0.0f);  // instant wetting in bypass
+    pump.set_puck_density(1.0f);        // no resistance
+    pump.set_pump_max_pressure(15.0f);
+    pump.set_internal_volume(0.0f);     // no residual pressure
+    pump.set_puck_absorption(0.0f);
+    pump.set_puck_extraction_tau(0.0f);
+    pump.set_bypass_mode(true);         // steam-like: open valve, full flow
+    pump.setup();
+  }
+
+  void advance_time_ms(uint32_t ms) {
+    g_mock_millis += ms;
+    pump.loop();
+  }
+
+  MockPump pump;
+};
+
+TEST(MockPumpTargetFlow, InitialTargetFlowIsZero) {
+  MockPumpTargetFlowFixture f;
+  EXPECT_FLOAT_EQ(f.pump.get_target_flow(), 0.0f);
+}
+
+TEST(MockPumpTargetFlow, SetTargetFlowStoresValue) {
+  MockPumpTargetFlowFixture f;
+  f.pump.set_target_flow(2.0f);
+  EXPECT_FLOAT_EQ(f.pump.get_target_flow(), 2.0f);
+}
+
+TEST(MockPumpTargetFlow, PumpTurnsOnWhenRateBelowTarget) {
+  MockPumpTargetFlowFixture f;
+  // Target is 2 ml/s; pump is off so current_flow_rate = 0 < target → should start.
+  f.pump.set_target_flow(2.0f);
+  f.advance_time_ms(10);
+  EXPECT_TRUE(f.pump.is_running());
+}
+
+TEST(MockPumpTargetFlow, PumpTurnsOffWhenRateReachesTarget) {
+  // In bypass mode with nominal_flow=4 ml/s and instant wetting, the pump
+  // reaches full flow on the first tick. A target of 1 ml/s should cause
+  // the pump to immediately shut off after reaching the target.
+  MockPumpTargetFlowFixture f;
+  // Set a target lower than nominal_flow so the pump overshoots and shuts off.
+  f.pump.set_target_flow(1.0f);  // target < 4 ml/s nominal
+  f.pump.turn_on();              // start so first tick computes flow
+  f.advance_time_ms(10);         // flow = nominal_flow = 4 > target → turns off
+  EXPECT_FALSE(f.pump.is_running());
+}
+
+TEST(MockPumpTargetFlow, ClearTargetFlowDisablesBangBang) {
+  MockPumpTargetFlowFixture f;
+  f.pump.set_target_flow(2.0f);
+  f.advance_time_ms(10);         // turns on (rate 0 < target)
+  EXPECT_TRUE(f.pump.is_running());
+
+  f.pump.set_target_flow(0.0f);  // disable flow control
+  f.pump.turn_off();             // external stop
+  f.advance_time_ms(10);         // loop must not restart the pump
+  EXPECT_FALSE(f.pump.is_running());
+}

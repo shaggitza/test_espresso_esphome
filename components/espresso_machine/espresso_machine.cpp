@@ -246,8 +246,10 @@ void EspressoMachine::steam_stop() {
   // cools to steam_cool_down_to_.  The valve is closed in the CLEANUP state.
   if (steam_purge_valve_)
     steam_purge_valve_->open();
-  if (steam_pump_)
+  if (steam_pump_) {
+    steam_pump_->set_target_flow(0.0f);  // disable pump-level flow control
     steam_pump_->turn_off();
+  }
   steam_state_ = SteamState::COOLING;
   state_entered_ms_ = millis();
   // Lower heater setpoint to cool-down temperature
@@ -459,6 +461,10 @@ void EspressoMachine::advance_steam_() {
           steam_valve_->open();
         if (steam_pump_) {
           steam_pump_->set_bypass_mode(true);  // No puck resistance through valve
+          // Delegate bang-bang flow control to the pump (P2-7).
+          // The pump's loop() will modulate on/off to maintain this rate,
+          // respecting its own min_on/min_off timing constraints.
+          steam_pump_->set_target_flow(steam_flow_max_ml_per_s_);
           steam_pump_->turn_on();
         }
         publish_status_();
@@ -475,7 +481,10 @@ void EspressoMachine::advance_steam_() {
           steam_purge_valve_->close();
         if (steam_pump_)
           steam_pump_->reset_flow();  // reset so STEAMING tracks steam-only volume
-        // Stay in bypass mode — still pumping through steam valve
+        // Stay in bypass mode — still pumping through steam valve.
+        // Delegate bang-bang flow control to the pump (P2-7).
+        if (steam_pump_)
+          steam_pump_->set_target_flow(steam_flow_max_ml_per_s_);
         steam_state_ = SteamState::STEAMING;
         steam_start_ms_ = millis();
         state_entered_ms_ = millis();
@@ -494,21 +503,13 @@ void EspressoMachine::advance_steam_() {
         steam_stop();
         break;
       }
-      // Bang-bang flow rate control (P2-7): toggle pump to maintain
-      // steam_flow_max_ml_per_s_. Minimum on/off timing constraints are enforced
-      // at the pump hardware level (pump_min_on_time / pump_min_off_time in YAML).
-      // Falls back to continuous pump operation when no flow meter is wired
-      // (get_flow_rate() returns 0 by default, keeping the pump on).
-      if (steam_pump_) {
-        float current_rate = steam_pump_->get_flow_rate();
-        if (current_rate < steam_flow_max_ml_per_s_) {
-          if (!steam_pump_->is_running())
-            steam_pump_->turn_on();
-        } else {
-          if (steam_pump_->is_running())
-            steam_pump_->turn_off();
-        }
-      }
+      // Bang-bang flow rate control (P2-7) is now delegated to the pump.
+      // When entering STEAMING, the orchestrator called
+      //   steam_pump_->set_target_flow(steam_flow_max_ml_per_s_)
+      // and the pump's own loop() modulates on/off to maintain that rate,
+      // honouring its pump_min_on_time / pump_min_off_time constraints.
+      // Falls back to continuous operation when no flow meter is wired
+      // (pump reports rate=0 < target, keeping itself on).
       break;
     }
 
@@ -600,10 +601,12 @@ void EspressoMachine::enter_brewing_() {
 
 void EspressoMachine::safe_stop_all_() {
   if (brew_pump_) {
+    brew_pump_->set_target_flow(0.0f);
     brew_pump_->turn_off();
     brew_pump_->set_bypass_mode(false);
   }
   if (steam_pump_) {
+    steam_pump_->set_target_flow(0.0f);
     steam_pump_->turn_off();
     steam_pump_->set_bypass_mode(false);
   }

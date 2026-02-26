@@ -394,8 +394,9 @@ espresso_machine_pump:
   type: relay                 # relay | dimmer
   pin: GPIO25                 # ← CHANGE ME
   flow_meter: brew_flow       # flow meter owned by the pump; see design note above
-  # Minimum time the pump must stay ON before it can be toggled off (e.g. by bang-bang
-  # steam flow-rate control). Reduces pump wear from rapid on/off cycling. Default: 500ms.
+  # Minimum time the pump must stay ON before it can be toggled off by the
+  # pump's own bang-bang flow-rate controller (set_target_flow). Reduces pump
+  # wear from rapid on/off cycling. Default: 500ms.
   pump_min_on_time: 500ms
   # Minimum time the pump must stay OFF before it can turn on again. Default: disabled.
   # pump_min_off_time: 500ms
@@ -584,8 +585,10 @@ espresso_machine:
   #   1. HEATING   — raise thermoblock to target_temperature; valves closed
   #   2. PURGING   — pump water through purge_valve to flush residual water;
   #                  ensures only dry steam reaches the wand
-  #   3. STEAMING  — close purge valve, open steam valve; bang-bang pump
-  #                  control maintains flow_max ml/s rate
+  #   3. STEAMING  — close purge valve, open steam valve; the orchestrator
+  #                  calls pump.set_target_flow(flow_max) and the pump's
+  #                  own loop() does bang-bang on/off to maintain the rate,
+  #                  respecting pump_min_on_time / pump_min_off_time
   #   4. COOLING   — on stop: close steam valve, reopen purge valve,
   #                  lower heater to cool_down_to; wait for temp to drop
   #   5. CLEANUP   — close purge valve; return to idle
@@ -605,8 +608,10 @@ espresso_machine:
     # Remove or set to 0 to skip the purge phase (backward-compatible).
     purge_volume: 5ml
 
-    # Pump duty-cycle target during steaming (ml/s)
-    # The pump pulses on/off to maintain this average flow rate.
+    # Target flow rate during steaming (ml/s).
+    # The orchestrator sets this as the pump's target via set_target_flow().
+    # The pump's own loop() does bang-bang on/off to maintain this average rate,
+    # respecting pump_min_on_time / pump_min_off_time constraints.
     # Set to 0 for passive steam only (no pump assist).
     flow_max: 2ml/s
 

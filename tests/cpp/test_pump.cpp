@@ -331,6 +331,90 @@ TEST(PumpSwitchMinOffTime, FirstTurnOnAlwaysAllowed) {
 }
 
 // ---------------------------------------------------------------------------
+// Flow-rate bang-bang control — set_target_flow()
+//
+// When a target flow rate is set the pump modulates on/off in loop() to
+// maintain the requested rate. The orchestrator uses this so that steam/brew
+// simply declare a desired flow and the pump provides it.
+// ---------------------------------------------------------------------------
+
+TEST(PumpSwitchTargetFlow, TurnsOnWhenRateBelowTarget) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  fm.rate = 0.0f;          // below target
+  p.set_target_flow(2.0f);
+  p.loop();                // should start the pump
+  EXPECT_TRUE(p.is_running());
+  EXPECT_TRUE(pin.state_);
+}
+
+TEST(PumpSwitchTargetFlow, TurnsOffWhenRateAtTarget) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  fm.rate = 0.0f;
+  p.set_target_flow(2.0f);
+  p.loop();               // turns on (rate < target)
+  EXPECT_TRUE(p.is_running());
+
+  fm.rate = 2.0f;         // at target
+  p.loop();               // should stop the pump
+  EXPECT_FALSE(p.is_running());
+  EXPECT_FALSE(pin.state_);
+}
+
+TEST(PumpSwitchTargetFlow, TurnsBackOnWhenRateDropsBelowTarget) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  p.set_target_flow(2.0f);
+  fm.rate = 0.0f;
+  p.loop();               // on
+  fm.rate = 2.0f;
+  p.loop();               // off at target
+  fm.rate = 1.5f;         // drops below target
+  p.loop();               // should turn back on
+  EXPECT_TRUE(p.is_running());
+}
+
+TEST(PumpSwitchTargetFlow, RunsContinuouslyWithoutFlowMeter) {
+  GPIOPin pin;
+  PumpSwitch p = make_pump(pin);
+  // No flow meter — get_rate() returns 0 (< target) so pump stays on
+  p.set_target_flow(2.0f);
+  for (int i = 0; i < 10; i++)
+    p.loop();
+  EXPECT_TRUE(p.is_running());
+}
+
+TEST(PumpSwitchTargetFlow, ClearTargetFlowDisablesBangBang) {
+  GPIOPin pin;
+  MockFlowMeter fm;
+  PumpSwitch p = make_pump(pin);
+  p.set_flow_meter(&fm);
+
+  p.set_target_flow(2.0f);
+  fm.rate = 0.0f;
+  p.loop();               // turns on
+  EXPECT_TRUE(p.is_running());
+
+  p.set_target_flow(0.0f);  // disable flow control
+  p.turn_off();             // external stop is now honoured
+  EXPECT_FALSE(p.is_running());
+
+  fm.rate = 0.0f;
+  p.loop();               // should NOT restart (flow control cleared)
+  EXPECT_FALSE(p.is_running());
+}
+
+// ---------------------------------------------------------------------------
 // PumpNumber (dimmer) tests
 // ---------------------------------------------------------------------------
 

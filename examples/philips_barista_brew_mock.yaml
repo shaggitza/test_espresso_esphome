@@ -428,6 +428,8 @@ espresso_machine:
     # Pump 5 ml through the purge valve before opening the steam valve to flush
     # residual water so only dry steam exits the wand (PURGING state).
     purge_volume: 5ml
+    # Target flow rate during steaming (ml/s). The orchestrator sets this on the
+    # pump via set_target_flow(); the pump's loop() does bang-bang to maintain it.
     flow_max: 2ml/s
     cool_down_to: 90°C
     # Safety timeout: stop steaming after 5 minutes even if not manually stopped.
