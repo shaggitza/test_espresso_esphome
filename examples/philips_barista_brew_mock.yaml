@@ -343,6 +343,7 @@ climate:
 espresso_machine_heater:
   id: heater_ctrl
   climate_id: main_heater
+  # temperature_tolerance: 0.5   # °C — heater is considered ready within this margin of target
 
 # =============================================================================
 # VALVES — unchanged from real config (dummy GPIOs, no physical hardware)

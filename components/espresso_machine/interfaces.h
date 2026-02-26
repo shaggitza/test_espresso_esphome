@@ -79,6 +79,17 @@ class IHeater {
  public:
   virtual float get_current_temperature() const = 0;
   virtual void set_target_temperature(float t) = 0;
+  // Returns true when the current temperature is within acceptable range of
+  // the target, meaning the machine may safely begin or continue operation.
+  // The default uses exact comparison (current >= target), which passes both
+  // when the heater has reached the target and when it is above it (e.g.
+  // during cool-down gating).  Concrete implementations (e.g. EspressoMachineHeater)
+  // may override this to apply a configurable tolerance so the machine does not
+  // wait indefinitely for a stably-heated thermoblock that is slightly below
+  // the target (e.g. 89.9°C when target is 90.0°C with a 0.5°C tolerance).
+  virtual bool is_ready(float target_temp) const {
+    return get_current_temperature() >= target_temp;
+  }
   // Called by the orchestrator's hard over-temperature safety cutoff.
   // Implementations should immediately disable the heater output (e.g. set
   // PID to off mode).  Default is a no-op so existing implementations that

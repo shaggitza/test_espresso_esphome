@@ -45,6 +45,7 @@ planned in this project.
 |---|---|---|
 | Brew state machine (`IDLE→HEATING→BREWING→DONE→CLEANUP`) | ✅ | All states; `HEATING` gates on temperature when `brew_heater_ctrl` is wired (P1-2) |
 | Heater setpoint wiring (climate call) | ✅ | `set_target_temperature(brew_target_temp_)` called via `IHeater` in `brew_start()`; `espresso_machine_heater` adapter wires production `climate.pid` (P1-2) |
+| Heater readiness tolerance (`temperature_tolerance`) | ✅ | `EspressoMachineHeater` overrides `IHeater::is_ready()` to treat temperatures within `temperature_tolerance` (default 0.5°C) of the target as ready; prevents indefinite wait when PID stabilises just below setpoint (e.g. 89.9°C at 90.0°C target) |
 | Temperature surfing (offset + ramp) | ✅ | Config accepted; ramp setpoint computed and applied to `brew_heater_ctrl_->set_target_temperature()` each BREWING tick; runtime HA switch (`temp_surf_switch`) enables/disables surfing without reflashing (P1-3) |
 | Pre-infusion (low-pressure pre-wet) | ✅ | Volume-driven flowing phase + hold timer; resets flow before main extraction |
 | Auto-terminate at `flow_max` | ✅ | Shot stops when flow meter reports ≥ `flow_max` ml |
@@ -59,7 +60,7 @@ planned in this project.
 |---|---|---|
 | Steam state machine (`IDLE→HEATING→PURGING→STEAMING→COOLING→CLEANUP`) | ✅ | All states; `PURGING` flushes residual water before steam; `HEATING` gates on temperature when `heater_controller` is wired |
 | Heater setpoint to steam temperature | ✅ | `set_target_temperature(steam_target_temp_)` called on `IHeater` in `steam_start()` |
-| Temperature-gated HEATING→PURGING/STEAMING transition | ✅ | Waits for `get_current_temperature() >= steam_target_temp_`; falls back to immediate if no IHeater wired |
+| Temperature-gated HEATING→PURGING/STEAMING transition | ✅ | Waits for `heater.is_ready(steam_target_temp_)`; heater reports ready within `temperature_tolerance` (default 0.5°C) of the target; falls back to immediate if no IHeater wired |
 | Purge-before-steam (`purge_volume`) | ✅ | Pumps configured volume through purge valve to clear residual water; `purge_volume: 0` (default) skips phase (backward-compatible) |
 | Steam valve + pump activation | ✅ | Steam valve opens and pump starts in STEAMING state (after purge, if configured) |
 | Pump duty-cycle flow-rate control (delegated to pump) | ✅ | Orchestrator calls `pump->set_target_flow(steam_flow_max_ml_per_s_)` when entering STEAMING; pump's `loop()` does bang-bang on/off to maintain the rate, honouring `pump_min_on_time` / `pump_min_off_time` |
@@ -68,7 +69,7 @@ planned in this project.
 | Purge on steam stop | ✅ | Purge valve opens immediately when steam stops to flush steam path during cool-down |
 | Auto cool-down after steaming | ✅ | `set_target_temperature(steam_cool_down_to_)` on `IHeater`; temperature-gated COOLING→CLEANUP transition |
 | Temperature-gated COOLING→CLEANUP transition | ✅ | Waits for `get_current_temperature() <= steam_cool_down_to_`; falls back to immediate if no IHeater wired |
-| `IHeater` interface | ✅ | `get_current_temperature()` + `set_target_temperature()` in `interfaces.h`; `MockHeater` implements it |
+| `IHeater` interface | ✅ | `get_current_temperature()` + `set_target_temperature()` + `is_ready(target)` in `interfaces.h`; default `is_ready()` uses exact `>=`; `EspressoMachineHeater` overrides with configurable tolerance |
 | `heater_controller:` YAML key | ✅ | Optional in steam schema; wires an `IHeater*` to the orchestrator |
 | Cleanup script callback after steam | ✅ | `set_steam_cleanup_fn()` called in CLEANUP state; wired from YAML via `cleanup_script:` (P2-1) |
 | `steam_start` / `steam_stop` actions | ✅ | Available from YAML automations and HA services |

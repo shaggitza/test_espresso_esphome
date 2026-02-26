@@ -346,6 +346,11 @@ climate:
 espresso_machine_heater:
   id: heater_ctrl
   climate_id: main_heater
+  # temperature_tolerance: 0.5   # °C — heater is considered ready when temperature
+  #                               # is within this margin of the target.  Prevents an
+  #                               # indefinite wait when the PID stabilises just below
+  #                               # the setpoint (e.g. 89.9°C at a 90.0°C target).
+  #                               # Default: 0.5°C.  Set to 0 for exact-match behaviour.
 
 # =============================================================================
 # VALVES — espresso_machine_valve platform (first-class citizen)
