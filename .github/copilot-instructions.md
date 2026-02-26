@@ -126,7 +126,7 @@ espresso_machine:
     target_temperature: 90°C
     flow_max: 40ml
     flow_offset: 20ml
-    temperature_cooldown: false  # set true to cool back to target_temperature after shot
+    temperature_cooldown: false  # if true, cool to target_temperature before brewing when thermoblock is too hot
   steam:
     heater: main_heater
     pump: main_pump

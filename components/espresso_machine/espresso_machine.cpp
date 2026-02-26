@@ -150,25 +150,45 @@ void EspressoMachine::brew_start() {
   }
   ESP_LOGI(TAG, "Brew START — target=%.1f°C  flow_max=%.1fml", brew_target_temp_, brew_flow_max_ml_);
   mode_ = EspressoMode::BREWING;
-  brew_state_ = BrewState::HEATING;
   brew_start_ms_ = millis();
-  state_entered_ms_ = millis();
-  publish_status_();
 
-  // Start with all valves closed and pump off until temperature is reached
+  // Always close the brew valve and stop/reset the pump first.
   if (brew_valve_)
     brew_valve_->close();
-  if (brew_purge_valve_)
-    brew_purge_valve_->close();
   if (brew_pump_) {
     brew_pump_->turn_off();
     brew_pump_->reset_flow();
   }
 
-  // NOTE: heater setpoint is raised to brew_target_temp_ when a brew heater
-  // controller is wired via set_brew_heater_ctrl() (P1-2).
-  if (brew_heater_ctrl_ && brew_target_temp_ > 0.0f)
+  // If temperature_cooldown is enabled and the thermoblock is above the brew
+  // target (e.g. still hot after an aborted steam session), cool it down first
+  // before entering the HEATING/PRE_INFUSION/BREWING sequence.  This prevents
+  // a shot from starting at the wrong temperature and ensures the PID has
+  // settled at brew_target_temp_ before extraction begins.
+  if (brew_temperature_cooldown_ && brew_heater_ctrl_ && brew_target_temp_ > 0.0f &&
+      brew_heater_ctrl_->get_current_temperature() > brew_target_temp_) {
+    ESP_LOGI(TAG, "Brew: START → COOLING (%.1f°C → %.1f°C first)",
+             brew_heater_ctrl_->get_current_temperature(), brew_target_temp_);
     brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
+    if (brew_purge_valve_)
+      brew_purge_valve_->open();
+    if (brew_pump_) {
+      brew_pump_->set_bypass_mode(true);
+      brew_pump_->turn_on();
+    }
+    brew_state_ = BrewState::COOLING;
+  } else {
+    // Normal path: close purge valve and start waiting for brew temperature.
+    if (brew_purge_valve_)
+      brew_purge_valve_->close();
+    brew_state_ = BrewState::HEATING;
+    // NOTE: heater setpoint is raised to brew_target_temp_ when a brew heater
+    // controller is wired via set_brew_heater_ctrl() (P1-2).
+    if (brew_heater_ctrl_ && brew_target_temp_ > 0.0f)
+      brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
+  }
+  state_entered_ms_ = millis();
+  publish_status_();
 }
 
 void EspressoMachine::brew_stop() {
@@ -396,30 +416,7 @@ void EspressoMachine::advance_brew_() {
     }
 
     case BrewState::DONE:
-      // If temperature_cooldown is enabled and a heater controller is wired,
-      // check whether the thermoblock is still above the brew target.  If so,
-      // open the purge valve and run the pump to actively cool it before
-      // proceeding to cleanup.  This ensures the machine is ready for
-      // the next shot at the correct temperature without manual intervention.
-      if (brew_temperature_cooldown_ && brew_heater_ctrl_ &&
-          brew_heater_ctrl_->get_current_temperature() > brew_target_temp_) {
-        ESP_LOGI(TAG, "Brew: DONE → COOLING (%.1f°C → %.1f°C)",
-                 brew_heater_ctrl_->get_current_temperature(), brew_target_temp_);
-        // Ensure setpoint is at brew_target_temp_ (temp surfing may have left it higher)
-        brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
-        if (brew_purge_valve_)
-          brew_purge_valve_->open();
-        if (brew_pump_) {
-          brew_pump_->reset_flow();
-          brew_pump_->set_bypass_mode(true);
-          brew_pump_->turn_on();
-        }
-        brew_state_ = BrewState::COOLING;
-        state_entered_ms_ = millis();
-        publish_status_();
-        break;
-      }
-      // No cooldown needed (disabled, no controller, or already at target) — go straight to cleanup.
+      // Run the user-configured cleanup script (P2-1), then enter CLEANUP.
       ESP_LOGI(TAG, "Brew: DONE → CLEANUP");
       if (brew_cleanup_fn_)
         brew_cleanup_fn_();
@@ -429,22 +426,21 @@ void EspressoMachine::advance_brew_() {
       break;
 
     case BrewState::COOLING:
-      // Wait for the thermoblock to cool to brew_target_temp_.
+      // Wait for the thermoblock to cool to brew_target_temp_ before heating.
       // brew_heater_ctrl_ is guaranteed non-null when COOLING is entered.
       if (brew_heater_ctrl_->get_current_temperature() > brew_target_temp_) {
         break;  // Still cooling — wait
       }
-      ESP_LOGI(TAG, "Brew: COOLING → CLEANUP (%.1f°C)",
+      ESP_LOGI(TAG, "Brew: COOLING → HEATING (%.1f°C)",
                brew_heater_ctrl_->get_current_temperature());
       if (brew_pump_) {
         brew_pump_->turn_off();
         brew_pump_->set_bypass_mode(false);
+        brew_pump_->reset_flow();
       }
       if (brew_purge_valve_)
         brew_purge_valve_->close();
-      if (brew_cleanup_fn_)
-        brew_cleanup_fn_();
-      brew_state_ = BrewState::CLEANUP;
+      brew_state_ = BrewState::HEATING;
       state_entered_ms_ = millis();
       publish_status_();
       break;

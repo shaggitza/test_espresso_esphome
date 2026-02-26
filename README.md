@@ -28,7 +28,7 @@ partial / planned). A high-level summary:
 | **Vibration pump control** | ✅ Implemented | Relay (on/off) and dimmer (0–100 %) types |
 | **Grinder integration** | ✅ Implemented | Timed relay grind; adjustable from HA; brew/steam lockout ⬜ pending |
 | **Pre-infusion** | ✅ Implemented | Volume-driven pre-wet + configurable hold time |
-| **Brew temperature cooldown** | ✅ Implemented | Optional post-shot cooldown: purge valve + pump active until thermoblock reaches brew target |
+| **Brew temperature cooldown** | ✅ Implemented | Pre-brew cooldown when thermoblock is above target (e.g. after aborted steam): purge valve + pump active until temp drops to target, then HEATING proceeds |
 | **Brew state machine** | ✅ Implemented | All states; heater setpoint wiring; temperature-gating; pre-infusion; optional temperature cooldown |
 | **Steam mode** | ✅ Implemented | Full sequence: HEATING → PURGING → STEAMING → COOLING → CLEANUP; temperature-gated; purge-before-steam; safety timeout |
 | **Steam pump minimum on-window** | ✅ Implemented | Pump owns bang-bang flow-rate control: orchestrator calls `set_target_flow()`; pump modulates on/off in its `loop()`, respecting `pump_min_on_time` / `pump_min_off_time` (P2-7) |

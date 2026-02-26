@@ -108,10 +108,12 @@ class EspressoMachine : public Component {
   void set_brew_flow_max(float ml) { brew_flow_max_ml_ = ml; }
   void set_brew_flow_offset(float ml) { brew_flow_offset_ml_ = ml; }
   void set_brew_flow_max_number(BrewFlowMaxNumber *n) { brew_flow_max_number_ = n; }
-  // When true the brew sequence inserts a COOLING state after DONE: the purge
-  // valve is opened and the pump runs in bypass mode until the thermoblock
-  // cools back to brew_target_temp_.  Requires brew_heater_ctrl_ to be wired;
-  // if not wired the option is silently ignored.
+  // When true, if brew_start() is called while the thermoblock is above
+  // brew_target_temp_ (e.g. still hot after an aborted steam session), the
+  // brew sequence inserts a COOLING state BEFORE HEATING: the purge valve is
+  // opened and the pump runs in bypass mode until the thermoblock cools to
+  // brew_target_temp_, then the normal HEATING sequence begins.
+  // Requires brew_heater_ctrl_ to be wired; silently ignored otherwise.
   void set_brew_temperature_cooldown(bool enabled) { brew_temperature_cooldown_ = enabled; }
 
   // ----- Temperature surfing setters (Phase 7) -----------------------------

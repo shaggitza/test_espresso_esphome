@@ -269,7 +269,7 @@ machine in a dangerous state, regardless of what the mock components return.
 | `Safety_PurgeOnSteamStop` | Steam stopped by user | Purge valve opens; pressure safely released | ✅ Implemented in orchestrator tests |
 | `Safety_PurgeBeforeSteam` | Steam sequence started with `purge_volume > 0` | Purge valve open + pump on during PURGING; steam valve only opens after purge | ✅ Implemented (`SteamPurge.*` tests) |
 | `Safety_SteamTimeout` | Steaming runs past `timeout` duration | STEAMING auto-stops, enters COOLING | ✅ Implemented (`SteamTimeout.*` tests) |
-| `Safety_BrewTemperatureCooldown` | `temperature_cooldown: true` with temp above target after brew | COOLING state entered; purge valve open, pump on, heater setpoint lowered; transitions to CLEANUP when cool | ✅ Implemented (`BrewTemperatureCooldown.*` tests) |
+| `Safety_BrewTemperatureCooldown` | `temperature_cooldown: true` and thermoblock above target when `brew_start()` is called (e.g. after stopped steam at 110°C) | Pre-brew COOLING state entered; purge valve open, pump on, heater setpoint lowered; transitions to HEATING when temp ≤ target | ✅ Implemented (`BrewTemperatureCooldown.*` tests) |
 
 ### Priority 3 — Grinder Independence
 

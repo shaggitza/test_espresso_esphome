@@ -97,11 +97,13 @@ BREW_SCHEMA = cv.Schema(
             unit_of_measurement="mL",
         ),
         cv.Optional(CONF_PRE_INFUSION): PRE_INFUSION_SCHEMA,
-        # When true, after the shot completes the brew sequence enters a COOLING
-        # state: the purge valve is opened, the pump runs in bypass mode, and the
-        # orchestrator waits for the thermoblock to cool back to target_temperature
-        # before running the cleanup script.  Requires heater_controller: to be
-        # wired; ignored if no heater controller is configured.
+        # When true, if brew_start() is called while the thermoblock is above
+        # target_temperature (e.g. still hot after an aborted steam session),
+        # the brew sequence inserts a COOLING state BEFORE the HEATING phase:
+        # the purge valve opens, the pump runs in bypass mode, and the
+        # orchestrator waits for the thermoblock to drop to target_temperature
+        # before proceeding to HEATING.  Requires heater_controller: to be
+        # wired; silently ignored if no heater controller is configured.
         cv.Optional(CONF_TEMPERATURE_COOLDOWN, default=False): cv.boolean,
         # Shot statistics exposed as HA sensor entities (P1-5)
         cv.Optional(CONF_SHOT_STATS): cv.Schema(
