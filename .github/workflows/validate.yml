@@ -56,7 +56,9 @@ jobs:
         run: pip install esphome
 
       - name: Create mock secrets.yaml
-        run: cp secrets.yaml.example secrets.yaml
+        run: |
+          cp secrets.yaml.example secrets.yaml
+          cp secrets.yaml.example examples/secrets.yaml
 
       - name: Validate ${{ matrix.yaml }}
         run: esphome config ${{ matrix.yaml }}
