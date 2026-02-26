@@ -29,6 +29,10 @@ class PumpSwitch : public switch_::Switch, public Component, public espresso_mac
   void turn_off() override { write_state(false); }
   bool is_running() const override { return running_; }
 
+  // Flow-rate bang-bang control: stores the target rate; loop() modulates
+  // turn_on()/turn_off() to maintain it.  Set to 0 to disable.
+  void set_target_flow(float ml_per_s) override { target_flow_rate_ = ml_per_s; }
+
   // Flow subsystem — delegates to the wired flow meter if present
   float get_flow_rate() const override {
     return flow_meter_ ? flow_meter_->get_rate() : 0.0f;
@@ -54,6 +58,9 @@ class PumpSwitch : public switch_::Switch, public Component, public espresso_mac
   GPIOPin *pin_{nullptr};
   espresso_machine::IFlowMeter *flow_meter_{nullptr};
   bool running_{false};
+
+  // Flow-rate bang-bang target (0 = disabled, >0 = ml/s to maintain)
+  float target_flow_rate_{0.0f};
 
   // Minimum on/off timing constraints — enforced in write_state().
   // NOTE: defaults below must stay in sync with the YAML schema defaults

@@ -39,6 +39,14 @@ class IPump {
   virtual float get_flow_total() const { return 0.0f; }
   virtual void reset_flow() {}
 
+  // Flow-rate control: set the target flow rate that the pump should maintain.
+  // The pump modulates turn_on()/turn_off() (bang-bang) in its own loop() to
+  // achieve this rate, respecting its min_on_ms / min_off_ms constraints.
+  // Set to 0 to disable flow control (default: off). This keeps the orchestrator
+  // free of bang-bang logic — it simply declares the desired flow and the pump
+  // provides it. PumpSwitch and MockPump both implement this.
+  virtual void set_target_flow(float ml_per_s) { (void)ml_per_s; }
+
   // Bypass mode — when true, pump is flowing through an open valve (steam/purge)
   // rather than through a puck. In bypass mode there is no resistance, so flow
   // is at maximum and pressure stays near zero.

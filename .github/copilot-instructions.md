@@ -133,10 +133,10 @@ espresso_machine:
     purge_valve: purge_valve
     target_temperature: 135°C
     purge_volume: 5ml      # flush residual water before opening steam valve
-    flow_max: 2ml/s
+    flow_max: 2ml/s        # pump targets this flow rate via bang-bang in its own loop()
     cool_down_to: 90°C
     timeout: 5min          # optional safety auto-stop
-    pump_min_on_time: 2s   # minimum pump on-time before toggling off (P2-7)
+    pump_min_on_time: 2s   # minimum pump on-time enforced by pump hardware (P2-7)
 ```
 
 ## Current Development Phase

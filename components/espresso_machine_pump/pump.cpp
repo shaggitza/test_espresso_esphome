@@ -18,6 +18,20 @@ void PumpSwitch::setup() {
 }
 
 void PumpSwitch::loop() {
+  // Flow-rate bang-bang: when a target flow rate is set the pump modulates
+  // on/off to maintain the requested rate. min_on_ms / min_off_ms constraints
+  // are enforced inside write_state(), so rapid cycling is hardware-gated.
+  // Falls back to continuous operation when no flow meter is wired (rate = 0
+  // < target, so pump stays on — forward compatible with no-meter setups).
+  if (target_flow_rate_ > 0.0f) {
+    float current_rate = flow_meter_ ? flow_meter_->get_rate() : 0.0f;
+    if (current_rate < target_flow_rate_ && !running_)
+      write_state(true);
+    else if (current_rate >= target_flow_rate_ && running_)
+      write_state(false);
+    return;  // flow control active — skip volume-exit logic
+  }
+
   if (!running_)
     return;
 

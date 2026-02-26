@@ -36,6 +36,7 @@ struct MockPump : public IPump {
   float volume = 0.0f;   // simulated flow total (ml)
   float rate = 0.0f;     // simulated flow rate (ml/s)
   int reset_flow_count = 0;
+  float target_flow = 0.0f;  // last value passed to set_target_flow()
 
   void turn_on() override {
     running = true;
@@ -53,6 +54,7 @@ struct MockPump : public IPump {
     rate = 0.0f;
     reset_flow_count++;
   }
+  void set_target_flow(float ml_per_s) override { target_flow = ml_per_s; }
 };
 
 struct OrchestratorFixture {
@@ -454,42 +456,58 @@ TEST(Orchestrator, SteamCleanupTransitionsToIdle) {
   EXPECT_FALSE(f.steam_purge_valve.open_state);
 }
 
-TEST(Orchestrator, SteamPumpDutyCycleTurnsOffAtTargetFlowRate) {
+// ---------------------------------------------------------------------------
+// Steam pump flow control — delegated to the pump (P2-7)
+//
+// The orchestrator's responsibility is to tell the pump what flow rate it
+// needs; the pump handles bang-bang modulation in its own loop().
+// ---------------------------------------------------------------------------
+
+TEST(Orchestrator, SteamSetsTargetFlowOnPumpWhenEnteringSteaming) {
+  OrchestratorFixture f;
+  // Initially no flow target
+  EXPECT_FLOAT_EQ(f.steam_pump.target_flow, 0.0f);
+
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING (pump on, target flow set)
+  EXPECT_TRUE(f.steam_pump.running);
+  // Orchestrator delegates bang-bang to the pump by setting target_flow
+  EXPECT_FLOAT_EQ(f.steam_pump.target_flow, 2.0f);  // steam_flow_max configured as 2.0 ml/s
+}
+
+TEST(Orchestrator, SteamStopClearsTargetFlowOnPump) {
   OrchestratorFixture f;
   f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING (pump on)
-  EXPECT_TRUE(f.steam_pump.running);
+  f.machine.loop();  // HEATING → STEAMING
+  EXPECT_FLOAT_EQ(f.steam_pump.target_flow, 2.0f);
 
-  // Simulate flow rate reaching target — orchestrator requests pump off; pump-level
-  // min_on_time enforcement is handled by the pump hardware, not the orchestrator.
-  f.steam_pump.rate = 2.0f;
-  f.machine.loop();  // STEAMING: rate >= target → orchestrator calls turn_off()
+  f.machine.steam_stop();  // STEAMING → COOLING
+  // Pump flow control must be disabled before stopping
+  EXPECT_FLOAT_EQ(f.steam_pump.target_flow, 0.0f);
   EXPECT_FALSE(f.steam_pump.running);
 }
 
-TEST(Orchestrator, SteamPumpDutyCycleTurnsOnBelowTargetFlowRate) {
+TEST(Orchestrator, SafeStopClearsTargetFlowOnBothPumps) {
+  // Verify that an emergency stop (brew_stop or machine_off) also clears
+  // the target_flow on both pumps so they don't restart on the next loop().
   OrchestratorFixture f;
   f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING (pump on)
+  f.machine.loop();  // HEATING → STEAMING
+  EXPECT_FLOAT_EQ(f.steam_pump.target_flow, 2.0f);
 
-  // Raise rate to target → orchestrator turns pump off.
-  f.steam_pump.rate = 2.0f;
-  f.machine.loop();
-  EXPECT_FALSE(f.steam_pump.running);
-
-  // Drop rate below target → orchestrator turns pump on.
-  f.steam_pump.rate = 1.5f;
-  f.machine.loop();  // STEAMING: rate < target → pump on
-  EXPECT_TRUE(f.steam_pump.running);
+  f.machine.steam_stop();  // exits STEAMING, which clears target_flow
+  EXPECT_FLOAT_EQ(f.steam_pump.target_flow, 0.0f);
+  EXPECT_FLOAT_EQ(f.brew_pump.target_flow, 0.0f);
 }
 
 TEST(Orchestrator, SteamPumpRunsContinuouslyWithoutFlowMeter) {
   OrchestratorFixture f;
-  // steam_pump.rate defaults to 0.0f (no flow meter), target is 2.0f
   f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING (pump on)
-  f.machine.loop();  // STEAMING: rate(0) < target(2) → pump stays on
+  f.machine.loop();  // HEATING → STEAMING (pump on, target flow set)
+  // When no flow meter is wired the pump's own loop() keeps it running
+  // (rate = 0 < target); verify the orchestrator starts the pump and sets target.
   EXPECT_TRUE(f.steam_pump.running);
+  EXPECT_FLOAT_EQ(f.steam_pump.target_flow, 2.0f);
 }
 
 TEST(Orchestrator, SteamStopIgnoredDuringCooling) {

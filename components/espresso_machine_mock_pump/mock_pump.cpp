@@ -320,6 +320,18 @@ void MockPump::loop() {
     flow_observer_->set_flow_rate(current_flow_rate_);
   }
 
+  // Flow-rate bang-bang: when a target flow rate is set, modulate the pump
+  // on/off to maintain the requested rate. This mirrors PumpSwitch::loop() so
+  // the mock behaves consistently with real hardware.
+  // Note: MockPump has no min_on/min_off hardware constraints, so oscillation
+  // can be very fast (every 10 ms tick). This is acceptable for simulation.
+  if (target_flow_rate_ > 0.0f) {
+    if (current_flow_rate_ < target_flow_rate_ && !running_)
+      write_state(true);
+    else if (current_flow_rate_ >= target_flow_rate_ && running_)
+      write_state(false);
+  }
+
   // Log periodically (every ~5 seconds for debugging)
   static uint32_t last_log_ms = 0;
   if (now - last_log_ms > 5000) {
