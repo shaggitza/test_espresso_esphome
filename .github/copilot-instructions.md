@@ -152,6 +152,60 @@ See `PLAN.md` for the full phased roadmap.
 - Do not reinvent PID — delegate to `esphome::climate::PIDClimate`.
 - Do not add dependencies not already available in ESPHome core.
 
+## CI / Testing — Keeping Tests Green
+
+The CI workflow (`.github/workflows/validate.yml`) runs these jobs on every PR:
+
+| Job | What it validates |
+|---|---|
+| **Lint Python** | `flake8 components/ --max-line-length=100` |
+| **ESPHome config** | `esphome config` on every YAML in `tests/` and `examples/` |
+| **ESPHome compile** | `esphome compile tests/test_compile.yaml` (host platform) |
+| **C++ unit tests** | GoogleTest suite in `tests/cpp/` via CMake |
+| **Addon build** | Docker build of `addons/espresso_shot_history/` |
+
+### Secrets handling
+
+Example YAML configs use `!secret` references (`wifi_ssid`, `wifi_password`, `ha_api_key`,
+`ota_password`). ESPHome resolves `secrets.yaml` **relative to the config file's directory**,
+not the working directory. The CI must therefore provide `secrets.yaml` in every directory
+that contains YAML configs using `!secret`:
+
+- `secrets.yaml` (repo root — for test configs if any reference secrets)
+- `examples/secrets.yaml` (for example configs)
+
+The CI step copies `secrets.yaml.example` to both locations before running `esphome config`.
+Both `secrets.yaml` and `examples/secrets.yaml` are gitignored — **never commit real secrets**.
+
+### Mock secret values must be valid
+
+ESPHome validates secret values during `esphome config`. Mock values in `secrets.yaml.example`
+must satisfy all ESPHome validators:
+
+- `ha_api_key` must be a **base64-encoded 32-byte** value (use `esphome generate-api-key`)
+- `wifi_ssid` / `wifi_password` / `ota_password` can be any non-empty string
+
+If you change or add `!secret` references, update `secrets.yaml.example` with valid mock values
+and verify locally: `cp secrets.yaml.example secrets.yaml && cp secrets.yaml.example examples/secrets.yaml && esphome config examples/philips_barista_brew.yaml`
+
+### Example YAML configs must validate offline
+
+The `esphome config` step runs in CI without network access to external resources. Ensure:
+
+- **No Google Fonts downloads** — comment out `font:` blocks using `gfonts://` URIs
+  (or provide a local fallback font file checked into the repo).
+- **No external `!include` files** that won't exist in CI.
+- **ESP32 GPIO constraints** — GPIO34–39 are input-only with no internal pull resistors;
+  use `mode: INPUT` (not `INPUT_PULLUP` or `INPUT_PULLDOWN`).
+- **Unimplemented features** — if a schema field uses `cv.Any()` as a placeholder (e.g.
+  `cleanup_script`), keep the corresponding YAML commented out until the feature is wired.
+
+### C++ includes
+
+When using standard library functions (`std::exp`, `std::sqrt`, etc.) in C++ component files,
+always include the corresponding header (`<cmath>`, `<cstring>`, etc.). The ESPHome Arduino
+framework may not transitively include them, causing GoogleTest builds to fail.
+
 ## Documentation and YAML Files — Always Keep Updated
 
 > **Important:** Every code change that adds or modifies a feature **must** be accompanied by

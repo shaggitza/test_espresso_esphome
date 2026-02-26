@@ -17,6 +17,7 @@ env/
 
 # ESPHome secrets (never commit these)
 secrets.yaml
+examples/secrets.yaml
 
 # IDE / editor
 .vscode/

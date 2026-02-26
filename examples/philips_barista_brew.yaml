@@ -53,6 +53,12 @@ logger:
   level: INFO
 
 # -----------------------------------------------------------------------------
+# Debug component — exposes MCU memory and loop-time metrics to HA
+# -----------------------------------------------------------------------------
+debug:
+  update_interval: 30s
+
+# -----------------------------------------------------------------------------
 # Home Assistant API
 # -----------------------------------------------------------------------------
 api:
@@ -212,6 +218,13 @@ sensor:
   - platform: internal_temperature
     name: "ESP32 Temperature"
     entity_category: diagnostic
+  - platform: debug
+    free:
+      name: "Heap Free"
+      entity_category: diagnostic
+    loop_time:
+      name: "Loop Time"
+      entity_category: diagnostic
 
   # NOTE: Shot statistics (last shot time, volume, yield) are now declared
   # natively under espresso_machine: brew: shot_stats: (P1-5).
@@ -229,7 +242,7 @@ espresso_machine_flow_meter:
   name: "Brew Flow"
   pin:
     number: GPIO34            # ← CHANGE ME (input-capable GPIO; GPIO34–39 on ESP32)
-    mode: INPUT_PULLDOWN
+    mode: INPUT
   pulses_per_ml: 0.5195       # ← calibrate for your flow meter (AB32: ~0.5195)
   rate_sensor:
     name: "Brew Flow Rate"    # ml/s — appears in HA as sensor entity
@@ -550,11 +563,11 @@ espresso_machine:
     # Reference a script: block by id to run custom rinse or flush sequences.
     # Example: cleanup_script: my_brew_rinse_script
     # For a simple group-head rinse use the espresso_machine.flush action instead.
-    cleanup_script:
-      - delay: 2s
-      - espresso_machine_pump.run:
-          id: main_pump
-          volume_ml: 20ml
+    # cleanup_script:
+    #   - delay: 2s
+    #   - espresso_machine_pump.run:
+    #       id: main_pump
+    #       volume_ml: 20ml
 
   # ---------------------------------------------------------------------------
   # Steam mode — milk steaming sequence
@@ -608,36 +621,36 @@ espresso_machine:
     # Reference a script: block by id to run custom rinse or flush sequences.
     # Example: cleanup_script: my_steam_rinse_script
     # For inline group-head flushing use the espresso_machine.flush action instead.
-    cleanup_script:
-      - espresso_machine_valve.open: purge_valve
-      - espresso_machine_pump.run:
-          id: main_pump
-          volume_ml: 10ml
-      - espresso_machine_valve.close: purge_valve
+    # cleanup_script:
+    #   - espresso_machine_valve.open: purge_valve
+    #   - espresso_machine_pump.run:
+    #       id: main_pump
+    #       volume_ml: 10ml
+    #   - espresso_machine_valve.close: purge_valve
 
 # =============================================================================
 # DISPLAY (optional) — native ESPHome SSD1306 via I2C
 # Comment out this entire block if you do not have a display attached.
 # =============================================================================
-display:
-  - platform: ssd1306_i2c
-    model: "SSD1306 128x64"
-    address: 0x3C
-    lambda: |-
-      it.printf(0,  0, id(font_small), "Mode: %s",
-        id(my_espresso).mode_name());
-      it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
-        id(main_heater).current_temperature,
-        id(main_heater).target_temperature);
-      it.printf(0, 32, id(font_small), "Vol: %.1f ml",
-        id(brew_flow).total_volume());
-      it.printf(0, 48, id(font_small), "Heat: %.0f%%",
-        id(main_heater).output_value() * 100.0f);
-
-font:
-  - file: "gfonts://Roboto Mono"
-    id: font_small
-    size: 12
+# display:
+#   - platform: ssd1306_i2c
+#     model: "SSD1306 128x64"
+#     address: 0x3C
+#     lambda: |-
+#       it.printf(0,  0, id(font_small), "Mode: %s",
+#         id(my_espresso).mode_name());
+#       it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
+#         id(main_heater).current_temperature,
+#         id(main_heater).target_temperature);
+#       it.printf(0, 32, id(font_small), "Vol: %.1f ml",
+#         id(brew_flow).total_volume());
+#       it.printf(0, 48, id(font_small), "Heat: %.0f%%",
+#         id(main_heater).output_value() * 100.0f);
+#
+# font:
+#   - file: "gfonts://Roboto Mono"
+#     id: font_small
+#     size: 12
 
 # =============================================================================
 # POWER SWITCH — master on/off toggle
