@@ -43,10 +43,11 @@ planned in this project.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Brew state machine (`IDLE→HEATING→BREWING→DONE→CLEANUP`) | ✅ | All states; `HEATING` gates on temperature when `brew_heater_ctrl` is wired (P1-2) |
+| Brew state machine (`IDLE→[COOLING→]HEATING→[PRE_INFUSION→]BREWING→DONE→CLEANUP`) | ✅ | All states; `HEATING` gates on temperature when `brew_heater_ctrl` is wired (P1-2); optional pre-brew `COOLING` state when `temperature_cooldown: true` and thermoblock is above target |
 | Heater setpoint wiring (climate call) | ✅ | `set_target_temperature(brew_target_temp_)` called via `IHeater` in `brew_start()`; `espresso_machine_heater` adapter wires production `climate.pid` (P1-2) |
 | Heater readiness tolerance (`temperature_tolerance`) | ✅ | `EspressoMachineHeater` overrides `IHeater::is_ready()` to treat temperatures within `temperature_tolerance` (default 0.5°C) of the target as ready; prevents indefinite wait when PID stabilises just below setpoint (e.g. 89.9°C at 90.0°C target) |
 | Temperature surfing (offset + ramp) | ✅ | Config accepted; ramp setpoint computed and applied to `brew_heater_ctrl_->set_target_temperature()` each BREWING tick; runtime HA switch (`temp_surf_switch`) enables/disables surfing without reflashing (P1-3) |
+| Brew temperature cooldown (`temperature_cooldown`) | ✅ | When `true`, if the thermoblock is above `target_temperature` when `brew_start()` is called (e.g. after an aborted steam session), the brew sequence inserts a `COOLING` state **before** `HEATING`: purge valve opens, pump runs in bypass mode, heater setpoint lowered to `target_temperature`; waits for thermoblock to drop to target then closes purge and transitions to `HEATING` as normal. Requires `heater_controller:` to be wired; ignored otherwise |
 | Pre-infusion (low-pressure pre-wet) | ✅ | Volume-driven flowing phase + hold timer; resets flow before main extraction |
 | Auto-terminate at `flow_max` | ✅ | Shot stops when flow meter reports ≥ `flow_max` ml |
 | Shot stats (`last_shot_time_s`, `last_shot_volume_ml`) | ✅ | Stored on the orchestrator |

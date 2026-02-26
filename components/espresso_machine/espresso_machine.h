@@ -26,6 +26,7 @@ enum class BrewState : uint8_t {
   BREWING = 3,       // full-pressure extraction
   DONE = 4,          // flow_max reached; waiting for cleanup
   CLEANUP = 5,       // flushing brew path
+  COOLING = 6,       // temperature cooldown: purge valve open, pump running, waiting for temp drop
 };
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,13 @@ class EspressoMachine : public Component {
   void set_brew_flow_max(float ml) { brew_flow_max_ml_ = ml; }
   void set_brew_flow_offset(float ml) { brew_flow_offset_ml_ = ml; }
   void set_brew_flow_max_number(BrewFlowMaxNumber *n) { brew_flow_max_number_ = n; }
+  // When true, if brew_start() is called while the thermoblock is above
+  // brew_target_temp_ (e.g. still hot after an aborted steam session), the
+  // brew sequence inserts a COOLING state BEFORE HEATING: the purge valve is
+  // opened and the pump runs in bypass mode until the thermoblock cools to
+  // brew_target_temp_, then the normal HEATING sequence begins.
+  // Requires brew_heater_ctrl_ to be wired; silently ignored otherwise.
+  void set_brew_temperature_cooldown(bool enabled) { brew_temperature_cooldown_ = enabled; }
 
   // ----- Temperature surfing setters (Phase 7) -----------------------------
   void set_brew_temp_offset(float offset) { brew_temp_offset_ = offset; }
@@ -242,6 +250,7 @@ class EspressoMachine : public Component {
   float brew_target_temp_{90.0f};     // °C
   float brew_flow_max_ml_{40.0f};     // ml to extract before stopping
   float brew_flow_offset_ml_{20.0f};  // ml absorbed by puck (subtracted for yield)
+  bool brew_temperature_cooldown_{false};  // when true, cool to brew_target_temp_ after shot
   BrewFlowMaxNumber *brew_flow_max_number_{nullptr};
 
   // -- Temperature surfing config (Phase 7) ----------------------------------

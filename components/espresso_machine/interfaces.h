@@ -81,14 +81,23 @@ class IHeater {
   virtual void set_target_temperature(float t) = 0;
   // Returns true when the current temperature is within acceptable range of
   // the target, meaning the machine may safely begin or continue operation.
-  // The default uses exact comparison (current >= target), which passes both
-  // when the heater has reached the target and when it is above it (e.g.
-  // during cool-down gating).  Concrete implementations (e.g. EspressoMachineHeater)
-  // may override this to apply a configurable tolerance so the machine does not
-  // wait indefinitely for a stably-heated thermoblock that is slightly below
-  // the target (e.g. 89.9°C when target is 90.0°C with a 0.5°C tolerance).
+  // The DEFAULT implementation checks only the lower bound (current >= target),
+  // i.e. it does NOT reject temperatures above the target.  Concrete implementations
+  // (e.g. EspressoMachineHeater) override this with a bidirectional tolerance band
+  // (target - tol ≤ current ≤ target + tol) so that: (a) a thermoblock stabilised
+  // slightly below the setpoint (e.g. 89.9°C at 90.0°C) is considered ready without
+  // waiting indefinitely, and (b) the COOLING state correctly stays blocked while
+  // the temperature is still above the target + tolerance.
   virtual bool is_ready(float target_temp) const {
     return get_current_temperature() >= target_temp;
+  }
+  // Returns true when the current temperature is significantly above the target,
+  // indicating that active cooling (pump + purge valve) is needed before brewing.
+  // The default uses a strict > comparison.  Concrete implementations may override
+  // to apply an upper tolerance, so minor overshoot (e.g. 90.3°C at a 90.0°C
+  // target with 0.5°C tolerance) does not unnecessarily trigger cooldown.
+  virtual bool is_above_target(float target_temp) const {
+    return get_current_temperature() > target_temp;
   }
   // Called by the orchestrator's hard over-temperature safety cutoff.
   // Implementations should immediately disable the heater output (e.g. set

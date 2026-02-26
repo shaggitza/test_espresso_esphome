@@ -232,3 +232,19 @@ The scenarios above are validated by the following GoogleTest tests in
 | `HeaterReadiness.DefaultIsReadyRequiresExactTarget` | Default IHeater (no tolerance) requires exact >= target |
 | `HeaterReadiness.SteamProceedsWhenTempStabilisedJustBelowSteamTarget` | 134.7°C at 135.0°C steam target with 0.5°C tolerance → steam starts |
 | `HeaterReadiness.SteamWaitsWhenTempBelowSteamToleranceBand` | 134.0°C at 135.0°C steam target with 0.5°C tolerance → steam waits |
+| `BrewTemperatureCooldown.DisabledByDefaultNoCoolingStateAtEnd` | DONE→CLEANUP without COOLING when disabled |
+| `BrewTemperatureCooldown.DisabledSkipsCoolingEvenWhenTempAboveTarget` | COOLING skipped when feature disabled |
+| `BrewTemperatureCooldown.EnabledButNoHeaterCtrlSkipsCooling` | COOLING skipped when no heater controller wired |
+| `BrewTemperatureCooldown.EnabledTempAtTargetGoesDirectlyToHeating` | brew_start() at target temp → direct HEATING |
+| `BrewTemperatureCooldown.EnabledTempBelowTargetGoesDirectlyToHeating` | brew_start() below target temp → direct HEATING |
+| `BrewTemperatureCooldown.EntersCoolingWhenTempAboveTarget` | brew_start() above target → COOLING first |
+| `BrewTemperatureCooldown.CoolingOpensPurgeValveAndRunsPump` | Purge valve + pump active during brew COOLING |
+| `BrewTemperatureCooldown.CoolingKeepsBrewValveClosed` | Brew valve stays closed during COOLING |
+| `BrewTemperatureCooldown.CoolingSetsHeaterSetpointToBrewTarget` | Heater setpoint lowered to brew target on COOLING entry |
+| `BrewTemperatureCooldown.StaysInCoolingWhileTempAboveTarget` | COOLING persists while temp > target |
+| `BrewTemperatureCooldown.TransitionsToHeatingWhenTempReachesTarget` | COOLING→HEATING when temp ≤ target |
+| `BrewTemperatureCooldown.HeatingAfterCoolingClosesPurgeValveAndStopsPump` | Pump off + purge valve closed at HEATING entry |
+| `BrewTemperatureCooldown.FullSequenceWithCooldownReturnsToIdle` | Full COOLING→HEATING→BREWING→DONE→CLEANUP→IDLE |
+| `BrewTemperatureCooldown.BrewStopDuringCoolingSafelyReturnsToIdle` | brew_stop() during COOLING → immediate safe stop |
+| `BrewTemperatureCooldown.StatusNameShowsCurrentAndTargetTemperatures` | Status string shows current and target °C during COOLING |
+| `BrewTemperatureCooldown.NoCoolingInsertedAfterDoneWhenEnabled` | DONE→CLEANUP is direct even with cooldown enabled (no end-of-brew cooling) |

@@ -150,25 +150,45 @@ void EspressoMachine::brew_start() {
   }
   ESP_LOGI(TAG, "Brew START — target=%.1f°C  flow_max=%.1fml", brew_target_temp_, brew_flow_max_ml_);
   mode_ = EspressoMode::BREWING;
-  brew_state_ = BrewState::HEATING;
   brew_start_ms_ = millis();
-  state_entered_ms_ = millis();
-  publish_status_();
 
-  // Start with all valves closed and pump off until temperature is reached
+  // Always close the brew valve and stop/reset the pump first.
   if (brew_valve_)
     brew_valve_->close();
-  if (brew_purge_valve_)
-    brew_purge_valve_->close();
   if (brew_pump_) {
     brew_pump_->turn_off();
     brew_pump_->reset_flow();
   }
 
-  // NOTE: heater setpoint is raised to brew_target_temp_ when a brew heater
-  // controller is wired via set_brew_heater_ctrl() (P1-2).
-  if (brew_heater_ctrl_ && brew_target_temp_ > 0.0f)
+  // If temperature_cooldown is enabled and the thermoblock is above the brew
+  // target (e.g. still hot after an aborted steam session), cool it down first
+  // before entering the HEATING/PRE_INFUSION/BREWING sequence.  This prevents
+  // a shot from starting at the wrong temperature and ensures the PID has
+  // settled at brew_target_temp_ before extraction begins.
+  if (brew_temperature_cooldown_ && brew_heater_ctrl_ && brew_target_temp_ > 0.0f &&
+      brew_heater_ctrl_->is_above_target(brew_target_temp_)) {
+    ESP_LOGI(TAG, "Brew: START → COOLING (%.1f°C → %.1f°C first)",
+             brew_heater_ctrl_->get_current_temperature(), brew_target_temp_);
     brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
+    if (brew_purge_valve_)
+      brew_purge_valve_->open();
+    if (brew_pump_) {
+      brew_pump_->set_bypass_mode(true);
+      brew_pump_->turn_on();
+    }
+    brew_state_ = BrewState::COOLING;
+  } else {
+    // Normal path: close purge valve and start waiting for brew temperature.
+    if (brew_purge_valve_)
+      brew_purge_valve_->close();
+    brew_state_ = BrewState::HEATING;
+    // NOTE: heater setpoint is raised to brew_target_temp_ when a brew heater
+    // controller is wired via set_brew_heater_ctrl() (P1-2).
+    if (brew_heater_ctrl_ && brew_target_temp_ > 0.0f)
+      brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
+  }
+  state_entered_ms_ = millis();
+  publish_status_();
 }
 
 void EspressoMachine::brew_stop() {
@@ -401,6 +421,29 @@ void EspressoMachine::advance_brew_() {
       if (brew_cleanup_fn_)
         brew_cleanup_fn_();
       brew_state_ = BrewState::CLEANUP;
+      state_entered_ms_ = millis();
+      publish_status_();
+      break;
+
+    case BrewState::COOLING:
+      // Wait for the thermoblock to cool into the acceptable range around
+      // brew_target_temp_.  is_ready() checks both directions (too cold AND
+      // too hot), so this correctly waits until the block has settled within
+      // temperature_tolerance_ of brew_target_temp_.
+      // brew_heater_ctrl_ is guaranteed non-null when COOLING is entered.
+      if (!brew_heater_ctrl_->is_ready(brew_target_temp_)) {
+        break;  // Still out of range — wait
+      }
+      ESP_LOGI(TAG, "Brew: COOLING → HEATING (%.1f°C)",
+               brew_heater_ctrl_->get_current_temperature());
+      if (brew_pump_) {
+        brew_pump_->turn_off();
+        brew_pump_->set_bypass_mode(false);
+        brew_pump_->reset_flow();
+      }
+      if (brew_purge_valve_)
+        brew_purge_valve_->close();
+      brew_state_ = BrewState::HEATING;
       state_entered_ms_ = millis();
       publish_status_();
       break;
@@ -713,6 +756,14 @@ std::string EspressoMachine::status_name() const {
         case BrewState::DONE:
           n = snprintf(buf, STATUS_BUF_SIZE, "Shot done: %.1f ml in %.1f s",
                        last_shot_volume_ml_, last_shot_time_s_);
+          break;
+        case BrewState::COOLING:
+          if (brew_heater_ctrl_) {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Brew cooldown: %.1f°C → %.1f°C",
+                         brew_heater_ctrl_->get_current_temperature(), brew_target_temp_);
+          } else {
+            n = snprintf(buf, STATUS_BUF_SIZE, "Brew cooldown to %.1f°C", brew_target_temp_);
+          }
           break;
         case BrewState::CLEANUP:
           return "Brew cleanup";
