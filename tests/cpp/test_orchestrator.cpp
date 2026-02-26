@@ -535,6 +535,22 @@ struct MockHeaterCtrl : public IHeater {
     target_temp = t;
     set_target_count++;
   }
+  // Bidirectional: ready only when within 0.5°C of target (both above and below).
+  bool is_ready(float t) const override {
+    return current_temp >= (t - 0.5f) && current_temp <= (t + 0.5f);
+  }
+  // Above-target: temperature significantly above target (more than 0.5°C).
+  bool is_above_target(float t) const override { return current_temp > (t + 0.5f); }
+};
+
+// ExactHeater — minimal IHeater stub that does NOT override is_ready() or
+// is_above_target(), so tests can exercise the base IHeater default behaviour
+// (no tolerance: is_ready ↔ current >= target, is_above_target ↔ current > target).
+struct ExactHeater : public IHeater {
+  float current_temp{25.0f};
+  float get_current_temperature() const override { return current_temp; }
+  void set_target_temperature(float) override {}
+  // is_ready() and is_above_target() intentionally use IHeater defaults.
 };
 
 // Fixture with heater controller wired (start cold, target 135°C, cool-down 90°C)
@@ -1231,7 +1247,10 @@ struct MockHeaterWithTolerance : public IHeater {
 
   float get_current_temperature() const override { return current_temp; }
   void set_target_temperature(float /*t*/) override {}  // target flows through is_ready() param
-  bool is_ready(float t) const override { return current_temp >= (t - tolerance); }
+  bool is_ready(float t) const override {
+    return current_temp >= (t - tolerance) && current_temp <= (t + tolerance);
+  }
+  bool is_above_target(float t) const override { return current_temp > (t + tolerance); }
 };
 
 // Fixture using MockHeaterWithTolerance for brew (tolerance = 0.5°C).
@@ -1303,18 +1322,41 @@ TEST(HeaterReadiness, BrewWaitsWhenTempBelowToleranceBand) {
 
 // Default IHeater::is_ready() (no override) still requires exact >= target.
 TEST(HeaterReadiness, DefaultIsReadyRequiresExactTarget) {
-  BrewHeaterFixture f;  // uses MockHeaterCtrl — no is_ready() override
-  f.machine.brew_start();
+  // ExactHeater uses the base IHeater::is_ready() (current >= target, no tolerance),
+  // verifying that without a concrete override the machine waits for the exact target.
+  ExactHeater heater;
+  MockValve brew_valve, purge_valve, steam_valve, steam_purge_valve;
+  MockPump brew_pump, steam_pump;
+  EspressoMachine machine;
+  machine.set_brew_valve(&brew_valve);
+  machine.set_brew_purge_valve(&purge_valve);
+  machine.set_brew_pump(&brew_pump);
+  machine.set_brew_heater_ctrl(&heater);
+  machine.set_brew_target_temperature(90.0f);
+  machine.set_brew_flow_max(40.0f);
+  machine.set_brew_flow_offset(20.0f);
+  machine.set_steam_valve(&steam_valve);
+  machine.set_steam_purge_valve(&steam_purge_valve);
+  machine.set_steam_pump(&steam_pump);
+  machine.set_steam_target_temperature(135.0f);
+  machine.set_steam_flow_max(2.0f);
+  machine.set_steam_cool_down_to(90.0f);
+  heater.current_temp = 25.0f;
+  g_mock_millis = 0;
+  machine.setup();
+  machine.machine_on();
+
+  machine.brew_start();
 
   // 89.9°C without a tolerance override does NOT satisfy default >= 90.0°C.
-  f.brew_heater_ctrl.current_temp = 89.9f;
-  f.machine.loop();
-  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+  heater.current_temp = 89.9f;
+  machine.loop();
+  EXPECT_EQ(machine.get_brew_state(), BrewState::HEATING);
 
   // Reaching exactly the target satisfies the default check.
-  f.brew_heater_ctrl.current_temp = 90.0f;
-  f.machine.loop();
-  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  heater.current_temp = 90.0f;
+  machine.loop();
+  EXPECT_EQ(machine.get_brew_state(), BrewState::BREWING);
 }
 
 // Steam heating: same tolerance logic applies via is_ready().

@@ -166,7 +166,7 @@ void EspressoMachine::brew_start() {
   // a shot from starting at the wrong temperature and ensures the PID has
   // settled at brew_target_temp_ before extraction begins.
   if (brew_temperature_cooldown_ && brew_heater_ctrl_ && brew_target_temp_ > 0.0f &&
-      brew_heater_ctrl_->get_current_temperature() > brew_target_temp_) {
+      brew_heater_ctrl_->is_above_target(brew_target_temp_)) {
     ESP_LOGI(TAG, "Brew: START → COOLING (%.1f°C → %.1f°C first)",
              brew_heater_ctrl_->get_current_temperature(), brew_target_temp_);
     brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
@@ -426,10 +426,13 @@ void EspressoMachine::advance_brew_() {
       break;
 
     case BrewState::COOLING:
-      // Wait for the thermoblock to cool to brew_target_temp_ before heating.
+      // Wait for the thermoblock to cool into the acceptable range around
+      // brew_target_temp_.  is_ready() checks both directions (too cold AND
+      // too hot), so this correctly waits until the block has settled within
+      // temperature_tolerance_ of brew_target_temp_.
       // brew_heater_ctrl_ is guaranteed non-null when COOLING is entered.
-      if (brew_heater_ctrl_->get_current_temperature() > brew_target_temp_) {
-        break;  // Still cooling — wait
+      if (!brew_heater_ctrl_->is_ready(brew_target_temp_)) {
+        break;  // Still out of range — wait
       }
       ESP_LOGI(TAG, "Brew: COOLING → HEATING (%.1f°C)",
                brew_heater_ctrl_->get_current_temperature());

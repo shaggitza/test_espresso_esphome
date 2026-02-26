@@ -43,11 +43,22 @@ class EspressoMachineHeater : public Component,
   }
 
   // IHeater — readiness check.  Returns true when the current temperature is
-  // within `temperature_tolerance_` degrees below the target (or above it).
+  // within `temperature_tolerance_` degrees of the target in BOTH directions.
   // This prevents the machine from waiting indefinitely for a thermoblock that
-  // has stabilised slightly below the setpoint due to PID steady-state error.
+  // has stabilised slightly below the setpoint (e.g. 89.9°C when target is
+  // 90.0°C with a 0.5°C tolerance) while also returning false when the block
+  // is significantly above the setpoint — ensuring cooldown gating works correctly.
   bool is_ready(float target_temp) const override {
-    return get_current_temperature() >= (target_temp - temperature_tolerance_);
+    float current = get_current_temperature();
+    return current >= (target_temp - temperature_tolerance_) &&
+           current <= (target_temp + temperature_tolerance_);
+  }
+
+  // IHeater — above-target check.  Returns true when the current temperature
+  // exceeds the target by more than `temperature_tolerance_`, indicating that
+  // active cooling (pump + purge valve) is needed before brewing.
+  bool is_above_target(float target_temp) const override {
+    return get_current_temperature() > (target_temp + temperature_tolerance_);
   }
 
   // IHeater — setpoint command
