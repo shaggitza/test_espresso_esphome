@@ -1214,6 +1214,184 @@ TEST(P1BrewHeater, BrewHeatingImmediateWithoutHeaterController) {
 }
 
 // ---------------------------------------------------------------------------
+// 🟠 Heater readiness tolerance — IHeater::is_ready() (issue: stable temp)
+//
+// A thermoblock controlled by a PID may stabilise slightly below the setpoint
+// due to integral windup or steady-state error (e.g. 89.9°C when target is
+// 90.0°C).  The orchestrator must delegate the "ready" decision to the heater
+// via IHeater::is_ready() so that a configurable tolerance prevents an
+// indefinite wait in the HEATING state.
+// ---------------------------------------------------------------------------
+
+// Heater mock that implements is_ready() with a configurable tolerance,
+// mirroring EspressoMachineHeater::is_ready() used in production.
+struct MockHeaterWithTolerance : public IHeater {
+  float current_temp{25.0f};
+  float tolerance{0.5f};  // default matches EspressoMachineHeater default
+
+  float get_current_temperature() const override { return current_temp; }
+  void set_target_temperature(float /*t*/) override {}  // target flows through is_ready() param
+  bool is_ready(float t) const override { return current_temp >= (t - tolerance); }
+};
+
+// Fixture using MockHeaterWithTolerance for brew (tolerance = 0.5°C).
+struct BrewHeaterToleranceFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  MockHeaterWithTolerance brew_heater_ctrl;
+  EspressoMachine machine;
+
+  BrewHeaterToleranceFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+    machine.set_brew_heater_ctrl(&brew_heater_ctrl);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+// Core bug scenario: thermoblock stabilises at 89.9°C with target 90.0°C.
+// Without tolerance the machine would wait indefinitely.  With a 0.5°C
+// tolerance the heater reports ready and brewing begins.
+TEST(HeaterReadiness, BrewProceedsWhenTempStabilisedJustBelowTarget) {
+  BrewHeaterToleranceFixture f;
+  f.brew_heater_ctrl.tolerance = 0.5f;
+
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+
+  // Thermoblock stabilised at 89.9°C — within 0.5°C tolerance of 90.0°C.
+  f.brew_heater_ctrl.current_temp = 89.9f;
+  f.machine.loop();  // HEATING → BREWING (is_ready returns true)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+  EXPECT_TRUE(f.brew_pump.running);
+  EXPECT_TRUE(f.brew_valve.open_state);
+}
+
+// When temperature is outside the tolerance band the machine keeps waiting.
+TEST(HeaterReadiness, BrewWaitsWhenTempBelowToleranceBand) {
+  BrewHeaterToleranceFixture f;
+  f.brew_heater_ctrl.tolerance = 0.5f;
+
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+
+  // 89.4°C is 0.6°C below target — outside the 0.5°C tolerance.
+  f.brew_heater_ctrl.current_temp = 89.4f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+}
+
+// Default IHeater::is_ready() (no override) still requires exact >= target.
+TEST(HeaterReadiness, DefaultIsReadyRequiresExactTarget) {
+  BrewHeaterFixture f;  // uses MockHeaterCtrl — no is_ready() override
+  f.machine.brew_start();
+
+  // 89.9°C without a tolerance override does NOT satisfy default >= 90.0°C.
+  f.brew_heater_ctrl.current_temp = 89.9f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+
+  // Reaching exactly the target satisfies the default check.
+  f.brew_heater_ctrl.current_temp = 90.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::BREWING);
+}
+
+// Steam heating: same tolerance logic applies via is_ready().
+TEST(HeaterReadiness, SteamProceedsWhenTempStabilisedJustBelowSteamTarget) {
+  MockValve brew_valve, purge_valve, steam_valve, steam_purge_valve;
+  MockPump brew_pump, steam_pump;
+  MockHeaterWithTolerance steam_heater_ctrl;
+  EspressoMachine machine;
+
+  machine.set_brew_valve(&brew_valve);
+  machine.set_brew_purge_valve(&purge_valve);
+  machine.set_brew_pump(&brew_pump);
+  machine.set_brew_target_temperature(90.0f);
+  machine.set_brew_flow_max(40.0f);
+  machine.set_brew_flow_offset(20.0f);
+
+  machine.set_steam_valve(&steam_valve);
+  machine.set_steam_purge_valve(&steam_purge_valve);
+  machine.set_steam_pump(&steam_pump);
+  machine.set_steam_target_temperature(135.0f);
+  machine.set_steam_flow_max(2.0f);
+  machine.set_steam_cool_down_to(90.0f);
+  machine.set_steam_heater_ctrl(&steam_heater_ctrl);
+
+  steam_heater_ctrl.tolerance = 0.5f;
+  steam_heater_ctrl.current_temp = 134.7f;  // within 0.5°C of 135.0°C
+
+  g_mock_millis = 0;
+  machine.setup();
+  machine.machine_on();
+
+  machine.steam_start();
+  EXPECT_EQ(machine.get_steam_state(), SteamState::HEATING);
+
+  machine.loop();  // HEATING → STEAMING (is_ready returns true at 134.7°C)
+  EXPECT_EQ(machine.get_steam_state(), SteamState::STEAMING);
+  EXPECT_TRUE(steam_valve.open_state);
+  EXPECT_TRUE(steam_pump.running);
+}
+
+// Steam heating waits when temperature is below the tolerance band.
+TEST(HeaterReadiness, SteamWaitsWhenTempBelowSteamToleranceBand) {
+  MockValve brew_valve, purge_valve, steam_valve, steam_purge_valve;
+  MockPump brew_pump, steam_pump;
+  MockHeaterWithTolerance steam_heater_ctrl;
+  EspressoMachine machine;
+
+  machine.set_brew_valve(&brew_valve);
+  machine.set_brew_purge_valve(&purge_valve);
+  machine.set_brew_pump(&brew_pump);
+  machine.set_brew_target_temperature(90.0f);
+  machine.set_brew_flow_max(40.0f);
+  machine.set_brew_flow_offset(20.0f);
+
+  machine.set_steam_valve(&steam_valve);
+  machine.set_steam_purge_valve(&steam_purge_valve);
+  machine.set_steam_pump(&steam_pump);
+  machine.set_steam_target_temperature(135.0f);
+  machine.set_steam_flow_max(2.0f);
+  machine.set_steam_cool_down_to(90.0f);
+  machine.set_steam_heater_ctrl(&steam_heater_ctrl);
+
+  steam_heater_ctrl.tolerance = 0.5f;
+  steam_heater_ctrl.current_temp = 134.0f;  // 1.0°C below target — outside tolerance
+
+  g_mock_millis = 0;
+  machine.setup();
+  machine.machine_on();
+
+  machine.steam_start();
+  machine.loop();  // should stay in HEATING
+  EXPECT_EQ(machine.get_steam_state(), SteamState::HEATING);
+  EXPECT_FALSE(steam_valve.open_state);
+  EXPECT_FALSE(steam_pump.running);
+}
+
+// ---------------------------------------------------------------------------
 // 🟠 P1-3 — Temperature surfing: apply computed setpoint to climate
 // ---------------------------------------------------------------------------
 

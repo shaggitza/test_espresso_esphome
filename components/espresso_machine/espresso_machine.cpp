@@ -297,7 +297,7 @@ void EspressoMachine::advance_brew_() {
       // Gate transition on actual temperature when a heater controller is wired.
       // Without a controller, transition immediately (backward-compatible placeholder).
       if (brew_heater_ctrl_) {
-        if (brew_heater_ctrl_->get_current_temperature() < brew_target_temp_) {
+        if (!brew_heater_ctrl_->is_ready(brew_target_temp_)) {
           break;  // Still heating — wait
         }
         ESP_LOGI(TAG, "Brew: HEATING → next (%.1f°C)",
@@ -428,7 +428,7 @@ void EspressoMachine::advance_steam_() {
       // steam temperature before opening the valve.  Without a controller the
       // machine transitions immediately (backward-compatible placeholder).
       if (steam_heater_ctrl_) {
-        if (steam_heater_ctrl_->get_current_temperature() < steam_target_temp_) {
+        if (!steam_heater_ctrl_->is_ready(steam_target_temp_)) {
           break;  // Still heating — wait
         }
       }

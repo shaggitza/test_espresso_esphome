@@ -166,6 +166,7 @@ automatically.
 | Power ON with thermoblock already at steam temp | Brew actions allowed; caution expected from user | Documented below (P2-6) | ✅ Documented |
 | Power OFF during pre-infusion hold | Pre-infusion is part of BREWING mode — stops immediately | ✅ Covered by "OFF during brew" | ✅ Done |
 | Grinder activated during brew/steam | ✅ Allowed by design — operations are independent | No action needed | ✅ N/A |
+| PID-stabilised temperature just below setpoint (e.g. 89.9°C at 90.0°C target) | Machine waits indefinitely in HEATING | `is_ready()` on `IHeater` with configurable `temperature_tolerance` (default 0.5°C) | ✅ Done |
 
 ---
 
@@ -186,7 +187,7 @@ the thermoblock to **cool down**, not heat up.
 
 1. `brew_start()` is accepted (machine is IDLE and powered on — no interlock on temperature at start).
 2. If `heater_controller:` is wired, the HEATING state gates the HEATING→BREWING transition on
-   `get_current_temperature() < brew_target_temp_`. If the thermoblock is above brew temperature,
+   `heater.is_ready(brew_target_temp_)`. If the thermoblock is above brew temperature,
    the state machine waits in HEATING until the block cools to the brew setpoint.
 3. If no `heater_controller:` is wired, the machine transitions to BREWING immediately. The resulting
    shot will be extracted at higher temperature, which may over-extract or cause bitter flavour.
@@ -226,3 +227,8 @@ The scenarios above are validated by the following GoogleTest tests in
 | `SteamPurge.MachineOffDuringPurgingCancelsImmediately` | OFF during PURGING → immediate cancel |
 | `SteamPurge.FullSteamSequenceWithPurge` | Full HEATING→PURGING→STEAMING→COOLING→IDLE sequence |
 | `SteamTimeout.SteamTimesOutWhenTimeoutElapses` | Steam auto-stops after configured timeout |
+| `HeaterReadiness.BrewProceedsWhenTempStabilisedJustBelowTarget` | 89.9°C at 90.0°C target with 0.5°C tolerance → brew starts |
+| `HeaterReadiness.BrewWaitsWhenTempBelowToleranceBand` | 89.4°C at 90.0°C target with 0.5°C tolerance → brew waits |
+| `HeaterReadiness.DefaultIsReadyRequiresExactTarget` | Default IHeater (no tolerance) requires exact >= target |
+| `HeaterReadiness.SteamProceedsWhenTempStabilisedJustBelowSteamTarget` | 134.7°C at 135.0°C steam target with 0.5°C tolerance → steam starts |
+| `HeaterReadiness.SteamWaitsWhenTempBelowSteamToleranceBand` | 134.0°C at 135.0°C steam target with 0.5°C tolerance → steam waits |
