@@ -179,6 +179,17 @@ espresso_machine_mock_heater:
   water_inlet_temp_c: 20.0
   heat_transfer_k: 2.0           # Heat transfer effectiveness constant [mL/s]
 
+  # Thermal distance parameters [mm] — model the lag through the Al thermoblock.
+  # Each non-zero value creates a separate thermal node and delays temperature
+  # shifts, making PID control harder and better representing real hardware.
+  # Time constants: τ ≈ C_node / G where G = 200 W/(m·K) × 1cm² / d_m.
+  #   dist_water_to_heater_mm: 5.0  → C_H/G ≈ 80/4 = 20s lag at heater element
+  #   dist_water_to_sensor_mm: 10.0 → C_S/G ≈ 40/2 = 20s lag at sensor probe
+  # Set to 0 (default) to disable the corresponding lag (1-node model).
+  dist_water_to_heater_mm: 0.0    # Heater element → water contact [mm]
+  dist_water_to_sensor_mm: 0.0    # Water contact → sensor probe [mm]
+  dist_sensor_to_heater_mm: 0.0   # Heater element → sensor probe (direct) [mm]
+
   # Temperature sensor — same ID as physical max6675/max31855
   temperature_sensor:
     id: thermoblock_temp
@@ -214,6 +225,16 @@ espresso_machine_mock_heater:
     entity_category: config
   heat_transfer_k_number:
     name: "Mock Heat Transfer K"
+    entity_category: config
+  # Thermal distance number entities — adjust at runtime from HA (in mm)
+  dist_water_to_heater_number:
+    name: "Mock Dist Water-Heater"
+    entity_category: config
+  dist_water_to_sensor_number:
+    name: "Mock Dist Water-Sensor"
+    entity_category: config
+  dist_sensor_to_heater_number:
+    name: "Mock Dist Sensor-Heater"
     entity_category: config
 
   # Duty-cycle sensor — shows SSR switching intensity in HA (0–100%)

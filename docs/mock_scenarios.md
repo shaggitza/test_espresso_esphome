@@ -21,6 +21,9 @@ testing plan for the safety-critical C++ code paths.
 | Heat transfer effectiveness tuning | mock_heater | ✅ Full | `heat_transfer_k` parameter, HA-tunable number entity |
 | Thermoblock thermal mass | mock_heater | ✅ Full | Al block + water thermal mass |
 | Ambient heat loss | mock_heater | ✅ Full | Newton cooling term h × (T − T_amb) |
+| Thermal distance water→heater | mock_heater | ✅ Full | `dist_water_to_heater_mm`; heater element node; C_H=10% of mass; τ = C_H/G |
+| Thermal distance water→sensor | mock_heater | ✅ Full | `dist_water_to_sensor_mm`; sensor node lags block; PID reads lagged temperature |
+| Thermal distance sensor→heater | mock_heater | ✅ Full | `dist_sensor_to_heater_mm`; direct heater→sensor coupling path |
 | PID heater control | native ESPHome PID | ✅ Full | Unchanged from real config |
 | Temperature overshoot at startup | mock_heater | ✅ Full | Controlled by thermal mass and PID gains |
 | Over-temperature safety cutoff | mock_heater + YAML | ✅ Full | `on_value_range` above 165 °C in example YAML |
@@ -124,6 +127,88 @@ rate > 0, regardless of orchestrator state.
 **Runtime tuning:** Adjust `heat_transfer_k` via the HA number entity
 `"Mock Heat Transfer K"` to match your machine's actual thermoblock
 characteristics without reflashing.
+
+---
+
+### Thermal Distance Model (3-Node Thermoblock)
+
+**What it models:** In a real thermoblock the heater element, water channel,
+and temperature-sensor probe are all embedded at different locations in an
+aluminium body. Heat must diffuse through aluminium to travel between them,
+introducing thermal lag. This lag makes the PID controller harder to tune:
+the sensor can't see the block's temperature instantly, and electrical power
+doesn't reach the water immediately.
+
+**Parameters:**
+
+| Parameter | Default | Units | Effect |
+|---|---|---|---|
+| `dist_water_to_heater_mm` | 0 | mm | Distance through Al from heater element to water contact zone |
+| `dist_water_to_sensor_mm` | 0 | mm | Distance through Al from water contact to sensor probe |
+| `dist_sensor_to_heater_mm` | 0 | mm | Direct Al path from heater element to sensor probe |
+
+Setting all three to 0 (default) reverts to the original 1-node model —
+backward-compatible with all existing tests and configurations.
+
+**Thermal nodes:**
+
+When any distance > 0 a 3-node thermal network is activated:
+
+| Node | Label | Thermal mass share | Role |
+|---|---|---|---|
+| Heater element | H | 10 % of `thermal_mass_j_per_c` | Receives electrical power; separated from block by `dist_water_to_heater_mm` |
+| Block / water contact | W | 90 % of `thermal_mass_j_per_c` | Where flow cooling and ambient loss act |
+| Sensor probe | S | 5 % of `thermal_mass_j_per_c` | What the PID reads; lags block via `dist_water_to_sensor_mm` |
+
+**Thermal conductances:**
+
+```
+G = K_Al × A_ref / d   [W/K]
+
+K_Al  = 200 W/(m·K)   — aluminium thermal conductivity
+A_ref = 1 cm² = 1e-4 m²  — representative cross-section
+d     = distance [m]  — converts mm parameter to SI
+```
+
+| Distance | Conductance at 5 mm | Effective node time constant (C_node / G) |
+|---|---|---|
+| `dist_water_to_heater_mm = 5` | G_HW = 4 W/K | τ_HW = 80 J/°C / 4 W/K = 20 s |
+| `dist_water_to_sensor_mm = 10` | G_WS = 2 W/K | τ_WS = 40 J/°C / 2 W/K = 20 s |
+| `dist_sensor_to_heater_mm = 10` | G_HS = 2 W/K | τ_HS = 40 J/°C / 2 W/K = 20 s |
+
+**ODEs (explicit Euler, 10 ms step):**
+
+```
+Q_HW = G_HW × (T_H − T_W)          # heat from heater element to block
+Q_WS = G_WS × (T_W − T_S)          # heat from block to sensor
+Q_HS = G_HS × (T_H − T_S)          # direct heater element to sensor
+
+dT_H/dt = (duty × P − Q_HW − Q_HS) / C_H
+dT_W/dt = (Q_HW − Q_loss − Q_flow − Q_WS) / C_W
+dT_S/dt = (Q_WS + Q_HS) / C_S
+
+# PID reads T_S; orchestrator reads T_S via get_current_temperature()
+```
+
+**Effect on PID control:**
+
+- **`dist_water_to_sensor_mm`** — most impactful. The PID sees a lagged,
+  smoothed version of the block temperature. Oscillations and overshoot
+  increase with distance. Simulates a sensor probe located far from the water
+  path (common in real machines).
+
+- **`dist_water_to_heater_mm`** — introduces dead time in the heating path.
+  The heater element overshoots before the water "feels" the heat, then
+  undershoots when duty is cut. Makes the PID response sluggish.
+
+- **`dist_sensor_to_heater_mm`** — opens a direct thermal shortcut from the
+  heater element to the sensor probe. At high duty the sensor overshoots;
+  at low duty it undershoots. Compounds the effect of the other two distances.
+
+**Runtime tuning:** All three distances are adjustable at runtime via HA
+number entities (`"Mock Dist Water-Heater"`, `"Mock Dist Water-Sensor"`,
+`"Mock Dist Sensor-Heater"`) without reflashing.
+
 
 ---
 

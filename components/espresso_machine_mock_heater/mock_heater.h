@@ -52,7 +52,16 @@ class MockHeaterTempSensor : public sensor::Sensor, public PollingComponent {
 // ---------------------------------------------------------------------------
 class MockHeaterNumber : public number::Number, public Component {
  public:
-  enum class ParamType { POWER, THERMAL_MASS, HEAT_LOSS, AMBIENT, HEAT_TRANSFER_K };
+  enum class ParamType {
+    POWER,
+    THERMAL_MASS,
+    HEAT_LOSS,
+    AMBIENT,
+    HEAT_TRANSFER_K,
+    DIST_WATER_TO_HEATER,
+    DIST_WATER_TO_SENSOR,
+    DIST_SENSOR_TO_HEATER,
+  };
 
   void set_parent(MockHeater *parent) { parent_ = parent; }
   void set_param_type(ParamType type) { param_type_ = type; }
@@ -81,12 +90,15 @@ class MockHeater : public Component,
   void set_thermal_mass(float c) { thermal_mass_ = c; }
   void set_heat_loss(float h) { heat_loss_ = h; }
   void set_water_inlet_temp(float t) { water_inlet_temp_ = t; }
+  void set_dist_water_to_heater(float d) { dist_water_to_heater_mm_ = d; }
+  void set_dist_water_to_sensor(float d) { dist_water_to_sensor_mm_ = d; }
+  void set_dist_sensor_to_heater(float d) { dist_sensor_to_heater_mm_ = d; }
 
   // Called by MockPump each loop tick to drive flow-based cooling (IFlowObserver)
   void set_flow_rate(float flow_rate_ml_s) override { flow_rate_ = flow_rate_ml_s; }
 
   // IHeater — temperature reading and setpoint commanding
-  float get_current_temperature() const override { return temperature_; }
+  float get_current_temperature() const override { return sensor_temperature_; }
   void set_target_temperature(float t) override;
 
   void set_output(MockHeaterOutput *out) { output_ = out; }
@@ -114,12 +126,26 @@ class MockHeater : public Component,
     heat_transfer_k_number_ = num;
     if (num) num->set_param_type(MockHeaterNumber::ParamType::HEAT_TRANSFER_K);
   }
+  void set_dist_water_to_heater_number(MockHeaterNumber *num) {
+    dist_water_to_heater_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::DIST_WATER_TO_HEATER);
+  }
+  void set_dist_water_to_sensor_number(MockHeaterNumber *num) {
+    dist_water_to_sensor_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::DIST_WATER_TO_SENSOR);
+  }
+  void set_dist_sensor_to_heater_number(MockHeaterNumber *num) {
+    dist_sensor_to_heater_number_ = num;
+    if (num) num->set_param_type(MockHeaterNumber::ParamType::DIST_SENSOR_TO_HEATER);
+  }
 
   void setup() override;
   void loop() override;
 
   // Accessors for sub-entities
   float get_temperature() const { return temperature_; }
+  float get_sensor_temperature() const { return sensor_temperature_; }
+  float get_heater_temperature() const { return heater_temperature_; }
   float get_duty() const { return output_ ? output_->get_duty() : 0.0f; }
 
   // Runtime parameter accessors/mutators
@@ -130,6 +156,9 @@ class MockHeater : public Component,
   float get_water_inlet_temp() const { return water_inlet_temp_; }
   float get_flow_rate() const { return flow_rate_; }
   float get_heat_transfer_k() const { return heat_transfer_k_; }
+  float get_dist_water_to_heater() const { return dist_water_to_heater_mm_; }
+  float get_dist_water_to_sensor() const { return dist_water_to_sensor_mm_; }
+  float get_dist_sensor_to_heater() const { return dist_sensor_to_heater_mm_; }
 
   void update_power_watts(float v) { power_watts_ = v; }
   void update_thermal_mass(float v) { thermal_mass_ = v; }
@@ -137,11 +166,14 @@ class MockHeater : public Component,
   void update_ambient_temp(float v) { ambient_temp_ = v; }
   void update_heat_transfer_k(float v) { heat_transfer_k_ = v; }
   void set_heat_transfer_k(float k) { heat_transfer_k_ = k; }
+  void update_dist_water_to_heater(float v) { dist_water_to_heater_mm_ = v; }
+  void update_dist_water_to_sensor(float v) { dist_water_to_sensor_mm_ = v; }
+  void update_dist_sensor_to_heater(float v) { dist_sensor_to_heater_mm_ = v; }
 
  protected:
   // Physics parameters
   // Default: 800g Al × 0.897 J/(g·°C) + 20mL water × 4.186 J/(mL·°C) ≈ 800 J/°C
-  float temperature_{25.0f};       // Current simulated temperature [°C]
+  float temperature_{25.0f};       // Current simulated water-contact block temperature [°C]
   float ambient_temp_{25.0f};      // Ambient temperature [°C]
   float power_watts_{1200.0f};     // Heater power [W]
   float thermal_mass_{800.0f};     // Thermal mass [J/°C] (Al block + water)
@@ -153,6 +185,20 @@ class MockHeater : public Component,
   // At lower flows, effectiveness approaches 100%.
   // Typical thermoblock: 1.5–3.0 mL/s.
   float heat_transfer_k_{2.0f};
+
+  // Thermal distance parameters [mm] — aluminium thermoblock geometry.
+  // Each non-zero distance creates a separate thermal node connected through
+  // aluminium (K_Al=200 W/(m·K), A_ref=1 cm²), introducing a lag that makes
+  // PID control harder and more realistic.
+  // Set to 0 (default) to disable the corresponding lag (backward compatible).
+  float dist_water_to_heater_mm_{0.0f};  // Heater element → water contact
+  float dist_water_to_sensor_mm_{0.0f};  // Water contact → sensor probe
+  float dist_sensor_to_heater_mm_{0.0f}; // Heater element → sensor probe (direct path)
+
+  // Additional temperature nodes for the 3-node thermal model.
+  // When all distances = 0, these equal temperature_ (original 1-node model).
+  float sensor_temperature_{25.0f};   // Temperature at sensor probe (what PID reads)
+  float heater_temperature_{25.0f};   // Temperature at heater element
 
   // Target temperature commanded via IHeater::set_target_temperature()
   // Used for tracking/logging; actual control driven by PID output.
@@ -172,6 +218,9 @@ class MockHeater : public Component,
   MockHeaterNumber *heat_loss_number_{nullptr};
   MockHeaterNumber *ambient_number_{nullptr};
   MockHeaterNumber *heat_transfer_k_number_{nullptr};
+  MockHeaterNumber *dist_water_to_heater_number_{nullptr};
+  MockHeaterNumber *dist_water_to_sensor_number_{nullptr};
+  MockHeaterNumber *dist_sensor_to_heater_number_{nullptr};
 
   // Timing for ODE integration
   uint32_t last_update_ms_{0};

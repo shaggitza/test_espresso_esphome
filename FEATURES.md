@@ -31,7 +31,7 @@ planned in this project.
 | `espresso_machine_grinder` | `button` + `number` | ✅ | Timed relay grind; adjustable grind-time number entity |
 | `espresso_machine` (orchestrator) | `component` | ✅ | Brew + steam state machines; purge-before-steam; steam timeout; temperature management via `IHeater`; all P0/P1/P2 items complete |
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
-| `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters |
+| `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters; optional 3-node thermal distance model (dist_water_to_heater_mm, dist_water_to_sensor_mm, dist_sensor_to_heater_mm) to simulate Al block lag and make PID harder |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
 | `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()` |
 
