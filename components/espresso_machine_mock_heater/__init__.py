@@ -93,12 +93,20 @@ CONF_WATER_INLET_TEMP_C = "water_inlet_temp_c"
 CONF_HEAT_TRANSFER_K = "heat_transfer_k"
 CONF_DUTY_SENSOR = "duty_sensor"
 
+# Thermal distance parameters [mm] — aluminium thermoblock geometry
+CONF_DIST_WATER_TO_HEATER = "dist_water_to_heater_mm"
+CONF_DIST_WATER_TO_SENSOR = "dist_water_to_sensor_mm"
+CONF_DIST_SENSOR_TO_HEATER = "dist_sensor_to_heater_mm"
+
 # Number entity config keys for runtime tuning
 CONF_POWER_NUMBER = "power_number"
 CONF_THERMAL_MASS_NUMBER = "thermal_mass_number"
 CONF_HEAT_LOSS_NUMBER = "heat_loss_number"
 CONF_AMBIENT_NUMBER = "ambient_number"
 CONF_HEAT_TRANSFER_K_NUMBER = "heat_transfer_k_number"
+CONF_DIST_WATER_TO_HEATER_NUMBER = "dist_water_to_heater_number"
+CONF_DIST_WATER_TO_SENSOR_NUMBER = "dist_water_to_sensor_number"
+CONF_DIST_SENSOR_TO_HEATER_NUMBER = "dist_sensor_to_heater_number"
 
 OUTPUT_SCHEMA = cv.Schema(
     {
@@ -139,6 +147,19 @@ CONFIG_SCHEMA = cv.Schema(
         # At flow_rate = k, effectiveness ≈ 63% (water doesn't fully absorb heat)
         # Lower k = more efficient thermoblock (water reaches block temp faster)
         cv.Optional(CONF_HEAT_TRANSFER_K, default=2.0): cv.positive_float,
+        # Thermal distance parameters [mm] — aluminium thermoblock geometry.
+        # Each non-zero distance introduces a thermal lag that makes the PID
+        # more challenging and better represents real hardware behaviour.
+        # Set to 0 (default) to disable the lag (backward-compatible 1-node model).
+        cv.Optional(CONF_DIST_WATER_TO_HEATER, default=0.0): cv.float_range(
+            min=0.0, max=100.0
+        ),
+        cv.Optional(CONF_DIST_WATER_TO_SENSOR, default=0.0): cv.float_range(
+            min=0.0, max=100.0
+        ),
+        cv.Optional(CONF_DIST_SENSOR_TO_HEATER, default=0.0): cv.float_range(
+            min=0.0, max=100.0
+        ),
         # Output sub-entity (what the PID's heat_output references)
         cv.Required(CONF_OUTPUT): OUTPUT_SCHEMA,
         # Temperature sensor sub-entity (what the PID's sensor references)
@@ -166,6 +187,15 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_HEAT_TRANSFER_K_NUMBER): number.number_schema(
             MockHeaterNumber
         ).extend(cv.COMPONENT_SCHEMA),
+        cv.Optional(CONF_DIST_WATER_TO_HEATER_NUMBER): number.number_schema(
+            MockHeaterNumber
+        ).extend(cv.COMPONENT_SCHEMA),
+        cv.Optional(CONF_DIST_WATER_TO_SENSOR_NUMBER): number.number_schema(
+            MockHeaterNumber
+        ).extend(cv.COMPONENT_SCHEMA),
+        cv.Optional(CONF_DIST_SENSOR_TO_HEATER_NUMBER): number.number_schema(
+            MockHeaterNumber
+        ).extend(cv.COMPONENT_SCHEMA),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -182,6 +212,9 @@ async def to_code(config):
     cg.add(var.set_heat_loss(config[CONF_HEAT_LOSS_W_PER_C]))
     cg.add(var.set_water_inlet_temp(config[CONF_WATER_INLET_TEMP_C]))
     cg.add(var.set_heat_transfer_k(config[CONF_HEAT_TRANSFER_K]))
+    cg.add(var.set_dist_water_to_heater(config[CONF_DIST_WATER_TO_HEATER]))
+    cg.add(var.set_dist_water_to_sensor(config[CONF_DIST_WATER_TO_SENSOR]))
+    cg.add(var.set_dist_sensor_to_heater(config[CONF_DIST_SENSOR_TO_HEATER]))
 
     # Create and register the output sub-entity
     out_conf = config[CONF_OUTPUT]
@@ -247,4 +280,31 @@ async def to_code(config):
         )
         await cg.register_component(num_var, num_conf)
         cg.add(var.set_heat_transfer_k_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_DIST_WATER_TO_HEATER_NUMBER in config:
+        num_conf = config[CONF_DIST_WATER_TO_HEATER_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.0, max_value=100.0, step=0.5
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_dist_water_to_heater_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_DIST_WATER_TO_SENSOR_NUMBER in config:
+        num_conf = config[CONF_DIST_WATER_TO_SENSOR_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.0, max_value=100.0, step=0.5
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_dist_water_to_sensor_number(num_var))
+        cg.add(num_var.set_parent(var))
+
+    if CONF_DIST_SENSOR_TO_HEATER_NUMBER in config:
+        num_conf = config[CONF_DIST_SENSOR_TO_HEATER_NUMBER]
+        num_var = await number.new_number(
+            num_conf, min_value=0.0, max_value=100.0, step=0.5
+        )
+        await cg.register_component(num_var, num_conf)
+        cg.add(var.set_dist_sensor_to_heater_number(num_var))
         cg.add(num_var.set_parent(var))

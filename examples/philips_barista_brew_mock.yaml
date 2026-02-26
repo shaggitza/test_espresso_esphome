@@ -29,7 +29,16 @@
 #   - HA runtime tuning
 #
 # THERMAL MODEL (mock heater):
+#   Single-node ODE (when all thermal distances = 0):
 #   dT/dt = (duty × P − h × (T − T_amb) − Q × Cp × ε × (T − T_inlet)) / C
+#
+#   3-node + diffusion chain (when any thermal distance > 0):
+#   Each Al path activates a 4-segment finite-difference diffusion chain:
+#     dT_i/dt = (α/Δx²) × (T_{i-1} − 2T_i + T_{i+1})   where α = 82.6 mm²/s
+#   This produces a Gaussian-shaped impulse response with dead time, NOT the
+#   simple 1st-order exponential of a single RC. Both lag and spatial averaging
+#   are modelled, making PID tuning harder and more realistic.
+#
 #     duty   = 0.0–1.0 from PID
 #     P      = power_watts
 #     C      = thermal_mass_j_per_c
@@ -179,6 +188,22 @@ espresso_machine_mock_heater:
   water_inlet_temp_c: 20.0
   heat_transfer_k: 2.0           # Heat transfer effectiveness constant [mL/s]
 
+  # Thermal distance parameters [mm] — model the lag through the Al thermoblock.
+  # Each non-zero value activates a 4-segment finite-difference diffusion chain
+  # that produces TRUE 1D heat diffusion behaviour:
+  #   — Dead-time zone: no sensor response until heat diffuses through the Al
+  #   — Gaussian-shaped arrival: spatially averaged, not an exponential step
+  #   — Numerically stable: sub-stepped to satisfy dt ≤ 0.4 × Δx²/α_Al
+  # This is fundamentally different from a simple RC lag (1st-order exponential).
+  # The chain better simulates real-world thermoblock physics and stresses the PID.
+  #
+  # Al thermal diffusivity α = 82.6 mm²/s → dead-time ≈ d²/(6α) per path.
+  # Example: 10mm → t_peak ≈ 200ms before sensor response peaks.
+  # Set to 0 (default) to disable — exact 1-node model (backward compatible).
+  dist_water_to_heater_mm: 0.0    # Heater element → water contact [mm]
+  dist_water_to_sensor_mm: 0.0    # Water contact → sensor probe [mm]
+  dist_sensor_to_heater_mm: 0.0   # Heater element → sensor probe (direct) [mm]
+
   # Temperature sensor — same ID as physical max6675/max31855
   temperature_sensor:
     id: thermoblock_temp
@@ -214,6 +239,16 @@ espresso_machine_mock_heater:
     entity_category: config
   heat_transfer_k_number:
     name: "Mock Heat Transfer K"
+    entity_category: config
+  # Thermal distance number entities — adjust at runtime from HA (in mm)
+  dist_water_to_heater_number:
+    name: "Mock Dist Water-Heater"
+    entity_category: config
+  dist_water_to_sensor_number:
+    name: "Mock Dist Water-Sensor"
+    entity_category: config
+  dist_sensor_to_heater_number:
+    name: "Mock Dist Sensor-Heater"
     entity_category: config
 
   # Duty-cycle sensor — shows SSR switching intensity in HA (0–100%)

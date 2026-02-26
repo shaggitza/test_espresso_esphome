@@ -21,6 +21,9 @@ testing plan for the safety-critical C++ code paths.
 | Heat transfer effectiveness tuning | mock_heater | ✅ Full | `heat_transfer_k` parameter, HA-tunable number entity |
 | Thermoblock thermal mass | mock_heater | ✅ Full | Al block + water thermal mass |
 | Ambient heat loss | mock_heater | ✅ Full | Newton cooling term h × (T − T_amb) |
+| Thermal distance water→heater | mock_heater | ✅ Full | `dist_water_to_heater_mm`; heater element node; C_H=10% of mass; τ = C_H/G |
+| Thermal distance water→sensor | mock_heater | ✅ Full | `dist_water_to_sensor_mm`; sensor node lags block; PID reads lagged temperature |
+| Thermal distance sensor→heater | mock_heater | ✅ Full | `dist_sensor_to_heater_mm`; direct heater→sensor coupling path |
 | PID heater control | native ESPHome PID | ✅ Full | Unchanged from real config |
 | Temperature overshoot at startup | mock_heater | ✅ Full | Controlled by thermal mass and PID gains |
 | Over-temperature safety cutoff | mock_heater + YAML | ✅ Full | `on_value_range` above 165 °C in example YAML |
@@ -124,6 +127,117 @@ rate > 0, regardless of orchestrator state.
 **Runtime tuning:** Adjust `heat_transfer_k` via the HA number entity
 `"Mock Heat Transfer K"` to match your machine's actual thermoblock
 characteristics without reflashing.
+
+---
+
+### Thermal Distance Model — Finite-Difference Diffusion Chain
+
+**What it models:** In a real thermoblock the heater element, water channel,
+and temperature-sensor probe are all embedded at different locations in an
+aluminium body. Heat must diffuse through aluminium to travel between them.
+This introduces two physically distinct effects:
+
+1. **Lag (dead time):** No response at the far end until the heat wavefront
+   arrives — proportional to distance².
+2. **Spatial averaging:** The sensor receives a time-weighted average of the
+   heat source history, not an instantaneous reading. The impulse response is
+   Gaussian-shaped (peaks at t_peak = d²/(6α)), not a delta function.
+
+These effects are fundamentally different from a simple 1st-order RC lag (which
+would show an immediate exponential response with no dead time). They make the
+PID controller harder to tune in a physically accurate way.
+
+**Parameters:**
+
+| Parameter | Default | Units | Effect |
+|---|---|---|---|
+| `dist_water_to_heater_mm` | 0 | mm | Distance through Al from heater element to water contact zone |
+| `dist_water_to_sensor_mm` | 0 | mm | Distance through Al from water contact to sensor probe |
+| `dist_sensor_to_heater_mm` | 0 | mm | Direct Al path from heater element to sensor probe |
+
+Setting all three to 0 (default) reverts to the original 1-node model —
+backward-compatible with all existing tests and configurations.
+
+**Thermal nodes:**
+
+When any distance > 0 a 3-node thermal network is activated:
+
+| Node | Label | Thermal mass share | Role |
+|---|---|---|---|
+| Heater element | H | 10 % of `thermal_mass_j_per_c` | Receives electrical power |
+| Block / water contact | W | 90 % of `thermal_mass_j_per_c` | Where flow cooling and ambient loss act |
+| Sensor probe | S | 5 % of `thermal_mass_j_per_c` | What the PID reads |
+
+**Finite-difference diffusion chain (N_THERMAL_SEGS = 4):**
+
+Each non-zero distance activates a finite-difference diffusion chain of
+4 segments between the two endpoint nodes. This approximates true 1D heat
+conduction through an aluminium rod (heat equation: ∂T/∂t = α ∇²T).
+
+Aluminium material constants (physical, fixed):
+```
+K_Al  = 200  W/(m·K)     — thermal conductivity
+ρ_Al  = 2700 kg/m³       — density
+Cp_Al = 897  J/(kg·K)    — specific heat
+α_Al  = K_Al/(ρ_Al×Cp_Al) ≈ 82.6 mm²/s   — thermal diffusivity
+A_ref = 1e-4 m² (1 cm²)  — representative cross-section
+```
+
+Segment properties for a path of length d_mm:
+```
+Δx    = d_m / 4                          — segment length [m]
+G_seg = K_Al × A_ref / Δx               — segment conductance [W/K]
+C_seg = ρ_Al × Cp_Al × A_ref × Δx      — segment thermal mass [J/K]
+τ_seg = C_seg / G_seg = Δx² / α_Al     — segment time constant [s]
+```
+
+For d = 10 mm (Δx = 2.5 mm):
+```
+G_seg = 200 × 1e-4 / 2.5e-3 = 8 W/K
+C_seg = 2700 × 897 × 1e-4 × 2.5e-3 = 0.605 J/K
+τ_seg = 0.605 / 8 ≈ 76 ms
+```
+
+Chain integration (explicit Euler with automatic sub-stepping):
+```
+Stability: dt_sub ≤ 0.4 × τ_seg  →  n_substeps ≥ dt_outer / (0.4 × τ_seg)
+Update:    dT_i = dt_sub × (G_seg/C_seg) × (T_{i-1} + T_{i+1} − 2T_i)
+```
+
+At each outer loop tick (10 ms):
+1. Capture endpoint-to-chain heat fluxes from the CURRENT (pre-integration) state.
+2. Sub-step the intermediate chain nodes to stability.
+3. Update endpoint temperatures using the captured fluxes.
+
+This "split-step" coupling ensures energy conservation and that the chain
+accurately stores/releases transient energy (the averaging mechanism).
+
+**Example response for dist_water_to_sensor_mm = 10 mm, C_W = 42 J/°C:**
+
+| Time | Block drop | Sensor drop | Ratio |
+|---|---|---|---|
+| 100 ms | 1.5 °C | 0.002 °C | 0.1 % (dead-time zone) |
+| 200 ms | 3.0 °C | 0.035 °C | 1.2 % (wavefront arriving) |
+| 500 ms | 7.1 °C | 0.6 °C | 8.5 % (chain still damping) |
+| 1000 ms | 13.3 °C | 3.0 °C | 22 % (chain fully engaged) |
+| 2000 ms | 23.5 °C | 10.6 °C | 45 % (approaching steady state) |
+
+**Effect on PID control:**
+
+- **`dist_water_to_sensor_mm`** — most impactful. Dead-time zone before sensor
+  responds, then Gaussian-shaped rise. PID tuning is harder because integral
+  term accumulates during the dead time, causing overshoot.
+
+- **`dist_water_to_heater_mm`** — dead time in the heating path. Heater element
+  overshoots thermally before block "feels" the energy. Tuning sluggish response.
+
+- **`dist_sensor_to_heater_mm`** — direct heater→sensor shortcut. At high duty
+  the sensor overshoots; at low duty it undershoots. Compounds the other effects.
+
+**Runtime tuning:** All three distances are adjustable at runtime via HA
+number entities (`"Mock Dist Water-Heater"`, `"Mock Dist Water-Sensor"`,
+`"Mock Dist Sensor-Heater"`) without reflashing.
+
 
 ---
 
