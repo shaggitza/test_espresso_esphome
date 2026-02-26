@@ -18,6 +18,8 @@ class PumpSwitch : public switch_::Switch, public Component, public espresso_mac
  public:
   void set_pin(GPIOPin *pin) { pin_ = pin; }
   void set_flow_meter(espresso_machine::IFlowMeter *fm) { flow_meter_ = fm; }
+  void set_min_on_ms(uint32_t ms) { min_on_ms_ = ms; }
+  void set_min_off_ms(uint32_t ms) { min_off_ms_ = ms; }
 
   void setup() override;
   void loop() override;
@@ -52,6 +54,15 @@ class PumpSwitch : public switch_::Switch, public Component, public espresso_mac
   GPIOPin *pin_{nullptr};
   espresso_machine::IFlowMeter *flow_meter_{nullptr};
   bool running_{false};
+
+  // Minimum on/off timing constraints — enforced in write_state().
+  // NOTE: defaults below must stay in sync with the YAML schema defaults
+  // in espresso_machine_pump/__init__.py (pump_min_on_time / pump_min_off_time).
+  uint32_t min_on_ms_{500};     // minimum time ON before turn_off() is honoured
+  uint32_t min_off_ms_{0};      // minimum time OFF before turn_on() is honoured (0=disabled)
+  uint32_t last_on_ms_{0};      // millis() when pump last turned on
+  uint32_t last_off_ms_{0};     // millis() when pump last turned off
+  bool been_off_{false};        // true after the first turn_off(); gates the min_off check
 
   // Volume-run tracking
   bool run_volume_active_{false};

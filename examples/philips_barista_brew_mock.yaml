@@ -412,9 +412,6 @@ espresso_machine:
         name: "Last Shot Volume"
       last_shot_yield:
         name: "Last Shot Yield"
-    # Minimum pump ON/OFF times for any bang-bang brew control. Default: 500ms / disabled.
-    pump_min_on_time: 500ms
-    # pump_min_off_time: 500ms
     # cleanup_script fires when brew enters CLEANUP. Reference a script by id.
     # cleanup_script: my_brew_rinse_script
     # For simple flushing, use the espresso_machine.flush action (see button block).
@@ -433,12 +430,6 @@ espresso_machine:
     cool_down_to: 90°C
     # Safety timeout: stop steaming after 5 minutes even if not manually stopped.
     timeout: 5min
-    # Minimum time the pump must stay ON before toggling off in bang-bang control.
-    # Reduces pump wear. Default is 500ms. (P2-7)
-    pump_min_on_time: 500ms
-    # Minimum time the pump must stay OFF before turning on again in bang-bang control.
-    # Reduces pump wear. Default: disabled.
-    # pump_min_off_time: 500ms
     # cleanup_script fires when steam enters CLEANUP. Reference a script by id.
     # cleanup_script: my_steam_rinse_script
 

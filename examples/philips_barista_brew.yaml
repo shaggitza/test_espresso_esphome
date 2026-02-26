@@ -392,6 +392,11 @@ espresso_machine_pump:
   type: relay                 # relay | dimmer
   pin: GPIO25                 # ← CHANGE ME
   flow_meter: brew_flow       # flow meter owned by the pump; see design note above
+  # Minimum time the pump must stay ON before it can be toggled off (e.g. by bang-bang
+  # steam flow-rate control). Reduces pump wear from rapid on/off cycling. Default: 500ms.
+  pump_min_on_time: 500ms
+  # Minimum time the pump must stay OFF before it can turn on again. Default: disabled.
+  # pump_min_off_time: 500ms
 
 # =============================================================================
 # GRINDER — espresso_machine_grinder platform (first-class citizen)
@@ -563,9 +568,6 @@ espresso_machine:
     # Reference a script: block by id to run custom rinse or flush sequences.
     # Example: cleanup_script: my_brew_rinse_script
     # For a simple group-head rinse use the espresso_machine.flush action instead.
-    # Minimum pump ON/OFF times for any bang-bang brew control. Default: 500ms / disabled.
-    pump_min_on_time: 500ms
-    # pump_min_off_time: 500ms
     # cleanup_script:
     #   - delay: 2s
     #   - espresso_machine_pump.run:
@@ -613,14 +615,6 @@ espresso_machine:
     # Safety timeout: automatically stop steaming after this duration.
     # Protects against forgotten steaming sessions.  0 or omitted = disabled.
     timeout: 5min
-
-    # Minimum time the pump must stay ON before it can be toggled off in the
-    # bang-bang steam flow-rate controller.  Reducing this may cause rapid
-    # on/off cycling that wears out the pump solenoid.  Default: 500ms. (P2-7)
-    pump_min_on_time: 500ms
-    # Minimum time the pump must stay OFF before it can be turned on again in
-    # bang-bang steam flow-rate controller.  Reduces pump wear.  Default: disabled.
-    # pump_min_off_time: 500ms
 
     # Cleanup: purge steam path after cool-down.
     # The cleanup_script callback fires when the steam sequence enters CLEANUP.
