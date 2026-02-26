@@ -143,9 +143,6 @@ class EspressoMachine : public Component {
   void set_steam_purge_volume_ml(float ml) { steam_purge_volume_ml_ = ml; }
   // Maximum steaming duration (ms). 0 = disabled (default).
   void set_steam_timeout_ms(uint32_t ms) { steam_timeout_ms_ = ms; }
-  // Minimum time (ms) the pump must stay ON before it can be toggled off in bang-bang
-  // steam control. Reduces pump wear from rapid on/off cycling. Default 2000 ms. (P2-7)
-  void set_steam_pump_min_on_ms(uint32_t ms) { steam_pump_min_on_ms_ = ms; }
 
   // ----- Safety: hard over-temperature cutoff (P0-1) -----------------------
   // When a temperature sensor exceeds the cutoff limit the orchestrator
@@ -271,12 +268,10 @@ class EspressoMachine : public Component {
   float steam_cool_down_to_{90.0f};       // °C — heater setpoint after steaming
   float steam_purge_volume_ml_{0.0f};     // ml to purge before steaming (0 = skip)
   uint32_t steam_timeout_ms_{0};          // max steaming duration ms (0 = disabled)
-  uint32_t steam_pump_min_on_ms_{2000};   // minimum pump on-time before toggling off (P2-7)
 
   // -- Internal state --------------------------------------------------------
   uint32_t state_entered_ms_{0};  // millis() when current brew/steam state was entered
   uint32_t steam_start_ms_{0};    // millis() when STEAMING state was entered
-  uint32_t steam_pump_on_ms_{0};  // millis() when pump last turned on in STEAMING (P2-7)
 
   // -- Brewing tracking (Phase 7) -------------------------------------------
   bool pre_infusion_flowing_{true};       // true=flowing phase, false=hold phase

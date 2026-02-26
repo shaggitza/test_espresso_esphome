@@ -26,6 +26,8 @@ RunAction = espresso_machine_pump_ns.class_("RunAction", automation.Action)
 CONF_FLOW_METER = "flow_meter"
 CONF_VOLUME_ML = "volume_ml"
 CONF_TIMEOUT_MS = "timeout_ms"
+CONF_PUMP_MIN_ON_TIME = "pump_min_on_time"
+CONF_PUMP_MIN_OFF_TIME = "pump_min_off_time"
 
 RELAY_SCHEMA = (
     switch.switch_schema(PumpSwitch, entity_category=ENTITY_CATEGORY_DIAGNOSTIC)
@@ -33,6 +35,16 @@ RELAY_SCHEMA = (
         {
             cv.Required(CONF_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_FLOW_METER): cv.use_id(cg.Component),
+            # Minimum time the pump must stay ON before turn_off() is honoured.
+            # Prevents rapid cycling that wears out the pump solenoid. Default: 500 ms.
+            cv.Optional(
+                CONF_PUMP_MIN_ON_TIME, default="500ms"
+            ): cv.positive_time_period_milliseconds,
+            # Minimum time the pump must stay OFF before turn_on() is honoured.
+            # Default: 0 ms (disabled).
+            cv.Optional(
+                CONF_PUMP_MIN_OFF_TIME, default="0ms"
+            ): cv.positive_time_period_milliseconds,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -92,6 +104,8 @@ async def to_code(config):
         if CONF_FLOW_METER in config:
             flow_meter = await cg.get_variable(config[CONF_FLOW_METER])
             cg.add(var.set_flow_meter(flow_meter))
+        cg.add(var.set_min_on_ms(config[CONF_PUMP_MIN_ON_TIME]))
+        cg.add(var.set_min_off_ms(config[CONF_PUMP_MIN_OFF_TIME]))
     else:
         var = await number.new_number(
             config, min_value=0.0, max_value=100.0, step=1.0

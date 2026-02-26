@@ -47,15 +47,25 @@ void PumpSwitch::write_state(bool state) {
   if (state) {
     if (running_)
       return;
+    // Enforce minimum off-time: only allow turn-on if pump has been off long enough.
+    // Skipped on the very first turn-on (before the pump has ever been stopped).
+    if (been_off_ && min_off_ms_ > 0 && (millis() - last_off_ms_) < min_off_ms_)
+      return;
     ESP_LOGI(TAG, "Pump ON");
     running_ = true;
+    last_on_ms_ = millis();
     pin_->digital_write(true);
     publish_state(true);
   } else {
     if (!running_)
       return;
+    // Enforce minimum on-time: only allow turn-off if pump has been on long enough.
+    if (min_on_ms_ > 0 && (millis() - last_on_ms_) < min_on_ms_)
+      return;
     ESP_LOGI(TAG, "Pump OFF");
     running_ = false;
+    last_off_ms_ = millis();
+    been_off_ = true;
     run_volume_active_ = false;
     run_timeout_active_ = false;
     pin_->digital_write(false);

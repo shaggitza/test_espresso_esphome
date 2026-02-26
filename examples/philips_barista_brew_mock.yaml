@@ -432,9 +432,6 @@ espresso_machine:
     cool_down_to: 90°C
     # Safety timeout: stop steaming after 5 minutes even if not manually stopped.
     timeout: 5min
-    # Minimum time the pump must stay ON before toggling off in bang-bang control.
-    # Reduces pump wear. Default is 2s. (P2-7)
-    pump_min_on_time: 2s
     # cleanup_script fires when steam enters CLEANUP. Reference a script by id.
     # cleanup_script: my_steam_rinse_script
 

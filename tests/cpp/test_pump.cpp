@@ -31,6 +31,8 @@ struct MockFlowMeter : public IFlowMeter {
 static PumpSwitch make_pump(GPIOPin &pin) {
   PumpSwitch p;
   p.set_pin(&pin);
+  p.set_min_on_ms(0);   // disable timing constraints for basic tests
+  p.set_min_off_ms(0);
   p.setup();
   return p;
 }
@@ -197,6 +199,135 @@ TEST(PumpSwitch, RunCanBeStoppedExternallyBeforeTarget) {
   fm.volume = 0.0f;
   p.loop();
   EXPECT_FALSE(p.is_running());
+}
+
+// ---------------------------------------------------------------------------
+// Minimum on-time — pump-level hardware constraint
+// ---------------------------------------------------------------------------
+
+// turn_off() must be silently ignored while min_on_ms has not yet elapsed.
+TEST(PumpSwitchMinOnTime, TurnOffIgnoredDuringMinOnWindow) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(500);
+
+  p.turn_on();
+  EXPECT_TRUE(p.is_running());
+
+  // Below min_on_ms — turn_off() must be a no-op.
+  g_mock_millis = 250;
+  p.turn_off();
+  EXPECT_TRUE(p.is_running());
+
+  g_mock_millis = 499;
+  p.turn_off();
+  EXPECT_TRUE(p.is_running());
+}
+
+// turn_off() succeeds once min_on_ms has elapsed.
+TEST(PumpSwitchMinOnTime, TurnOffSucceedsAfterMinOnWindow) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(500);
+
+  p.turn_on();
+  g_mock_millis = 500;
+  p.turn_off();
+  EXPECT_FALSE(p.is_running());
+  EXPECT_FALSE(pin.state_);
+}
+
+// With min_on_ms == 0 (disabled), turn_off() succeeds immediately.
+TEST(PumpSwitchMinOnTime, ZeroMinOnAllowsImmediateTurnOff) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(0);
+
+  p.turn_on();
+  p.turn_off();
+  EXPECT_FALSE(p.is_running());
+}
+
+// First turn_on() is always allowed even when default min_on_ms is set.
+TEST(PumpSwitchMinOnTime, FirstTurnOnAlwaysAllowed) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(500);
+  // Never been on — first turn_on() must succeed immediately.
+  p.turn_on();
+  EXPECT_TRUE(p.is_running());
+}
+
+// ---------------------------------------------------------------------------
+// Minimum off-time — pump-level hardware constraint
+// ---------------------------------------------------------------------------
+
+// turn_on() must be silently ignored while min_off_ms has not yet elapsed.
+TEST(PumpSwitchMinOffTime, TurnOnIgnoredDuringMinOffWindow) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(0);  // disable min_on to test min_off in isolation
+  p.set_min_off_ms(500);
+
+  p.turn_on();
+  p.turn_off();
+  EXPECT_FALSE(p.is_running());
+
+  // Below min_off_ms — turn_on() must be a no-op.
+  g_mock_millis = 250;
+  p.turn_on();
+  EXPECT_FALSE(p.is_running());
+
+  g_mock_millis = 499;
+  p.turn_on();
+  EXPECT_FALSE(p.is_running());
+}
+
+// turn_on() succeeds once min_off_ms has elapsed.
+TEST(PumpSwitchMinOffTime, TurnOnSucceedsAfterMinOffWindow) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(0);
+  p.set_min_off_ms(500);
+
+  p.turn_on();
+  p.turn_off();
+  g_mock_millis = 500;
+  p.turn_on();
+  EXPECT_TRUE(p.is_running());
+  EXPECT_TRUE(pin.state_);
+}
+
+// With min_off_ms == 0 (default/disabled), turn_on() succeeds immediately after off.
+TEST(PumpSwitchMinOffTime, ZeroMinOffAllowsImmediateTurnOn) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(0);
+  p.set_min_off_ms(0);
+
+  p.turn_on();
+  p.turn_off();
+  p.turn_on();
+  EXPECT_TRUE(p.is_running());
+}
+
+// First turn_on() is never gated by min_off_ms (pump starts in "never been off" state).
+TEST(PumpSwitchMinOffTime, FirstTurnOnAlwaysAllowed) {
+  GPIOPin pin;
+  g_mock_millis = 0;
+  PumpSwitch p = make_pump(pin);
+  p.set_min_on_ms(0);
+  p.set_min_off_ms(500);  // large off constraint
+  // Never been on or off — first turn_on() must succeed immediately.
+  p.turn_on();
+  EXPECT_TRUE(p.is_running());
 }
 
 // ---------------------------------------------------------------------------

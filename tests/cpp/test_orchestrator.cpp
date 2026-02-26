@@ -457,17 +457,13 @@ TEST(Orchestrator, SteamCleanupTransitionsToIdle) {
 TEST(Orchestrator, SteamPumpDutyCycleTurnsOffAtTargetFlowRate) {
   OrchestratorFixture f;
   f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING (pump on, steam_pump_on_ms_ = 0)
+  f.machine.loop();  // HEATING → STEAMING (pump on)
   EXPECT_TRUE(f.steam_pump.running);
 
-  // Simulate flow rate reaching target — but pump must stay on for min_on_ms first.
+  // Simulate flow rate reaching target — orchestrator requests pump off; pump-level
+  // min_on_time enforcement is handled by the pump hardware, not the orchestrator.
   f.steam_pump.rate = 2.0f;
-  f.machine.loop();  // STEAMING: rate >= target but min_on_ms not elapsed → pump stays on
-  EXPECT_TRUE(f.steam_pump.running);
-
-  // Advance time past the 2-second minimum on window.
-  g_mock_millis = 2001;
-  f.machine.loop();  // STEAMING: rate >= target AND min_on_ms elapsed → pump off
+  f.machine.loop();  // STEAMING: rate >= target → orchestrator calls turn_off()
   EXPECT_FALSE(f.steam_pump.running);
 }
 
@@ -476,13 +472,12 @@ TEST(Orchestrator, SteamPumpDutyCycleTurnsOnBelowTargetFlowRate) {
   f.machine.steam_start();
   f.machine.loop();  // HEATING → STEAMING (pump on)
 
-  // Advance time so the minimum on-window expires, then raise rate to target.
-  g_mock_millis = 2001;
+  // Raise rate to target → orchestrator turns pump off.
   f.steam_pump.rate = 2.0f;
-  f.machine.loop();  // STEAMING: rate >= target AND min_on_ms elapsed → pump off
+  f.machine.loop();
   EXPECT_FALSE(f.steam_pump.running);
 
-  // Drop rate below target
+  // Drop rate below target → orchestrator turns pump on.
   f.steam_pump.rate = 1.5f;
   f.machine.loop();  // STEAMING: rate < target → pump on
   EXPECT_TRUE(f.steam_pump.running);
@@ -1665,59 +1660,6 @@ TEST(SteamPurgeWithHeater, SteamStopDuringPurgingResetsHeaterSetpoint) {
   EXPECT_GT(f.heater_ctrl.set_target_count, count_before);
   EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
-}
-
-// ---------------------------------------------------------------------------
-// P2-7: Steam pump minimum on-window (2 s default)
-// ---------------------------------------------------------------------------
-
-// Pump must not turn off before the minimum on-window expires even if flow
-// rate exceeds the target immediately.
-TEST(SteamPumpMinOn, PumpStaysOnDuringMinOnWindow) {
-  OrchestratorFixture f;
-  f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
-  EXPECT_TRUE(f.steam_pump.running);
-
-  // Rate already at target, but min_on_ms not elapsed — pump must stay on.
-  f.steam_pump.rate = 2.0f;
-  g_mock_millis = 500;
-  f.machine.loop();
-  EXPECT_TRUE(f.steam_pump.running);  // still within 2 s window
-
-  g_mock_millis = 1999;
-  f.machine.loop();
-  EXPECT_TRUE(f.steam_pump.running);  // still within 2 s window
-}
-
-// Pump turns off only after the minimum on-window has expired.
-TEST(SteamPumpMinOn, PumpTurnsOffAfterMinOnWindow) {
-  OrchestratorFixture f;
-  f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING
-  f.steam_pump.rate = 2.0f;
-
-  g_mock_millis = 2000;
-  // At t=2000 with pump_on_ms=0: elapsed (2000) >= min_on_ms (2000) → pump turns off.
-  f.machine.loop();
-  EXPECT_FALSE(f.steam_pump.running);
-}
-
-// Configuring a shorter minimum on-window via set_steam_pump_min_on_ms().
-TEST(SteamPumpMinOn, CustomMinOnWindowIsRespected) {
-  OrchestratorFixture f;
-  f.machine.set_steam_pump_min_on_ms(500);  // 500 ms custom window
-  f.machine.steam_start();
-  f.machine.loop();  // HEATING → STEAMING (pump on at t=0)
-  f.steam_pump.rate = 2.0f;
-
-  g_mock_millis = 499;
-  f.machine.loop();
-  EXPECT_TRUE(f.steam_pump.running);  // not yet elapsed
-
-  g_mock_millis = 500;
-  f.machine.loop();  // 500 ms elapsed → pump off
-  EXPECT_FALSE(f.steam_pump.running);
 }
 
 // ---------------------------------------------------------------------------

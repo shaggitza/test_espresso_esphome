@@ -28,7 +28,6 @@ CONF_FLOW_OFFSET = "flow_offset"
 CONF_COOL_DOWN_TO = "cool_down_to"
 CONF_PURGE_VOLUME = "purge_volume"
 CONF_STEAM_TIMEOUT = "timeout"
-CONF_PUMP_MIN_ON_TIME = "pump_min_on_time"
 CONF_FLUSH_VOLUME = "volume_ml"
 
 # Temperature-surfing sub-schema keys
@@ -138,9 +137,6 @@ STEAM_SCHEMA = cv.Schema(
         cv.Optional(CONF_PURGE_VOLUME): _validate_volume_ml,
         # Safety timeout: stop steaming after this duration (0 = disabled).
         cv.Optional(CONF_STEAM_TIMEOUT): cv.positive_time_period_milliseconds,
-        # Minimum time the pump must stay ON before it can be toggled off in
-        # bang-bang steam control.  Reduces pump wear. Default: 2 s. (P2-7)
-        cv.Optional(CONF_PUMP_MIN_ON_TIME, default="2s"): cv.positive_time_period_milliseconds,
         # Advanced fields validated in later phases; accepted here to avoid errors
         cv.Optional("cleanup_script"): cv.Any(),
     }
@@ -257,8 +253,6 @@ async def to_code(config):
 
         if CONF_STEAM_TIMEOUT in steam:
             cg.add(var.set_steam_timeout_ms(steam[CONF_STEAM_TIMEOUT]))
-
-        cg.add(var.set_steam_pump_min_on_ms(steam[CONF_PUMP_MIN_ON_TIME]))
 
 
 # ---------------------------------------------------------------------------
