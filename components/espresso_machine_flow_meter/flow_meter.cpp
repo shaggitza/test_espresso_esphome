@@ -30,10 +30,22 @@ void FlowMeter::loop() {
     rate_ = delta_ml / (static_cast<float>(elapsed_ms) / 1000.0f);
   }
 
+  // Update 3-second rolling average (circular buffer of AVG_WINDOW_SIZE samples)
+  avg_buf_[avg_buf_idx_] = rate_;
+  avg_buf_idx_ = (avg_buf_idx_ + 1) % AVG_WINDOW_SIZE;
+  if (avg_buf_count_ < AVG_WINDOW_SIZE)
+    avg_buf_count_++;
+  float sum = 0.0f;
+  for (uint8_t i = 0; i < avg_buf_count_; i++)
+    sum += avg_buf_[i];
+  avg_rate_3s_ = sum / static_cast<float>(avg_buf_count_);
+
   if (rate_sensor_ != nullptr)
     rate_sensor_->publish_state(rate_);
   if (total_sensor_ != nullptr)
     total_sensor_->publish_state(total_volume_);
+  if (avg_rate_sensor_ != nullptr)
+    avg_rate_sensor_->publish_state(avg_rate_3s_);
 }
 
 void FlowMeter::reset() {
@@ -41,6 +53,11 @@ void FlowMeter::reset() {
   last_pulse_count_ = 0;
   total_volume_ = 0.0f;
   rate_ = 0.0f;
+  for (uint8_t i = 0; i < AVG_WINDOW_SIZE; i++)
+    avg_buf_[i] = 0.0f;
+  avg_buf_idx_ = 0;
+  avg_buf_count_ = 0;
+  avg_rate_3s_ = 0.0f;
   ESP_LOGI(TAG, "Flow meter reset");
 }
 

@@ -24,7 +24,7 @@ planned in this project.
 
 | Platform | ESPHome entity type | Status | Notes |
 |---|---|---|---|
-| `espresso_machine_flow_meter` | `sensor` (rate + total) | ✅ | ISR-driven pulse counter; `reset` and `calibrate` actions |
+| `espresso_machine_flow_meter` | `sensor` (rate + total + 3 s avg) | ✅ | ISR-driven pulse counter; `reset` and `calibrate` actions |
 | `espresso_machine_valve` | `switch` | ✅ | Single-open interlock enforced at platform level; `open`/`close` actions |
 | `espresso_machine_pump` (relay) | `switch` | ✅ | On/off relay; `run` action with volume + timeout |
 | `espresso_machine_pump` (dimmer) | `number` (0–100 %) | ✅ | Slow-PWM dimmer stub; `turn_on`/`turn_off` wired |

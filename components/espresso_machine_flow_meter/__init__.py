@@ -26,6 +26,7 @@ CalibrateAction = espresso_machine_flow_meter_ns.class_(
 CONF_PULSES_PER_ML = "pulses_per_ml"
 CONF_RATE_SENSOR = "rate_sensor"
 CONF_TOTAL_SENSOR = "total_sensor"
+CONF_AVG_RATE_SENSOR = "avg_rate_sensor"
 CONF_ACTUAL_VOLUME_ML = "actual_volume_ml"
 
 CONFIG_SCHEMA = cv.Schema(
@@ -43,6 +44,11 @@ CONFIG_SCHEMA = cv.Schema(
             unit_of_measurement="mL",
             accuracy_decimals=1,
             state_class=STATE_CLASS_TOTAL_INCREASING,
+        ),
+        cv.Optional(CONF_AVG_RATE_SENSOR): sensor.sensor_schema(
+            unit_of_measurement="mL/s",
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
         ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -63,6 +69,10 @@ async def to_code(config):
     if CONF_TOTAL_SENSOR in config:
         sens = await sensor.new_sensor(config[CONF_TOTAL_SENSOR])
         cg.add(var.set_total_sensor(sens))
+
+    if CONF_AVG_RATE_SENSOR in config:
+        sens = await sensor.new_sensor(config[CONF_AVG_RATE_SENSOR])
+        cg.add(var.set_avg_rate_sensor(sens))
 
 
 # ---------------------------------------------------------------------------

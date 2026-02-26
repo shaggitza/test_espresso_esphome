@@ -163,6 +163,7 @@ CONF_TOTAL_SENSOR = "total_sensor"
 CONF_PRESSURE_SENSOR = "pressure_sensor"
 CONF_NOZZLE_RATE_SENSOR = "nozzle_rate_sensor"
 CONF_NOZZLE_TOTAL_SENSOR = "nozzle_total_sensor"
+CONF_AVG_RATE_SENSOR = "avg_rate_sensor"
 
 # Number entity config keys for runtime tuning
 CONF_NOMINAL_FLOW_NUMBER = "nominal_flow_number"
@@ -241,6 +242,12 @@ CONFIG_SCHEMA = (
                 accuracy_decimals=1,
                 state_class=STATE_CLASS_TOTAL_INCREASING,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ),
+            # 3-second rolling average of pump flow rate
+            cv.Optional(CONF_AVG_RATE_SENSOR): sensor.sensor_schema(
+                unit_of_measurement="mL/s",
+                accuracy_decimals=1,
+                state_class=STATE_CLASS_MEASUREMENT,
             ),
             # Optional HA number entities for runtime tuning
             cv.Optional(CONF_NOMINAL_FLOW_NUMBER): number.number_schema(
@@ -324,6 +331,10 @@ async def to_code(config):
     if CONF_NOZZLE_TOTAL_SENSOR in config:
         sens = await sensor.new_sensor(config[CONF_NOZZLE_TOTAL_SENSOR])
         cg.add(var.set_nozzle_total_sensor(sens))
+
+    if CONF_AVG_RATE_SENSOR in config:
+        sens = await sensor.new_sensor(config[CONF_AVG_RATE_SENSOR])
+        cg.add(var.set_avg_rate_sensor(sens))
 
     # Optional runtime-tunable number entities
     if CONF_NOMINAL_FLOW_NUMBER in config:

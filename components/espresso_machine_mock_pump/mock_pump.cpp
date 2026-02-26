@@ -218,6 +218,17 @@ void MockPump::loop() {
     static uint32_t last_sensor_publish_ms = 0;
     if (now - last_sensor_publish_ms > 250) {
       last_sensor_publish_ms = now;
+
+      // Update 3-second rolling average (12 samples × 250 ms = 3 s window)
+      avg_buf_[avg_buf_idx_] = current_flow_rate_;
+      avg_buf_idx_ = (avg_buf_idx_ + 1) % AVG_WINDOW_SIZE;
+      if (avg_buf_count_ < AVG_WINDOW_SIZE)
+        avg_buf_count_++;
+      float sum = 0.0f;
+      for (uint8_t i = 0; i < avg_buf_count_; i++)
+        sum += avg_buf_[i];
+      avg_rate_3s_ = sum / static_cast<float>(avg_buf_count_);
+
       if (rate_sensor_) {
         rate_sensor_->publish_state(current_flow_rate_);
       }
@@ -232,6 +243,9 @@ void MockPump::loop() {
       }
       if (nozzle_total_sensor_) {
         nozzle_total_sensor_->publish_state(nozzle_total_volume_);
+      }
+      if (avg_rate_sensor_) {
+        avg_rate_sensor_->publish_state(avg_rate_3s_);
       }
     }
   } else {
@@ -342,6 +356,11 @@ void MockPump::reset_flow() {
   absorbed_volume_ = 0.0f;
   run_time_ = 0.0f;
   system_pressure_bar_ = 0.0f;
+  for (uint8_t i = 0; i < AVG_WINDOW_SIZE; i++)
+    avg_buf_[i] = 0.0f;
+  avg_buf_idx_ = 0;
+  avg_buf_count_ = 0;
+  avg_rate_3s_ = 0.0f;
 
   if (rate_sensor_) {
     rate_sensor_->publish_state(0.0f);
@@ -357,6 +376,9 @@ void MockPump::reset_flow() {
   }
   if (nozzle_total_sensor_) {
     nozzle_total_sensor_->publish_state(0.0f);
+  }
+  if (avg_rate_sensor_) {
+    avg_rate_sensor_->publish_state(0.0f);
   }
 
   ESP_LOGD(TAG, "Flow counters reset");

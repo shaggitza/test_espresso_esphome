@@ -60,6 +60,23 @@ jobs:
           cp secrets.yaml.example secrets.yaml
           cp secrets.yaml.example examples/secrets.yaml
 
+      - name: Override github:// external_components source to local for CI
+        run: |
+          python3 -c "
+          import re, sys, os
+          path = sys.argv[1]
+          # Compute relative path from the YAML file's directory to components/
+          yaml_dir = os.path.dirname(os.path.abspath(path))
+          rel = os.path.relpath('components', yaml_dir)
+          text = open(path).read()
+          text = re.sub(
+              r'  - source: github://[^\n]+',
+              '  - source:\n      type: local\n      path: ' + rel,
+              text
+          )
+          open(path, 'w').write(text)
+          " ${{ matrix.yaml }}
+
       - name: Validate ${{ matrix.yaml }}
         run: esphome config ${{ matrix.yaml }}
 
