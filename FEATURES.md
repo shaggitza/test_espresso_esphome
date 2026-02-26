@@ -124,5 +124,9 @@ configuration and documented in the example YAML.
 |---|---|---|
 | Brew profiles (`espresso_machine_profile:`) | Phase 12 | Multi-phase pressure/flow curves; runtime HA select |
 | Gaggiuino/GaggiaMate profile import | Phase 12 | Python CLI converter planned |
-| Weight-based shot exit (scale) | Future | Requires HX711 / NAU7802 scale platform |
+| **Scale platform — Bluetooth** (`espresso_machine_scale`, `type: bluetooth`) | Phase 13 | ESP32 BLE connection to Acaia Lunar/Pearl, Bookoo, Felicita Arc, Difluid; weight-based brew exit + grinder dose exit; see docs/scales.md |
+| **Scale platform — Wired load cell** (`espresso_machine_scale`, `type: load_cell`) | Phase 13 | HX711 or NAU7802 ADC; tare, calibrate actions; same `IScale` interface as BT variant; see docs/scales.md |
+| Weight-based brew exit (`target_weight:` in brew) | Phase 13 | Scale takes priority over flow meter; falls back to volume on stale/disconnect |
+| Weight-based grinder dose exit (`target_dose:` on grinder) | Phase 13 | Stops grind when portafilter scale reaches target; falls back to `default_grind_time` |
+| Shot statistics extended (weight + brew ratio) | Phase 13 | `last_shot_weight_g`, `last_shot_brew_ratio` HA sensor entities |
 | Pressure transducer | Future | Requires ADC + transducer hardware |

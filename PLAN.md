@@ -273,6 +273,65 @@ Deliverables:
 
 ---
 
+### Phase 13 — Scale Platform (`espresso_machine_scale`) ⬜
+
+**Goal:** Weight-based shot termination and grinder dosing via Bluetooth or wired load cell.
+
+> **Status: Planned. No code written yet.**
+> See `docs/scales.md` for the full architecture, YAML API, and protocol driver plan.
+
+Two hardware categories share a single `IScale` interface:
+
+- **Bluetooth** — ESP32 BLE connection to a supported scale (Acaia Lunar/Pearl, Bookoo,
+  Felicita Arc, Difluid Microbalance).  The ESP32 owns the connection: no Home Assistant
+  middleman; ~50 ms latency; tare and timer commands sent directly from firmware.
+- **Wired load cell** — HX711 (bit-banged SPI) or NAU7802 (I²C); suitable for users who
+  prefer a fully wired, no-RF solution.
+
+Tasks:
+
+- [ ] **13a — Schema & Interface**
+  - [ ] `components/espresso_machine_scale/__init__.py` — schema for `type: bluetooth` and `type: load_cell`
+  - [ ] `IScale` interface in `interfaces.h`: `get_weight_g()`, `get_flow_g_per_s()`, `tare()`, `is_connected()`
+  - [ ] Add `IScale*` to `EspressoMachine` (brew) and `GrinderController`
+  - [ ] Add `target_weight:` to `brew:` sub-schema
+  - [ ] Add `target_dose:` / `dose_timeout:` to grinder sub-schema
+  - [ ] Brew state machine: weight exit + fallback to volume when scale is stale
+  - [ ] Grinder: dose exit + fallback to `default_grind_time`
+
+- [ ] **13b — Wired Load Cell Driver**
+  - [ ] HX711 variant (bit-banged SPI)
+  - [ ] NAU7802 variant (I²C)
+  - [ ] `espresso_machine_scale.tare` and `espresso_machine_scale.calibrate` actions
+  - [ ] Tare offset persisted in `globals:` (survives reboot)
+
+- [ ] **13c — Bluetooth Protocol Drivers**
+  - [ ] Shared BLE connection manager (persistent, reconnect backoff, stale detection)
+  - [ ] Acaia Lunar / Pearl v1 driver (`acaia_v1.cpp`)
+  - [ ] Acaia Pearl S / 2021 v2 driver (`acaia_v2.cpp`)
+  - [ ] Bookoo / Felicita Arc driver (`felicita.cpp`)
+  - [ ] Difluid Microbalance driver (`difluid.cpp`)
+
+- [ ] **13d — Integration Tests**
+  - [ ] `MockScale` implementing `IScale`
+  - [ ] Brew: weight exit at `target_weight`; fallback to volume on stale
+  - [ ] Grinder: dose exit; fallback to time on stale
+
+- [ ] **13e — Documentation & Examples**
+  - [ ] Update example YAMLs with commented-out scale blocks
+  - [ ] Update `docs/wiring.md` — HX711 / NAU7802 wiring diagrams
+  - [ ] Update `docs/home_assistant.md` — scale Lovelace card
+  - [ ] Update `structure.md`, `README.md`, `FEATURES.md`
+
+Deliverables:
+
+- User can add `espresso_machine_scale:` to their YAML and get weight-based shot exit
+  from either a Bluetooth scale or a wired load cell.
+- Grinder supports optional dose-by-weight mode.
+- Full fallback to volumetric / time-based exit when scale is disconnected or stale.
+
+---
+
 ## Hardware Bill of Materials (Reference Build — Philips Barista Brew)
 
 | Component | Purpose | Notes |
