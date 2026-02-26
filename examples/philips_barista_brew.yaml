@@ -528,7 +528,8 @@ espresso_machine:
 
   # ---------------------------------------------------------------------------
   # Brew mode — full espresso shot sequence
-  # State machine: idle → heating → brewing → done → cleanup
+  # State machine: idle → heating → [pre_infusion →] brewing → done → [cooling →] cleanup
+  # The cooling step is optional and activated by temperature_cooldown: true.
   # ---------------------------------------------------------------------------
   brew:
     heater: main_heater           # id of the climate entity above
@@ -581,6 +582,15 @@ espresso_machine:
     #   - espresso_machine_pump.run:
     #       id: main_pump
     #       volume_ml: 20ml
+
+    # Temperature cooldown after brew: when true, the brew sequence inserts a
+    # COOLING state after the shot completes.  The purge valve is opened and
+    # the pump runs in bypass mode while the orchestrator waits for the
+    # thermoblock to drop back to target_temperature.  Requires
+    # heater_controller: to be wired; ignored when no controller is present.
+    # This ensures the machine is at the correct brew temperature for the next
+    # shot without manual intervention — similar to the steam cool_down_to.
+    temperature_cooldown: false  # set to true to enable automatic brew cool-down
 
   # ---------------------------------------------------------------------------
   # Steam mode — milk steaming sequence

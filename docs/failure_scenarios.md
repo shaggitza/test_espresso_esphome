@@ -232,3 +232,15 @@ The scenarios above are validated by the following GoogleTest tests in
 | `HeaterReadiness.DefaultIsReadyRequiresExactTarget` | Default IHeater (no tolerance) requires exact >= target |
 | `HeaterReadiness.SteamProceedsWhenTempStabilisedJustBelowSteamTarget` | 134.7°C at 135.0°C steam target with 0.5°C tolerance → steam starts |
 | `HeaterReadiness.SteamWaitsWhenTempBelowSteamToleranceBand` | 134.0°C at 135.0°C steam target with 0.5°C tolerance → steam waits |
+| `BrewTemperatureCooldown.DisabledByDefaultSkipsCoolingState` | DONE→CLEANUP without COOLING when disabled |
+| `BrewTemperatureCooldown.EnabledButNoHeaterCtrlSkipsCoolingState` | COOLING skipped when no heater controller wired |
+| `BrewTemperatureCooldown.EnabledButTempAlreadyAtTargetSkipsCoolingState` | COOLING skipped when temp already at target |
+| `BrewTemperatureCooldown.EntersCoolingStateWhenTempAboveTarget` | DONE→COOLING when temp > target and enabled |
+| `BrewTemperatureCooldown.CoolingOpensPurgeValveAndRunsPump` | Purge valve + pump active during brew COOLING |
+| `BrewTemperatureCooldown.CoolingSetsHeaterSetpointToTarget` | Heater setpoint lowered to brew target on COOLING entry |
+| `BrewTemperatureCooldown.StaysInCoolingWhileTempAboveTarget` | COOLING persists while temp > target |
+| `BrewTemperatureCooldown.TransitionsToCleanupWhenTempReachesTarget` | COOLING→CLEANUP when temp ≤ target |
+| `BrewTemperatureCooldown.CleanupClosesPurgeValveAndStopsPump` | Pump off + purge valve closed when COOLING complete |
+| `BrewTemperatureCooldown.FullCooldownSequenceReturnsToIdle` | Full DONE→COOLING→CLEANUP→IDLE sequence |
+| `BrewTemperatureCooldown.BrewStopDuringCoolingSafelyReturnsToIdle` | brew_stop() during COOLING → immediate safe stop |
+| `BrewTemperatureCooldown.StatusNameShowsCooldownProgress` | Status string shows "cooldown" during COOLING state |

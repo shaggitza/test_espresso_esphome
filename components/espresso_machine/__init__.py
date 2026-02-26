@@ -26,6 +26,7 @@ CONF_FLOW_MAX = "flow_max"
 CONF_FLOW_MAX_NUMBER = "flow_max_number"
 CONF_FLOW_OFFSET = "flow_offset"
 CONF_COOL_DOWN_TO = "cool_down_to"
+CONF_TEMPERATURE_COOLDOWN = "temperature_cooldown"
 CONF_PURGE_VOLUME = "purge_volume"
 CONF_STEAM_TIMEOUT = "timeout"
 CONF_FLUSH_VOLUME = "volume_ml"
@@ -96,6 +97,12 @@ BREW_SCHEMA = cv.Schema(
             unit_of_measurement="mL",
         ),
         cv.Optional(CONF_PRE_INFUSION): PRE_INFUSION_SCHEMA,
+        # When true, after the shot completes the brew sequence enters a COOLING
+        # state: the purge valve is opened, the pump runs in bypass mode, and the
+        # orchestrator waits for the thermoblock to cool back to target_temperature
+        # before running the cleanup script.  Requires heater_controller: to be
+        # wired; ignored if no heater controller is configured.
+        cv.Optional(CONF_TEMPERATURE_COOLDOWN, default=False): cv.boolean,
         # Shot statistics exposed as HA sensor entities (P1-5)
         cv.Optional(CONF_SHOT_STATS): cv.Schema(
             {
@@ -212,6 +219,8 @@ async def to_code(config):
             cg.add(var.set_pre_infusion_enabled(pi[CONF_PRE_INFUSION_ENABLED]))
             cg.add(var.set_pre_infusion_volume_ml(pi[CONF_PRE_INFUSION_VOLUME]))
             cg.add(var.set_pre_infusion_hold_time_ms(pi[CONF_PRE_INFUSION_HOLD_TIME]))
+
+        cg.add(var.set_brew_temperature_cooldown(brew[CONF_TEMPERATURE_COOLDOWN]))
 
         if CONF_SHOT_STATS in brew:
             stats = brew[CONF_SHOT_STATS]

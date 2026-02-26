@@ -418,6 +418,9 @@ espresso_machine:
     # cleanup_script fires when brew enters CLEANUP. Reference a script by id.
     # cleanup_script: my_brew_rinse_script
     # For simple flushing, use the espresso_machine.flush action (see button block).
+    # Cool the thermoblock back to target_temperature after each shot.
+    # Requires heater_controller: to be wired; ignored otherwise.
+    temperature_cooldown: false  # set to true to enable automatic brew cool-down
 
   steam:
     heater: main_heater

@@ -2235,3 +2235,220 @@ TEST(StatusSensor, DeduplicatesIdenticalUpdates) {
   f.machine.loop();  // pump still 0 → "Brewing: 0.0 ml / 40.0 ml" already published
   EXPECT_EQ(publish_count, after_start + 1);  // only 1 extra for BREWING state entry
 }
+
+// ---------------------------------------------------------------------------
+// Brew temperature cooldown — new feature
+// ---------------------------------------------------------------------------
+
+// Fixture with brew heater controller and temperature_cooldown enabled.
+struct BrewCooldownFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  MockHeaterCtrl heater_ctrl;
+  EspressoMachine machine;
+
+  BrewCooldownFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_heater_ctrl(&heater_ctrl);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+    machine.set_brew_temperature_cooldown(true);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    heater_ctrl.current_temp = 90.0f;  // At brew temperature
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+TEST(BrewTemperatureCooldown, DisabledByDefaultSkipsCoolingState) {
+  // Default fixture has temperature_cooldown=false — DONE goes straight to CLEANUP.
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::DONE);
+  f.machine.loop();           // DONE → CLEANUP (no COOLING)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+  f.machine.loop();           // CLEANUP → IDLE
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(BrewTemperatureCooldown, EnabledButNoHeaterCtrlSkipsCoolingState) {
+  // With temperature_cooldown=true but no heater_ctrl wired, cooling is skipped.
+  OrchestratorFixture f;
+  f.machine.set_brew_temperature_cooldown(true);
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.machine.loop();           // DONE → CLEANUP (no controller → skip COOLING)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+}
+
+TEST(BrewTemperatureCooldown, EnabledButTempAlreadyAtTargetSkipsCoolingState) {
+  // Heater is wired but temperature is already at brew_target_temp_ — no COOLING needed.
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;  // already at target
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING (temp >= target)
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.machine.loop();           // DONE → CLEANUP (temp not above target → skip)
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+}
+
+TEST(BrewTemperatureCooldown, EntersCoolingStateWhenTempAboveTarget) {
+  // Temperature above brew_target_temp_ after brew → should enter COOLING.
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+
+  // Simulate thermoblock still above target after shot
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::COOLING);
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+TEST(BrewTemperatureCooldown, CoolingOpensPurgeValveAndRunsPump) {
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING
+  EXPECT_TRUE(f.purge_valve.open_state);
+  EXPECT_TRUE(f.brew_pump.running);
+}
+
+TEST(BrewTemperatureCooldown, CoolingSetsHeaterSetpointToTarget) {
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING (should lower setpoint to 90°C)
+  EXPECT_FLOAT_EQ(f.heater_ctrl.target_temp, 90.0f);
+}
+
+TEST(BrewTemperatureCooldown, StaysInCoolingWhileTempAboveTarget) {
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING
+
+  // Temperature still above target — should remain in COOLING
+  f.heater_ctrl.current_temp = 93.0f;
+  f.machine.loop();
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::COOLING);
+}
+
+TEST(BrewTemperatureCooldown, TransitionsToCleanupWhenTempReachesTarget) {
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING
+
+  // Temperature drops to target
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.loop();           // COOLING → CLEANUP
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::CLEANUP);
+}
+
+TEST(BrewTemperatureCooldown, CleanupClosesPurgeValveAndStopsPump) {
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING (purge valve opens, pump on)
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.loop();           // COOLING → CLEANUP (pump off, purge valve closed)
+
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.purge_valve.open_state);
+}
+
+TEST(BrewTemperatureCooldown, FullCooldownSequenceReturnsToIdle) {
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.loop();           // COOLING → CLEANUP
+  f.machine.loop();           // CLEANUP → IDLE
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::IDLE);
+}
+
+TEST(BrewTemperatureCooldown, BrewStopDuringCoolingSafelyReturnsToIdle) {
+  // brew_stop() during COOLING should stop everything and return to IDLE.
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING
+
+  f.machine.brew_stop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.purge_valve.open_state);
+}
+
+TEST(BrewTemperatureCooldown, StatusNameShowsCooldownProgress) {
+  BrewCooldownFixture f;
+  f.heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();           // HEATING → BREWING
+  f.brew_pump.volume = 40.0f;
+  f.machine.loop();           // BREWING → DONE
+  f.heater_ctrl.current_temp = 95.0f;
+  f.machine.loop();           // DONE → COOLING
+
+  std::string status = f.machine.status_name();
+  // Should mention cooldown and both temperatures
+  EXPECT_NE(status.find("cooldown"), std::string::npos);
+}
