@@ -167,6 +167,12 @@ class EspressoMachine : public Component {
   // returns 0 so flow_max is never reached.
   void set_brew_timeout_ms(uint32_t ms) { brew_timeout_ms_ = ms; }
 
+  // ----- Idle auto-off ------------------------------------------------------
+  // When the machine is powered on but has been idle for this many milliseconds,
+  // machine_off() is called automatically.  Default is 30 minutes.
+  // Set to 0 to disable.  Configurable only via YAML (not at runtime from HA).
+  void set_idle_timeout_ms(uint32_t ms) { idle_timeout_ms_ = ms; }
+
   // ----- ESPHome lifecycle --------------------------------------------------
   void setup() override;
   void loop() override;
@@ -310,6 +316,12 @@ class EspressoMachine : public Component {
   // -- Safety: brew timeout (P0-4) ------------------------------------------
   uint32_t brew_timeout_ms_{0};   // 0 = disabled
   uint32_t brew_start_ms_{0};     // millis() when brew_start() was called
+
+  // -- Idle auto-off ---------------------------------------------------------
+  // Auto-powers-off the machine when idle for idle_timeout_ms_ ms.
+  // Default: 30 minutes.  0 = disabled.
+  uint32_t idle_timeout_ms_{30u * 60u * 1000u};  // 30 min default
+  uint32_t idle_since_ms_{0};                      // millis() when machine last became idle
 
   // -- Flush state (P2-2) ---------------------------------------------------
   float flush_volume_ml_{0.0f};   // target volume for current maintenance flush

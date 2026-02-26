@@ -52,6 +52,9 @@ CONF_SHOT_YIELD_SENSOR = "last_shot_yield"
 # Status text sensor key
 CONF_STATUS_SENSOR = "status_sensor"
 
+# Idle auto-off timeout key
+CONF_IDLE_TIMEOUT = "idle_timeout"
+
 # Validator for ml volumes (e.g. "40ml")
 _validate_volume_ml = cv.float_with_unit("volume", "ml")
 # Validator for ml/s flow rates (e.g. "2ml/s")
@@ -160,6 +163,9 @@ CONFIG_SCHEMA = cv.Schema(
         # every state transition (e.g. "Brew: Heating", "Brewing", "Steam: Cooling").
         # More informative than the template machine-mode sensor.
         cv.Optional(CONF_STATUS_SENSOR): text_sensor.text_sensor_schema(),
+        # Auto power-off when idle for this duration.  Default: 30 min.  Set to
+        # 0 to disable.  Adjustable only via YAML (not at runtime from HA).
+        cv.Optional(CONF_IDLE_TIMEOUT, default="30min"): cv.positive_time_period_milliseconds,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -171,6 +177,8 @@ async def to_code(config):
     if CONF_STATUS_SENSOR in config:
         sens = await text_sensor.new_text_sensor(config[CONF_STATUS_SENSOR])
         cg.add(var.set_status_sensor(sens))
+
+    cg.add(var.set_idle_timeout_ms(config[CONF_IDLE_TIMEOUT]))
 
     if CONF_BREW in config:
         brew = config[CONF_BREW]

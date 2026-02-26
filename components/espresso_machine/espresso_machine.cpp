@@ -66,6 +66,11 @@ void EspressoMachine::loop() {
       break;
     case EspressoMode::IDLE:
     default:
+      if (powered_on_ && idle_timeout_ms_ > 0 &&
+          (millis() - idle_since_ms_) >= idle_timeout_ms_) {
+        ESP_LOGI(TAG, "Idle timeout (%us) — auto power-off", idle_timeout_ms_ / 1000u);
+        machine_off();
+      }
       break;
   }
   // Publish verbose status on every tick; deduplication in publish_status_()
@@ -82,6 +87,7 @@ void EspressoMachine::machine_on() {
     return;
   }
   powered_on_ = true;
+  idle_since_ms_ = millis();
   ESP_LOGI(TAG, "Machine ON");
 }
 
@@ -100,6 +106,7 @@ void EspressoMachine::machine_off() {
       safe_stop_all_();
       brew_state_ = BrewState::IDLE;
       mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
       publish_status_();
       break;
 
@@ -122,6 +129,7 @@ void EspressoMachine::machine_off() {
       ESP_LOGI(TAG, "Machine OFF: stopping active flush");
       safe_stop_all_();
       mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
       publish_status_();
       break;
 
@@ -200,6 +208,7 @@ void EspressoMachine::brew_stop() {
   safe_stop_all_();
   brew_state_ = BrewState::IDLE;
   mode_ = EspressoMode::IDLE;
+  idle_since_ms_ = millis();
   publish_status_();
 }
 
@@ -251,6 +260,7 @@ void EspressoMachine::steam_stop() {
     safe_stop_all_();
     steam_state_ = SteamState::IDLE;
     mode_ = EspressoMode::IDLE;
+    idle_since_ms_ = millis();
     publish_status_();
     return;
   }
@@ -370,6 +380,7 @@ void EspressoMachine::advance_brew_() {
         safe_stop_all_();
         brew_state_ = BrewState::IDLE;
         mode_ = EspressoMode::IDLE;
+        idle_since_ms_ = millis();
         publish_status_();
         break;
       }
@@ -453,6 +464,7 @@ void EspressoMachine::advance_brew_() {
       ESP_LOGI(TAG, "Brew: CLEANUP → IDLE");
       brew_state_ = BrewState::IDLE;
       mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
       publish_status_();
       break;
 
@@ -594,6 +606,7 @@ void EspressoMachine::advance_steam_() {
         steam_purge_valve_->close();
       steam_state_ = SteamState::IDLE;
       mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
       publish_status_();
       break;
 
@@ -616,6 +629,7 @@ void EspressoMachine::advance_flush_() {
     if (brew_purge_valve_)
       brew_purge_valve_->close();
     mode_ = EspressoMode::IDLE;
+    idle_since_ms_ = millis();
     publish_status_();
   }
 }
