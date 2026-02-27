@@ -361,6 +361,9 @@ espresso_machine_heater:
   ssr_output: heater_ssr          # reference to the slow_pwm output — enables HA period control
   ssr_default_period_ms: 1000    # initial SSR period (ms) shown in HA on boot; should match
   #                               # the period: configured on the slow_pwm output above.
+  #                               # If they differ, the slow_pwm starts at its YAML period and
+  #                               # switches to ssr_default_period_ms when the number publishes
+  #                               # its initial state on boot (within the first loop tick).
   ssr_period_number:
     name: "SSR Period"            # appears in HA — adjust to tune PID responsiveness vs. SSR wear
     entity_category: diagnostic   # internal tuning parameter; hide from main dashboard if desired

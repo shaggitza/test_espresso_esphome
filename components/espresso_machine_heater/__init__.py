@@ -16,10 +16,12 @@ SsrPeriodNumber = espresso_machine_heater_ns.class_(
 )
 
 # Reference SlowPWMOutput without importing the slow_pwm module.
-# When ssr_output is configured, slow_pwm is already loaded (the user defines
-# `output: - platform: slow_pwm` in their YAML), making its headers available
-# during compilation.  No hard dependency is added here so that users who use
-# a gpio/bang-bang output are not forced to include slow_pwm.
+# When ssr_output is configured, ESPHome's cv.use_id() will raise a config
+# error at validation time if the referenced output doesn't exist — no
+# additional check is needed here.  The user must have `output: - platform:
+# slow_pwm` in their YAML, which makes slow_pwm headers available during
+# compilation.  No hard DEPENDENCIES entry is added so that users who use a
+# gpio/bang-bang output are not forced to include slow_pwm.
 _slow_pwm_ns = cg.esphome_ns.namespace("slow_pwm")
 SlowPWMOutput = _slow_pwm_ns.class_("SlowPWMOutput")
 
@@ -61,8 +63,10 @@ async def to_code(config):
         # Generate a lambda that calls set_period() on the slow_pwm output when
         # the HA number entity changes.  The lambda is embedded in the main
         # generated .cpp file where all component headers are available.
+        # Explicit capture [ssr_out] is used to keep the lambda minimal and
+        # to clearly document the captured variable.
         cg.add(var.set_ssr_period_callback(
-            cg.RawExpression(f"[=](uint32_t ms) {{ {ssr_out}->set_period(ms); }}")
+            cg.RawExpression(f"[{ssr_out}](uint32_t ms) {{ {ssr_out}->set_period(ms); }}")
         ))
 
     cg.add(var.set_ssr_default_period_ms(config[CONF_SSR_DEFAULT_PERIOD_MS]))

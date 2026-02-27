@@ -7,11 +7,10 @@ namespace espresso_machine_heater {
 static const char *const TAG = "espresso_machine_heater";
 
 void SsrPeriodNumber::control(float value) {
-  publish_state(value);
-  if (parent_ != nullptr) {
+  if (parent_ != nullptr)
     parent_->set_ssr_period_ms(static_cast<uint32_t>(value));
-    ESP_LOGI(TAG, "SSR period updated to %.0f ms", value);
-  }
+  publish_state(value);
+  ESP_LOGI(TAG, "SSR period updated to %.0f ms", value);
 }
 
 }  // namespace espresso_machine_heater
