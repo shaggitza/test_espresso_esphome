@@ -120,7 +120,7 @@ output:
   - platform: slow_pwm
     id: heater_ssr
     pin: GPIO4
-    period: 1s
+    period: 1s           # initial period; override at runtime via the SSR Period number in HA
 
 # Heater — native ESPHome PID climate (first-class citizen)
 climate:
@@ -134,6 +134,19 @@ climate:
       kp: 2.5
       ki: 0.05
       kd: 15.0
+
+# Heater controller adapter — espresso_machine_heater platform
+# Bridges climate.pid to the orchestrator and exposes the SSR switching period
+# as a Home Assistant number entity so you can tune PID responsiveness from HA
+# without reflashing.  Shorter period = faster response; longer = less SSR wear.
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
+  ssr_output: heater_ssr         # wire slow_pwm output to enable HA period control
+  ssr_default_period_ms: 1000   # initial period published to HA on boot (ms)
+  ssr_period_number:
+    name: "SSR Period"           # adjustable from HA — range 8–10 000 ms
+    entity_category: diagnostic
 
 # Flow meter — espresso_machine_flow_meter platform (first-class citizen)
 espresso_machine_flow_meter:
