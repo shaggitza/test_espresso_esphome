@@ -36,6 +36,8 @@ partial / planned). A high-level summary:
 | **Cleanup script callbacks** | ✅ Implemented | `cleanup_script:` fires at DONE/CLEANUP; reference any ESPHome script by id (P2-1) |
 | **Maintenance flush action** | ✅ Implemented | `espresso_machine.flush`: pumps N ml through purge valve on demand (P2-2) |
 | **Brew profiles** | ⬜ Planned | Multi-phase pressure/flow curves (Phase 12) |
+| **Scale — Bluetooth** (Acaia Lunar, Bookoo, Felicita Arc, Difluid) | ⬜ Planned | ESP32 BLE connection; weight-based brew exit + grinder dosing (Phase 13); see `docs/scales.md` |
+| **Scale — Wired load cell** (HX711 / NAU7802) | ⬜ Planned | Same `IScale` interface as BT variant; fully offline (Phase 13) |
 | **Home Assistant integration** | ✅ Implemented | All entities auto-discovered via native ESPHome API |
 | **OTA updates** | ✅ Implemented | Standard ESPHome OTA via Wi-Fi |
 

@@ -33,6 +33,7 @@ planned in this project.
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters; optional 3-node thermal distance model (dist_water_to_heater_mm, dist_water_to_sensor_mm, dist_sensor_to_heater_mm) to simulate Al block lag and make PID harder |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
+| `espresso_machine_mock_scale` | `sensor` (weight + flow) | ⬜ | Planned (Phase 13b); cup mode: derives weight from mock pump nozzle output; portafilter mode: accumulates at `dose_rate_g_per_s`; auto-tare on brew/grind start; see `docs/scales.md` |
 | `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()`; optional `ssr_output` + `ssr_period_number` to expose SSR switching period (ms) as HA number entity for runtime tuning |
 
 ---
@@ -124,5 +125,9 @@ configuration and documented in the example YAML.
 |---|---|---|
 | Brew profiles (`espresso_machine_profile:`) | Phase 12 | Multi-phase pressure/flow curves; runtime HA select |
 | Gaggiuino/GaggiaMate profile import | Phase 12 | Python CLI converter planned |
-| Weight-based shot exit (scale) | Future | Requires HX711 / NAU7802 scale platform |
+| **Scale platform — Bluetooth** (`espresso_machine_scale`, `type: bluetooth`) | Phase 13 | ESP32 BLE connection to Acaia Lunar/Pearl, Bookoo, Felicita Arc, Difluid; weight-based brew exit + grinder dose exit; see docs/scales.md |
+| **Scale platform — Wired load cell** (`espresso_machine_scale`, `type: load_cell`) | Phase 13 | HX711 or NAU7802 ADC; tare, calibrate actions; same `IScale` interface as BT variant; see docs/scales.md |
+| Weight-based brew exit (`target_weight:` in brew) | Phase 13 | Scale takes priority over flow meter; falls back to volume on stale/disconnect |
+| Weight-based grinder dose exit (`target_dose:` on grinder) | Phase 13 | Stops grind when portafilter scale reaches target; falls back to `default_grind_time` |
+| Shot statistics extended (weight + brew ratio) | Phase 13 | `last_shot_weight_g`, `last_shot_brew_ratio` HA sensor entities |
 | Pressure transducer | Future | Requires ADC + transducer hardware |
