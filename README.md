@@ -26,7 +26,7 @@ partial / planned). A high-level summary:
 | **Volumetric shot control** | ✅ Implemented | Flow meter with ISR pulse counter; auto-terminates at target volume |
 | **Valve management + interlock** | ✅ Implemented | Named valves; single-open safety interlock at platform level |
 | **Vibration pump control** | ✅ Implemented | Relay (on/off) and dimmer (0–100 %) types |
-| **Grinder integration** | ✅ Implemented | Timed relay grind; adjustable from HA; brew/steam lockout ⬜ pending |
+| **Grinder integration** | ✅ Implemented | Timed relay grind; adjustable from HA; no brew/steam lockout by design — grinder is an independent entity |
 | **Pre-infusion** | ✅ Implemented | Volume-driven pre-wet + configurable hold time |
 | **Brew temperature cooldown** | ✅ Implemented | Pre-brew cooldown when thermoblock is above target (e.g. after aborted steam): purge valve + pump active until temp drops to target, then HEATING proceeds |
 | **Brew state machine** | ✅ Implemented | All states; heater setpoint wiring; temperature-gating; pre-infusion; optional temperature cooldown |
@@ -122,7 +122,7 @@ output:
   - platform: slow_pwm
     id: heater_ssr
     pin: GPIO4
-    period: 1s
+    period: 1s           # initial period; override at runtime via the SSR Period number in HA
 
 # Heater — native ESPHome PID climate (first-class citizen)
 climate:
@@ -136,6 +136,19 @@ climate:
       kp: 2.5
       ki: 0.05
       kd: 15.0
+
+# Heater controller adapter — espresso_machine_heater platform
+# Bridges climate.pid to the orchestrator and exposes the SSR switching period
+# as a Home Assistant number entity so you can tune PID responsiveness from HA
+# without reflashing.  Shorter period = faster response; longer = less SSR wear.
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
+  ssr_output: heater_ssr         # wire slow_pwm output to enable HA period control
+  ssr_default_period_ms: 1000   # initial period published to HA on boot (ms)
+  ssr_period_number:
+    name: "SSR Period"           # adjustable from HA — range 8–10 000 ms
+    entity_category: diagnostic
 
 # Flow meter — espresso_machine_flow_meter platform (first-class citizen)
 espresso_machine_flow_meter:
@@ -206,7 +219,8 @@ espresso_machine:
     flow_max: 2ml/s        # pump targets this flow rate via bang-bang in its own loop()
     cool_down_to: 90°C
     timeout: 5min          # optional safety auto-stop
-    pump_min_on_time: 2s   # minimum pump on-time enforced by pump hardware (P2-7)
+    # NOTE: pump_min_on_time is configured on the espresso_machine_pump: entity,
+    #       not here.  See the espresso_machine_pump: block below for that setting.
 ```
 
 See [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) for the full annotated

@@ -12,6 +12,10 @@ static const char *const TAG = "espresso_machine";
 
 void BrewFlowMaxNumber::control(float value) {
   if (parent_ != nullptr) {
+    if (value < 10.0f) {
+      ESP_LOGW(TAG, "Brew flow max %.1f mL ignored — must be >= 10 mL", value);
+      return;
+    }
     parent_->set_brew_flow_max(value);
     publish_state(value);
     ESP_LOGI(TAG, "Brew flow max updated to %.0f mL", value);
@@ -303,6 +307,10 @@ void EspressoMachine::flush(float volume_ml) {
   }
   if (volume_ml <= 0.0f) {
     ESP_LOGW(TAG, "flush ignored: volume_ml must be > 0");
+    return;
+  }
+  if (brew_pump_ == nullptr || brew_purge_valve_ == nullptr) {
+    ESP_LOGW(TAG, "flush ignored: brew pump or purge valve not configured");
     return;
   }
   ESP_LOGI(TAG, "Flush: pumping %.1fml through brew purge valve", volume_ml);

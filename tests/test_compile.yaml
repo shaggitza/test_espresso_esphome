@@ -49,6 +49,10 @@ climate:
 espresso_machine_heater:
   id: heater_ctrl
   climate_id: main_heater
+  ssr_output: fake_heater_ssr     # enables runtime SSR period control from HA
+  ssr_default_period_ms: 1000     # initial period published to HA on boot
+  ssr_period_number:
+    name: "SSR Period"
 
 espresso_machine_flow_meter:
   id: brew_flow

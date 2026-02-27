@@ -34,7 +34,7 @@ planned in this project.
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters; optional 3-node thermal distance model (dist_water_to_heater_mm, dist_water_to_sensor_mm, dist_sensor_to_heater_mm) to simulate Al block lag and make PID harder |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
 | `espresso_machine_mock_scale` | `sensor` (weight + flow) | ⬜ | Planned (Phase 13b); cup mode: derives weight from mock pump nozzle output; portafilter mode: accumulates at `dose_rate_g_per_s`; auto-tare on brew/grind start; see `docs/scales.md` |
-| `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()` |
+| `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()`; optional `ssr_output` + `ssr_period_number` to expose SSR switching period (ms) as HA number entity for runtime tuning |
 
 ---
 
@@ -66,7 +66,7 @@ planned in this project.
 | Purge-before-steam (`purge_volume`) | ✅ | Pumps configured volume through purge valve to clear residual water; `purge_volume: 0` (default) skips phase (backward-compatible) |
 | Steam valve + pump activation | ✅ | Steam valve opens and pump starts in STEAMING state (after purge, if configured) |
 | Pump duty-cycle flow-rate control (delegated to pump) | ✅ | Orchestrator calls `pump->set_target_flow(steam_flow_max_ml_per_s_)` when entering STEAMING; pump's `loop()` does bang-bang on/off to maintain the rate, honouring `pump_min_on_time` / `pump_min_off_time` |
-| Steam pump minimum on-window (`pump_min_on_time`) | ✅ | Prevents rapid pump cycling; default 2 s; configurable via `pump_min_on_time:` in steam schema (P2-7) |
+| Steam pump minimum on-window (`pump_min_on_time`) | ✅ | Prevents rapid pump cycling; default 500 ms; configurable via `pump_min_on_time:` in the `espresso_machine_pump:` component block (P2-7) |
 | Steam safety timeout (`timeout`) | ✅ | Optional auto-stop after configured duration; 0 = disabled (default) |
 | Purge on steam stop | ✅ | Purge valve opens immediately when steam stops to flush steam path during cool-down |
 | Auto cool-down after steaming | ✅ | `set_target_temperature(steam_cool_down_to_)` on `IHeater`; temperature-gated COOLING→CLEANUP transition |
@@ -108,7 +108,7 @@ configuration and documented in the example YAML.
 |---|---|---|
 | PID temperature control (`climate.pid`) | ✅ | Full ESPHome PID with tunable kp/ki/kd and autotune button |
 | Thermocouple support (MAX6675 / MAX31855) | ✅ | Both options documented in example; NTC also supported |
-| SSR output (`output.slow_pwm`) | ✅ | 1 s period for SSR duty-cycle control |
+| SSR output (`output.slow_pwm`) | ✅ | 1 s period for SSR duty-cycle control; period adjustable from HA via `ssr_period_number` on the `espresso_machine_heater` entity |
 | Home Assistant native API | ✅ | All entities auto-discovered; API encryption supported |
 | OTA updates | ✅ | Standard ESPHome OTA via Wi-Fi |
 | OLED display (SSD1306) | ✅ | Optional; display lambda documented in example YAML |

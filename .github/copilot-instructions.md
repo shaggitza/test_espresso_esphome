@@ -137,7 +137,8 @@ espresso_machine:
     flow_max: 2ml/s        # pump targets this flow rate via bang-bang in its own loop()
     cool_down_to: 90°C
     timeout: 5min          # optional safety auto-stop
-    pump_min_on_time: 2s   # minimum pump on-time enforced by pump hardware (P2-7)
+    # NOTE: pump_min_on_time is set on the espresso_machine_pump: entity (see above),
+    #       not here in the steam section.
 ```
 
 ## Current Development Phase

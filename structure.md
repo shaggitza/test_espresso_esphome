@@ -25,8 +25,16 @@ test_espresso_esphome/
 ├── components/
 │   └── espresso_machine/            # Pure orchestrator component (brew + steam state machines)
 │       ├── __init__.py              # Top-level schema: brew {}, steam {} + entity id references
+│       ├── interfaces.h             # Pure-virtual IValve, IPump, IFlowMeter, IHeater interfaces
+│       │                            # (IFlowMeter decouples the orchestrator from flow sensor type)
 │       ├── espresso_machine.h       # EspressoMachine class: coordinates brew/steam/interlock
 │       └── espresso_machine.cpp     # Brew state machine, steam state machine, safety interlocks
+│
+│   └── espresso_machine_heater/     # Production IHeater adapter wrapping climate.pid
+│       ├── __init__.py              # Schema: id, climate_id, temperature_tolerance
+│       └── heater.h                 # EspressoMachineHeater class (implements IHeater)
+│                                    # Wraps any ESPHome climate entity; set_target_temperature(),
+│                                    # get_current_temperature(), force_off(), is_ready() with tolerance
 │
 │   └── espresso_machine_valve/      # First-class solenoid valve platform
 │       ├── __init__.py              # Schema: id, name, pin, normally_open

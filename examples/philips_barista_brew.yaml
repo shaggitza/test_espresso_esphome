@@ -15,10 +15,10 @@
 #                    steam temperature-gating (IHeater), purge-before-steam (purge_volume),
 #                    steam safety timeout, post-steam cool-down + purge sequence,
 #                    steam pump 500ms minimum on-window (P2-7), cleanup_script callbacks (P2-1),
-#                    espresso_machine.flush action (P2-2)
-#   🚧 Partial:      temperature surfing (config accepted; ramp applies via IHeater),
-#                    hard over-temperature cutoff (C++ + on_value_range)
-#   ⬜ Not yet:      grinder lockout, brew profiles
+#                    espresso_machine.flush action (P2-2),
+#                    temperature surfing (offset + ramp via IHeater; HA switch to enable/disable),
+#                    hard over-temperature cutoff (C++ orchestrator + on_value_range)
+#   ⬜ Not yet:      brew profiles (Phase 12)
 #
 # DESIGN PHILOSOPHY:
 #   Every subsystem (heater, valves, pump, grinder, flow meter) is a first-class
@@ -342,6 +342,13 @@ climate:
 #   • Read thermoblock temperature from the PID sensor
 #   • Set the PID target temperature for brew/steam/cool-down
 #   • Force the heater off during safety cutoffs
+#
+# OPTIONAL: SSR PERIOD CONTROL
+# Wire ssr_output: to the slow_pwm output (heater_ssr) to expose the SSR
+# switching period as a Home Assistant number entity.  Shorter period = faster
+# PID output update = more responsive temperature control.  Longer period =
+# less SSR wear.  SSRs can typically switch as fast as 8–100 ms; the default
+# 1 s is conservative and safe.  Range: 8–10 000 ms.  Default: 1 000 ms.
 # =============================================================================
 espresso_machine_heater:
   id: heater_ctrl
@@ -351,6 +358,15 @@ espresso_machine_heater:
   #                               # indefinite wait when the PID stabilises just below
   #                               # the setpoint (e.g. 89.9°C at a 90.0°C target).
   #                               # Default: 0.5°C.  Set to 0 for exact-match behaviour.
+  ssr_output: heater_ssr          # reference to the slow_pwm output — enables HA period control
+  ssr_default_period_ms: 1000    # initial SSR period (ms) shown in HA on boot; should match
+  #                               # the period: configured on the slow_pwm output above.
+  #                               # If they differ, the slow_pwm starts at its YAML period and
+  #                               # switches to ssr_default_period_ms when the number publishes
+  #                               # its initial state on boot (within the first loop tick).
+  ssr_period_number:
+    name: "SSR Period"            # appears in HA — adjust to tune PID responsiveness vs. SSR wear
+    entity_category: diagnostic   # internal tuning parameter; hide from main dashboard if desired
 
 # =============================================================================
 # VALVES — espresso_machine_valve platform (first-class citizen)
