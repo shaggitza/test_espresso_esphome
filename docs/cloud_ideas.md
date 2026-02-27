@@ -522,9 +522,9 @@ CREATE TABLE shots (
   recipe_name   TEXT,
   started_at    TIMESTAMPTZ NOT NULL,
   duration_s    REAL,
-  volume_ml     REAL,
-  weight_g      REAL,
-  yield_ml      REAL,
+  volume_ml     REAL,           -- total water through flow meter
+  weight_g      REAL,           -- total weight in cup (from scale)
+  yield_ml      REAL,           -- volume_ml minus flow_offset (puck absorption)
   avg_temp_c    REAL,
   avg_flow_ml_s REAL,
   metadata      JSONB,          -- beans, grinder, notes, TDS, EY
