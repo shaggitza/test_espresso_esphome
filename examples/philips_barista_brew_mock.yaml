@@ -374,11 +374,19 @@ climate:
 # The mock heater simulates temperature physics (sensor + SSR output).
 # This adapter controls the PID setpoint when the orchestrator calls
 # set_target_temperature() for brew/steam temperature changes.
+# NOTE: ssr_output is not wired here because the mock uses MockHeaterOutput
+#       (not a slow_pwm output).  In the real config, wire ssr_output: heater_ssr
+#       to enable the HA-adjustable SSR period number entity.
 # =============================================================================
 espresso_machine_heater:
   id: heater_ctrl
   climate_id: main_heater
   # temperature_tolerance: 0.5   # °C — heater is considered ready within this margin of target
+  # ssr_output: heater_ssr        # not applicable in mock (MockHeaterOutput is not slow_pwm)
+  # ssr_default_period_ms: 1000  # initial SSR period shown in HA on boot
+  # ssr_period_number:
+  #   name: "SSR Period"
+  #   entity_category: diagnostic
 
 # =============================================================================
 # VALVES — unchanged from real config (dummy GPIOs, no physical hardware)

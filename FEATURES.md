@@ -33,7 +33,7 @@ planned in this project.
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters; optional 3-node thermal distance model (dist_water_to_heater_mm, dist_water_to_sensor_mm, dist_sensor_to_heater_mm) to simulate Al block lag and make PID harder |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
-| `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()` |
+| `espresso_machine_heater` | `component` | ✅ | Production `IHeater` adapter wrapping `climate::Climate`; implements `get_current_temperature()`, `set_target_temperature()`, `force_off()`; optional `ssr_output` + `ssr_period_number` to expose SSR switching period (ms) as HA number entity for runtime tuning |
 
 ---
 
@@ -107,7 +107,7 @@ configuration and documented in the example YAML.
 |---|---|---|
 | PID temperature control (`climate.pid`) | ✅ | Full ESPHome PID with tunable kp/ki/kd and autotune button |
 | Thermocouple support (MAX6675 / MAX31855) | ✅ | Both options documented in example; NTC also supported |
-| SSR output (`output.slow_pwm`) | ✅ | 1 s period for SSR duty-cycle control |
+| SSR output (`output.slow_pwm`) | ✅ | 1 s period for SSR duty-cycle control; period adjustable from HA via `ssr_period_number` on the `espresso_machine_heater` entity |
 | Home Assistant native API | ✅ | All entities auto-discovered; API encryption supported |
 | OTA updates | ✅ | Standard ESPHome OTA via Wi-Fi |
 | OLED display (SSD1306) | ✅ | Optional; display lambda documented in example YAML |
