@@ -59,17 +59,19 @@ needing to buy a Meticulous machine.
 | Aspect | Details |
 |---|---|
 | **Hardware** | Robotic lever espresso machine with integrated scale |
-| **Processor** | ESP32-family dual-core MCU (up to 240 MHz) |
+| **Processor** | Dual-architecture: Linux SBC (runs Python backend) + ESP32 radio module (WiFi/BLE, FCC ID 2BRNQ-E01G) |
 | **Connectivity** | Dual-band WiFi (2.4/5 GHz, 802.11 a/b/g/n/ac), Bluetooth 5.3 |
 | **Sensors** | Pressure, flow meter, temperature (group + boiler), weight (built-in scale) |
-| **Backend** | Python (Socket.IO + REST), runs on the machine itself |
+| **Backend** | Python (Socket.IO + REST), runs locally on the machine's Linux SBC |
 | **Cloud** | meticuloushome.com — cloud profiles, firmware updates, account management |
 
 ### Key Insight
 
 The Meticulous machine runs its backend **locally on the device**. The
 "Meticulous API" is not just a remote cloud — it's a local HTTP + Socket.IO
-server running on the machine's own ESP32/Linux board. This means:
+server running on the machine's own Linux SBC (the ESP32 handles WiFi/BLE
+radio, while the Python backend runs on a more capable Linux processor). This
+means:
 
 1. The API was designed for **local network** communication (low latency).
 2. Third-party integrations (HA add-on, MCP servers) connect to the machine
@@ -517,13 +519,20 @@ features we need:
 | TLS overhead | +15–20 KB for HTTPS/WSS (needed for cloud) |
 | Total estimated overhead | ~10–25 KB additional heap for Meticulous compatibility layer |
 
-**Verdict:** Feasible, but we should implement a **lightweight Socket.IO v4
-client** rather than relying on existing Arduino libraries (which are outdated
-or incomplete). The protocol is simple enough to implement the subset we need.
+**Verdict:** Feasible. We need both roles:
 
-### Recommended Approach: Minimal Socket.IO v4 Client
+- **Socket.IO client** (Direction B) — for connecting to Meticulous cloud or
+  a local Meticulous backend instance if available.
+- **Socket.IO server** (Direction A) — for emulating a Meticulous machine on
+  LAN so that Meticulous-compatible tools can connect to our ESP32.
 
-Implement only what we need on the ESP32:
+The protocol is simple enough to implement the subset we need for both roles,
+rather than relying on existing Arduino libraries (which are outdated or
+incomplete).
+
+### Recommended Approach: Minimal Socket.IO v4 Implementation
+
+**Client mode** (connecting to Meticulous cloud/backend):
 
 ```
 1. HTTP GET /socket.io/?EIO=4&transport=polling  → get session ID (sid)
@@ -535,8 +544,24 @@ Implement only what we need on the ESP32:
 7. Receive events: parse '42["event_name",{json_payload}]'
 ```
 
-This is ~200–300 lines of C++ wrapping the ESP-IDF WebSocket client. No
-external Socket.IO library needed.
+Client implementation is ~200–300 lines of C++ wrapping the ESP-IDF WebSocket
+client.
+
+**Server mode** (accepting connections from HA add-on, MeticAI, etc.):
+
+```
+1. Serve HTTP GET /socket.io/?EIO=4&transport=polling → return sid + handshake
+2. Accept WebSocket upgrade on /socket.io/?EIO=4&transport=websocket&sid=...
+3. Respond to "2probe" with "3probe", then expect "5" (upgrade complete)
+4. Send ping ("2") periodically → expect pong ("3")
+5. Broadcast events: send '42["event_name",{json_payload}]' to all connected clients
+6. Receive commands: parse '42["event_name",{json_payload}]' from clients
+7. Manage client connection lifecycle (connect, disconnect, timeout)
+```
+
+Server implementation is more complex (~500–800 lines of C++) due to
+multi-client management, connection lifecycle, and HTTP upgrade handling.
+Both roles share the same packet framing code.
 
 ---
 
@@ -800,9 +825,11 @@ meticuloushome.com.
 
 ### For the ESP32 firmware:
 
-1. **Implement a minimal Socket.IO v4 server** (~300–400 lines of C++) that
+1. **Implement a minimal Socket.IO v4 server** (~500–800 lines of C++) that
    exposes the Meticulous telemetry and command events on the LAN. This
-   lets all Meticulous-compatible tools work with our machine.
+   lets all Meticulous-compatible tools work with our machine. The server
+   handles multi-client connections, Engine.IO handshake, packet framing,
+   and event broadcasting.
 
 2. **Implement a Meticulous profile parser** that can read Meticulous JSON
    profiles and convert them to our internal brew profile format.
@@ -944,9 +971,11 @@ in Docker emulation mode to test against.
    format?** This would simplify compatibility but tie our format to their
    schema evolution. Alternatively, keep our own format and translate.
 
-4. **Can we contribute to the `espresso-profile-schema` repo?** If we add
-   fields our hardware needs (grinder, valve), the schema becomes more
-   universal. This benefits the whole espresso community.
+4. **Can we contribute to the `espresso-profile-schema` repo?** For example,
+   adding support for additional interpolation modes or stage transition
+   types would benefit the whole espresso community. (Note: grinder and
+   valve settings are hardware-specific and belong in a recipe wrapper,
+   not the portable profile schema — see the compatibility assessment above.)
 
 5. **Should we run the Meticulous backend as an optional Docker add-on?** For
    advanced users who want full API compatibility, we could provide a
