@@ -30,6 +30,12 @@ testing plan for the safety-critical C++ code paths.
 | Grinder lockout during brew | orchestrator | ✅ Full | State-machine interlock |
 | Valve interlock (one open at a time) | valve platform | ✅ Full | Platform-level enforcement |
 | Shot auto-termination at `flow_max` | orchestrator | ✅ Full | State machine checks `get_flow_total()` |
+| Shot auto-termination at `target_weight` (scale) | mock_scale + orchestrator | ⬜ Planned | `MockScale` derives weight from `nozzle_total`; brew stops when weight ≥ target |
+| Stale scale fallback to `flow_max` | mock_scale + orchestrator | ⬜ Planned | Set `dose_rate_g_per_s: 0` or disconnect mock_pump reference |
+| Tare on brew start | mock_scale + orchestrator | ⬜ Planned | `brew_start()` calls `IScale::tare()` before pump starts |
+| Grinder dose exit at `target_dose` | mock_scale + grinder | ⬜ Planned | `dose_rate_g_per_s × time` reaches `target_dose`; grinder stops |
+| Grinder falls back to `default_grind_time` (stale scale) | mock_scale + grinder | ⬜ Planned | Set `dose_rate_g_per_s: 0` to simulate no weight signal |
+| Tare on grind start | mock_scale + grinder | ⬜ Planned | `grind_start()` calls `IScale::tare()` before motor starts |
 | Pre-infusion hold | orchestrator | ✅ Full | Volume + timer gated phase |
 | Steam temperature ramp | mock_heater | ✅ Full | PID drives heater to steam setpoint |
 | Steam purge-before-steam (PURGING state) | orchestrator | ✅ Full | Pumps configured volume through purge valve; ensures dry steam |
@@ -400,6 +406,17 @@ machine in a dangerous state, regardless of what the mock components return.
 | `Safety_SensorStuckZeroActivatesCutoff` | Temperature sensor returns 0 °C | PID drives to 100% but cutoff fires at 165 °C | ⚠️ Covered by over-temp cutoff |
 | `Safety_FlowSensorStuckZero` | Flow sensor returns 0 indefinitely | Brew times out after `brew_timeout_ms` | ✅ Implemented (P0-4) |
 
+### Priority 5 — Scale / Weight-Based Exit (Planned — Phase 13)
+
+| Test ID | Scenario | Expected Outcome | Status |
+|---|---|---|---|
+| `Scale_BrewExitsAtTargetWeight` | Cup weight reaches `target_weight` during BREWING | `brew_stop()` called; pump and valve closed | ⬜ Planned |
+| `Scale_StaleScaleFallsBackToFlowMax` | Scale reading stale during BREWING | Brew continues using `flow_max` volumetric exit | ⬜ Planned |
+| `Scale_TaredOnBrewStart` | `brew_start()` called with prior weight on scale | Scale weight resets to 0 before pump activates | ⬜ Planned |
+| `Scale_GrinderStopsAtTargetDose` | Portafilter weight reaches `target_dose` | Grinder motor stops immediately | ⬜ Planned |
+| `Scale_GrinderFallsBackToTimedGrind` | Scale stale during grind | Grinder uses `default_grind_time` as fallback | ⬜ Planned |
+| `Scale_TaredOnGrindStart` | Grind started with prior dose weight on scale | Scale weight resets to 0 before motor activates | ⬜ Planned |
+
 ---
 
 ## How to Use the Residual Pressure Model for Failure Testing
@@ -423,3 +440,83 @@ terminates the shot before over-extraction occurs.
 
 You can also adjust `internal_volume_ml` at runtime via the
 `"Mock Internal Volume"` HA number entity without reflashing.
+
+---
+
+## Mock Scale — `espresso_machine_mock_scale`
+
+> **Status: Planned — Phase 13b.  No code written yet.**
+> See `docs/scales.md` for the full mock scale architecture.
+
+The `espresso_machine_mock_scale` component is a software-only simulation of the
+`IScale` interface.  It lets you develop and test weight-based brew exit and grinder
+dosing without any physical scale hardware, following the same pattern as
+`espresso_machine_mock_heater` and `espresso_machine_mock_pump`.
+
+### Cup scale mode (brew): weight from pump nozzle output
+
+The cup scale reads `MockPump::get_nozzle_flow_total()` and multiplies by
+`liquid_density_g_per_ml` (default 1.05 g/mL for espresso) to produce a simulated
+cup weight.  The pump's nozzle model already accounts for puck water absorption, so
+the nozzle total represents the actual espresso yield in the cup.
+
+```
+weight_g(t) = nozzle_total_ml(t) × liquid_density_g_per_ml
+flow_g_s(t) = nozzle_rate_ml_s(t) × liquid_density_g_per_ml
+```
+
+**Simulated timeline (puck_density=50, target_weight=36 g):**
+
+```
+t=0 s   brew_start() → tare (weight = 0)
+t=1 s   pump starts; puck absorbing most water; nozzle_total ≈ 0.3 mL → weight ≈ 0.3 g
+t=10 s  puck ~50% saturated; nozzle_total ≈ 8 mL → weight ≈ 8.4 g
+t=20 s  puck ~80% saturated; nozzle_total ≈ 22 mL → weight ≈ 23 g
+t=27 s  nozzle_total ≈ 34 mL → weight ≈ 36 g → brew_stop() triggered
+```
+
+### Portafilter scale mode (grinder): dose by speed
+
+The portafilter scale accumulates weight at `dose_rate_g_per_s` while the grinder
+relay is active:
+
+```
+weight_g(t) = dose_rate_g_per_s × grinder_active_time_s
+```
+
+Weight is reset (tared) automatically at grind start.  Grind stops when
+`weight_g >= target_dose` or `dose_timeout` elapses.
+
+**Simulated timeline (dose_rate=2 g/s, target_dose=18 g):**
+
+```
+t=0 s   grind_start() → tare (weight = 0)
+t=3 s   weight = 6 g
+t=6 s   weight = 12 g
+t=9 s   weight = 18 g → grinder stops
+```
+
+### Simulating a stale scale (fallback path)
+
+Set `dose_rate_g_per_s: 0` to simulate a scale that produces no weight signal
+(or disconnect the `mock_pump:` reference for the cup scale).  The orchestrator
+falls back to `flow_max` for brew and `default_grind_time` for the grinder —
+exactly the paths that need to be validated.
+
+```yaml
+espresso_machine_mock_scale:
+  id: cup_scale
+  mock_pump: main_pump
+  dose_rate_g_per_s: 0.0   # simulate stale/disconnected scale → triggers flow_max fallback
+```
+
+### How to use the mock scale for failure testing
+
+| Test | Setup | Expected result |
+|---|---|---|
+| Brew exits at target weight | `target_weight: 36g`; `liquid_density: 1.05` | Brew stops when nozzle × density ≥ 36 g |
+| Stale scale → flow_max exit | `dose_rate: 0` or `mock_pump: none` | Brew exits at `flow_max` volumetric limit |
+| Tare verified on brew start | Check weight=0 at BREWING entry | `IScale::tare()` called by orchestrator before pump |
+| Grinder dose exit | `target_dose: 18g`; `dose_rate: 2.0` | Grinder stops at 9 s (18 g ÷ 2 g/s) |
+| Stale scale → timed grind | `dose_rate: 0` | Grinder runs for `default_grind_time` then stops |
+| Tare verified on grind start | Check weight=0 at grind entry | `IScale::tare()` called by grinder before motor |

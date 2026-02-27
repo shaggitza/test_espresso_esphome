@@ -299,25 +299,38 @@ Tasks:
   - [ ] Brew state machine: weight exit + fallback to volume when scale is stale
   - [ ] Grinder: dose exit + fallback to `default_grind_time`
 
-- [ ] **13b — Wired Load Cell Driver**
+- [ ] **13b — Mock Scale (`espresso_machine_mock_scale`)**
+  - [ ] `components/espresso_machine_mock_scale/__init__.py` — schema:
+    `mock_pump` (optional), `dose_rate_g_per_s`, `liquid_density_g_per_ml`,
+    `weight_sensor`, `flow_sensor`, `liquid_density_number`, `dose_rate_number`
+  - [ ] `mock_scale.h` / `mock_scale.cpp` — `MockScale` implementing `IScale`:
+    - Cup mode: `weight_g = MockPump::get_nozzle_flow_total() × liquid_density`
+    - Portafilter mode: `weight_g = dose_rate_g_per_s × grinder_active_time_s`
+    - `tare()` — zeroes `tare_offset_g_`; called automatically by orchestrator on brew/grind start
+    - `is_connected()` — always returns `true` (set `dose_rate: 0` to simulate stale)
+  - [ ] Add `espresso_machine_mock_scale` to mock example YAML
+  - [ ] Add mock scale scenario rows to `docs/mock_scenarios.md`
+
+- [ ] **13c — Wired Load Cell Driver**
   - [ ] HX711 variant (bit-banged SPI)
   - [ ] NAU7802 variant (I²C)
   - [ ] `espresso_machine_scale.tare` and `espresso_machine_scale.calibrate` actions
   - [ ] Tare offset persisted in `globals:` (survives reboot)
 
-- [ ] **13c — Bluetooth Protocol Drivers**
+- [ ] **13d — Bluetooth Protocol Drivers**
   - [ ] Shared BLE connection manager (persistent, reconnect backoff, stale detection)
   - [ ] Acaia Lunar / Pearl v1 driver (`acaia_v1.cpp`)
   - [ ] Acaia Pearl S / 2021 v2 driver (`acaia_v2.cpp`)
   - [ ] Bookoo / Felicita Arc driver (`felicita.cpp`)
   - [ ] Difluid Microbalance driver (`difluid.cpp`)
 
-- [ ] **13d — Integration Tests**
-  - [ ] `MockScale` implementing `IScale`
-  - [ ] Brew: weight exit at `target_weight`; fallback to volume on stale
-  - [ ] Grinder: dose exit; fallback to time on stale
+- [ ] **13e — Integration Tests**
+  - [ ] GoogleTest mock (`MockScale`) used by orchestrator and grinder tests
+  - [ ] Brew: weight exit at `target_weight`; fallback to volume on stale scale
+  - [ ] Grinder: dose exit; fallback to `default_grind_time` on stale scale
+  - [ ] Tare verified: weight = 0 at BREWING entry and at grind motor start
 
-- [ ] **13e — Documentation & Examples**
+- [ ] **13f — Documentation & Examples**
   - [ ] Update example YAMLs with commented-out scale blocks
   - [ ] Update `docs/wiring.md` — HX711 / NAU7802 wiring diagrams
   - [ ] Update `docs/home_assistant.md` — scale Lovelace card
@@ -327,6 +340,9 @@ Deliverables:
 
 - User can add `espresso_machine_scale:` to their YAML and get weight-based shot exit
   from either a Bluetooth scale or a wired load cell.
+- User can add `espresso_machine_mock_scale:` to the mock config and simulate
+  weight-based brew exit (from pump nozzle output) and grinder dosing (at configurable
+  g/s rate) without any physical scale hardware.
 - Grinder supports optional dose-by-weight mode.
 - Full fallback to volumetric / time-based exit when scale is disconnected or stale.
 

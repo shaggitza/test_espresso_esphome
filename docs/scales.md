@@ -210,6 +210,208 @@ immunity.  It is used in the OpenScale and Acaia-compatible DIY scale projects.
 
 ---
 
+## Mock Scale (`espresso_machine_mock_scale`)
+
+> **Status: Planned — no code written yet.**
+> The mock scale is a software-only simulation component that lets you develop and test
+> weight-based brew exit and grinder dosing **without any physical scale hardware**.
+> It follows the same pattern as `espresso_machine_mock_heater` and
+> `espresso_machine_mock_pump`.
+
+### Purpose
+
+The mock scale implements the same `IScale` interface as the real scale drivers.
+The orchestrator and grinder cannot tell the difference — they call `get_weight_g()`,
+`is_connected()`, and `tare()` identically regardless of whether the weight comes
+from a BLE packet, an ADC, or the mock model.
+
+This lets you:
+- Test weight-based brew exit in simulation, without a physical scale.
+- Test grinder dose-by-weight in simulation, without a portafilter scale.
+- Verify tare-on-brew-start and tare-on-grind-start behaviour.
+- Run the full CI test suite for scale-related features in a host environment.
+
+### Two simulation modes
+
+| Mode | Use case | Weight source |
+|---|---|---|
+| **Cup scale** (brew) | Simulates weight accumulating in the espresso cup | Derives weight from the mock pump's `nozzle_total` output |
+| **Portafilter scale** (grinder) | Simulates coffee falling into the portafilter | Accumulates at a configurable `dose_rate_g_per_s` while grinder is running |
+
+Both modes are configured on the same `espresso_machine_mock_scale:` component.
+A single instance can be used as a cup scale (wired to `brew: scale:`), a portafilter
+scale (wired to grinder `scale:`), or both at once with two separate instances.
+
+### Cup scale model (brew)
+
+The cup scale derives its weight reading from the **nozzle output of
+`espresso_machine_mock_pump`**.  The pump's nozzle flow model already accounts for
+puck water absorption, so `nozzle_total_volume_ml` represents the actual liquid
+that exits the group head into the cup.
+
+Since espresso has a density of approximately 1 g/mL, the relationship is:
+
+```
+weight_g(t) = nozzle_total_volume_ml(t) × liquid_density_g_per_ml
+```
+
+The default `liquid_density_g_per_ml` is `1.05` (espresso is slightly denser than water
+due to dissolved solids).  This is configurable as a HA number entity for tuning.
+
+The weight is reset to zero (tared) automatically when `brew_start()` is called, before
+the pump starts.
+
+**Example flow during a simulated shot:**
+
+```
+t=0 s   brew_start() called → scale tared (weight=0)
+t=1 s   pump starts, nozzle output begins building
+t=5 s   puck absorbs most water; nozzle_total ≈ 0.5 mL → weight ≈ 0.5 g
+t=15 s  puck largely saturated; nozzle_total ≈ 12 mL → weight ≈ 12.6 g
+t=25 s  nozzle_total ≈ 28 mL → weight ≈ 29.4 g
+t=28 s  weight crosses target_weight (36 g) → brew_stop() triggered
+```
+
+### Portafilter scale model (grinder)
+
+The portafilter scale simulates coffee falling into the portafilter basket at a
+fixed rate while the grinder relay is active.
+
+```
+weight_g(t) = dose_rate_g_per_s × grinder_active_time_s
+```
+
+The weight is reset to zero (tared) automatically when `grinder.grind()` is called.
+The grinder stops when `weight_g >= target_dose` or `dose_timeout` elapses.
+
+**Example flow during a simulated grind:**
+
+```
+dose_rate_g_per_s = 2.0
+target_dose = 18 g
+
+t=0 s   grind_start() → portafilter scale tared (weight=0)
+t=1 s   weight ≈ 2 g
+t=5 s   weight ≈ 10 g
+t=9 s   weight ≈ 18 g → dose reached → grinder stops
+```
+
+With `dose_rate_g_per_s = 2.0` and `target_dose = 18 g`, grind time ≈ 9 s.
+This matches typical single-boiler grinder performance (1–3 g/s is realistic).
+
+### Auto-tare behaviour
+
+| Event | Automatic tare |
+|---|---|
+| `brew_start()` called | ✅ Cup scale tared before pump starts |
+| `grinder.grind()` called | ✅ Portafilter scale tared before motor starts |
+| Manual `espresso_machine_scale.tare` action | ✅ Always available |
+
+The tare zeroes the internal `tare_offset_g_` so that subsequent weight readings
+start from zero, matching real-scale behaviour.  The tare value is **not** persisted
+across reboots in the mock (no `globals:` needed — the mock always starts at 0 g).
+
+### YAML — mock scale (cup weight from pump nozzle output)
+
+```yaml
+external_components:
+  - source: github://shaggitza/test_espresso_esphome@main
+    components:
+      - espresso_machine_mock_scale   # add to existing mock component list
+
+espresso_machine_mock_scale:
+  id: cup_scale
+  name: "Mock Cup Scale"
+  mock_pump: main_pump              # reference to espresso_machine_mock_pump
+  liquid_density_g_per_ml: 1.05     # espresso ≈ 1.05 g/mL; water = 1.0 g/mL
+  weight_sensor:
+    name: "Cup Weight (Simulated)"
+    unit_of_measurement: g
+    accuracy_decimals: 1
+  flow_sensor:
+    name: "Cup Flow Rate (Simulated)"
+    unit_of_measurement: "g/s"
+    accuracy_decimals: 2
+  # Optional runtime-tunable number entity:
+  liquid_density_number:
+    name: "Mock Liquid Density"
+    entity_category: config
+```
+
+### YAML — mock portafilter scale (dose by weight from grinder)
+
+```yaml
+espresso_machine_mock_scale:
+  id: portafilter_scale
+  name: "Mock Portafilter Scale"
+  dose_rate_g_per_s: 2.0            # grams of coffee per second while grinder runs
+  weight_sensor:
+    name: "Portafilter Weight (Simulated)"
+  # Optional runtime-tunable number entity:
+  dose_rate_number:
+    name: "Mock Dose Rate"
+    entity_category: config
+```
+
+### Wiring the mock scale into the orchestrator and grinder
+
+```yaml
+espresso_machine:
+  id: my_espresso
+  brew:
+    pump: main_pump
+    scale: cup_scale                # mock scale derives weight from pump nozzle output
+    target_weight: 36g
+    flow_max: 45ml                  # safety fallback if scale goes stale
+
+espresso_machine_grinder:
+  id: main_grinder
+  scale: portafilter_scale          # mock portafilter scale
+  target_dose: 18g
+  dose_timeout: 30s
+```
+
+### Physics parameters (HA number entities)
+
+All mock scale parameters are exposed as Home Assistant `number` entities so they can
+be adjusted at runtime without reflashing:
+
+| HA entity | Default | Range | Description |
+|---|---|---|---|
+| `"Mock Liquid Density"` | 1.05 g/mL | 0.9–1.2 | Espresso density; scales cup weight from nozzle volume |
+| `"Mock Dose Rate"` | 2.0 g/s | 0.1–10.0 | Coffee output rate from grinder into portafilter |
+
+### Scenario coverage enabled by mock scale
+
+| Scenario | Coverage | Notes |
+|---|---|---|
+| Brew exits at `target_weight` (cup scale) | ✅ Full | Nozzle volume × density drives weight to target |
+| Stale scale fallback to `flow_max` (cup scale) | ✅ Full | Set `mock_pump: none` or disconnect pump reference |
+| Tare on brew start | ✅ Full | `brew_start()` calls `tare()` before pump activates |
+| Grinder stops at `target_dose` (portafilter scale) | ✅ Full | `dose_rate_g_per_s` × time reaches `target_dose` |
+| Grinder falls back to `default_grind_time` on stale | ✅ Full | Set `dose_rate_g_per_s: 0` to simulate no-signal |
+| Tare on grind start | ✅ Full | `grind_start()` calls `tare()` before motor activates |
+| Dual-scale setup (cup + portafilter) | ✅ Full | Two separate `espresso_machine_mock_scale:` instances |
+
+### Implementation plan (Phase 13b — Mock Scale)
+
+- [ ] `components/espresso_machine_mock_scale/__init__.py` — schema with
+  `cv.Optional(..., default=...)` for all parameters:
+  `mock_pump` (optional reference), `dose_rate_g_per_s` (default 2.0),
+  `liquid_density_g_per_ml` (default 1.05),
+  `weight_sensor`, `flow_sensor`, `liquid_density_number`, `dose_rate_number`
+- [ ] `components/espresso_machine_mock_scale/mock_scale.h` — `MockScale` class
+  implementing `IScale`; derives weight from `MockPump::get_nozzle_flow_total()` for
+  cup mode and from elapsed grinder time for portafilter mode
+- [ ] `components/espresso_machine_mock_scale/mock_scale.cpp` — `loop()` integrates
+  nozzle volume, applies density, publishes `weight_sensor` and `flow_sensor`; `tare()`
+  stores tare offset; `is_connected()` always returns `true`
+- [ ] Add `espresso_machine_mock_scale` to `external_components:` list in
+  `examples/philips_barista_brew_mock.yaml`
+- [ ] Add mock scale scenario rows to `docs/mock_scenarios.md`
+
+---
+
 ## YAML API — Full Reference
 
 ### Bluetooth scale (Acaia Lunar example)
