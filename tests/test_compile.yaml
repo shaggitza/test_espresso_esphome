@@ -9,6 +9,9 @@ host:
 
 logger:
 
+http_request:
+  id: http_client
+
 external_components:
   - source:
       type: local
@@ -118,6 +121,7 @@ espresso_machine:
 
 espresso_machine_sprofiler:
   id: sprofiler_upload
+  http_request_id: http_client
   server: "https://sprofiler.io"
   api_token: "test_token_placeholder"
   profile_name: "Test Profile"

@@ -146,6 +146,12 @@ wifi:
   password: !secret wifi_password
 
 # -----------------------------------------------------------------------------
+# HTTP client — used by the Sprofiler component to POST shot data
+# -----------------------------------------------------------------------------
+http_request:
+  id: http_client
+
+# -----------------------------------------------------------------------------
 # External components — pulls all espresso_machine platforms from this repo
 # -----------------------------------------------------------------------------
 external_components:
@@ -427,6 +433,7 @@ espresso_machine_grinder:
 # =============================================================================
 espresso_machine_sprofiler:
   id: sprofiler_upload
+  http_request_id: http_client                  # ← wire the HTTP client
   espresso_machine: my_espresso                 # ← auto-records shots on brew end
   server: "https://sprofiler.io"               # ← or your self-hosted instance
   api_token: !secret sprofiler_token            # ← API token from sprofiler.io account

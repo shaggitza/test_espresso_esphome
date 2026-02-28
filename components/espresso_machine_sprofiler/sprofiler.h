@@ -14,6 +14,13 @@ class EspressoMachine;
 }  // namespace espresso_machine
 }  // namespace esphome
 
+// Forward-declare HttpRequestComponent (full header only needed in .cpp).
+namespace esphome {
+namespace http_request {
+class HttpRequestComponent;
+}  // namespace http_request
+}  // namespace esphome
+
 namespace esphome {
 namespace espresso_machine_sprofiler {
 
@@ -51,6 +58,10 @@ class SprofilerShotUpload : public Component {
   // When set, the sprofiler observes the orchestrator's brew state and
   // automatically records + uploads shots.
   void set_machine(espresso_machine::EspressoMachine *m) { machine_ = m; }
+
+  // ----- HTTP transport (injected from Python codegen) ----------------------
+  // When set, http_post() uses this component to make real HTTPS requests.
+  void set_http_request(http_request::HttpRequestComponent *req) { http_request_ = req; }
 
   // ----- Shot recording (manual API) ---------------------------------------
   void begin_shot();
@@ -91,6 +102,9 @@ class SprofilerShotUpload : public Component {
 
   // -- Orchestrator reference ------------------------------------------------
   espresso_machine::EspressoMachine *machine_{nullptr};
+
+  // -- HTTP transport --------------------------------------------------------
+  http_request::HttpRequestComponent *http_request_{nullptr};
 
   // -- Shot state ------------------------------------------------------------
   uint32_t shot_id_{0};
