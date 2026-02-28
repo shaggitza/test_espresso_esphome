@@ -1,5 +1,6 @@
 #include "sprofiler.h"
 #include "esphome/components/espresso_machine/espresso_machine.h"
+#include "esphome/components/http_request/http_request.h"
 #include <cstdio>
 #include <cstring>
 
@@ -186,9 +187,26 @@ bool SprofilerShotUpload::upload_pending_shot() {
 int SprofilerShotUpload::http_post(const std::string &url,
                                    const std::string &auth_header,
                                    const std::string &body) {
-  ESP_LOGW(TAG, "http_post not wired — upload skipped (%zu bytes to %s)",
-           body.size(), url.c_str());
-  return -1;
+  if (!http_request_) {
+    ESP_LOGW(TAG, "http_request not configured — upload skipped (%zu bytes to %s)",
+             body.size(), url.c_str());
+    return -1;
+  }
+
+  std::vector<esphome::http_request::Header> headers = {
+    {"Authorization", auth_header},
+    {"Content-Type", "application/json"},
+  };
+
+  auto container = http_request_->start(url, "POST", body, headers, {});
+  if (!container) {
+    ESP_LOGW(TAG, "HTTP connection failed for %s", url.c_str());
+    return -1;
+  }
+
+  int status = container->status_code;
+  container->end();
+  return status;
 }
 
 }  // namespace espresso_machine_sprofiler
