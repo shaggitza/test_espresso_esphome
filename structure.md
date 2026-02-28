@@ -72,6 +72,11 @@ test_espresso_esphome/
 │       ├── mock_pump.h                # MockPump class (inherits Switch, implements IPump)
 │       └── mock_pump.cpp              # Flow model: Q(t) = Q_nom × (1 − exp(−t/τ))
 │
+│   └── espresso_machine_sprofiler/    # Sprofiler cloud shot upload
+│       ├── __init__.py                # Schema: server, api_token, profile_name
+│       ├── sprofiler.h                # SprofilerShotUpload class (Component)
+│       └── sprofiler.cpp              # Shot recording, Gaggiuino JSON serialisation, upload
+│
 ├── examples/
 │   └── philips_barista_brew.yaml      # Full annotated example for the Philips Barista Brew
 │                                      # with integrated grinder — ready to flash

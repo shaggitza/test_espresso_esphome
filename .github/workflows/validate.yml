@@ -40,6 +40,7 @@ jobs:
           - tests/test_grinder.yaml
           - tests/test_mock_heater.yaml
           - tests/test_mock_pump.yaml
+          - tests/test_sprofiler.yaml
           - tests/test_compile.yaml
           # Full example configs (authoritative references)
           - examples/philips_barista_brew.yaml

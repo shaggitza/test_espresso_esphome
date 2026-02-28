@@ -96,6 +96,7 @@ external_components:
       - espresso_machine_pump      # vibration pump (relay or dimmer)
       - espresso_machine_grinder   # timed relay grinder with lockout
       - espresso_machine_flow_meter  # pulse-counting volumetric sensor
+      - espresso_machine_sprofiler   # Sprofiler cloud shot upload
 
 # -----------------------------------------------------------------------------
 # SPI bus — used by the MAX6675/MAX31855 thermocouple board
@@ -523,6 +524,17 @@ espresso_machine_grinder:
 #         exit:
 #           volume_ml: 38ml
 # =============================================================================
+
+# =============================================================================
+# SPROFILER CLOUD — shot upload (first-class citizen)
+# Uploads completed shot data to Sprofiler in the Gaggiuino JSON format.
+# Requires a Sprofiler account and API token (see docs/sprofiler.md).
+# =============================================================================
+espresso_machine_sprofiler:
+  id: sprofiler_upload
+  server: "https://sprofiler.io"               # ← or your self-hosted instance
+  api_token: !secret sprofiler_token            # ← API token from sprofiler.io account
+  profile_name: "Manual"                        # ← profile name included in shot records
 
 # =============================================================================
 # ESPRESSO MACHINE — orchestrator (first-class citizen)
