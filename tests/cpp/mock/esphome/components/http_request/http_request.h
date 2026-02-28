@@ -4,6 +4,7 @@
 // override http_post() in MockSprofilerUpload — so only the forward
 // declaration and the type are needed here.
 
+#include <list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,8 +27,7 @@ class HttpRequestComponent {
   std::shared_ptr<HttpContainer> start(const std::string & /*url*/,
                                        const std::string & /*method*/,
                                        const std::string & /*body*/,
-                                       const std::vector<Header> & /*headers*/,
-                                       const std::vector<std::string> & /*collect*/) {
+                                       const std::list<Header> & /*headers*/) {
     return nullptr;
   }
 };

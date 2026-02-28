@@ -193,12 +193,12 @@ int SprofilerShotUpload::http_post(const std::string &url,
     return -1;
   }
 
-  std::vector<esphome::http_request::Header> headers = {
+  std::list<esphome::http_request::Header> headers = {
     {"Authorization", auth_header},
     {"Content-Type", "application/json"},
   };
 
-  auto container = http_request_->start(url, "POST", body, headers, {});
+  auto container = http_request_->start(url, "POST", body, headers);
   if (!container) {
     ESP_LOGW(TAG, "HTTP connection failed for %s", url.c_str());
     return -1;
