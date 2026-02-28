@@ -1,6 +1,7 @@
 #include "sprofiler.h"
 #include "esphome/components/espresso_machine/espresso_machine.h"
 #include "esphome/components/http_request/http_request.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -62,9 +63,35 @@ void SprofilerShotUpload::loop() {
     was_brewing_ = is_brewing;
   }
 
-  // --- Upload any pending shot ---------------------------------------------
+  // --- Upload any pending shot (with retry backoff) -------------------------
+  // The HTTP POST is a blocking call that can take seconds on weak WiFi
+  // (TCP timeout, TLS handshake retransmits, DNS failures).  Without a
+  // cooldown the upload would be retried on EVERY loop() tick, causing
+  // massive loop time spikes.  Exponential backoff limits retries.
   if (shot_pending_upload_) {
-    upload_pending_shot();
+    uint32_t now = millis();
+    if (upload_retry_count_ == 0 ||
+        (now - last_upload_attempt_ms_) >= upload_retry_interval_ms_) {
+      if (upload_retry_count_ < UPLOAD_MAX_RETRIES) {
+        last_upload_attempt_ms_ = now;
+        if (!upload_pending_shot()) {
+          // Failed — increase backoff for next retry.
+          upload_retry_count_++;
+          if (upload_retry_interval_ms_ == 0)
+            upload_retry_interval_ms_ = UPLOAD_INITIAL_RETRY_MS;
+          else
+            upload_retry_interval_ms_ = std::min(
+                upload_retry_interval_ms_ * 2, UPLOAD_MAX_RETRY_MS);
+          ESP_LOGD(TAG, "Upload retry %u scheduled in %u ms",
+                   upload_retry_count_, upload_retry_interval_ms_);
+        }
+        // On success, upload_pending_shot() clears shot_pending_upload_.
+      } else {
+        ESP_LOGW(TAG, "Shot %u upload abandoned after %u retries",
+                 shot_id_, UPLOAD_MAX_RETRIES);
+        shot_pending_upload_ = false;
+      }
+    }
   }
 }
 
@@ -74,9 +101,14 @@ void SprofilerShotUpload::loop() {
 
 void SprofilerShotUpload::begin_shot() {
   datapoints_.clear();
+  // Pre-reserve for a typical 30-second shot at 10 Hz (300 datapoints) to
+  // avoid repeated heap reallocations during recording.
+  datapoints_.reserve(EXPECTED_DATAPOINTS_PER_SHOT);
   shot_id_++;
   shot_duration_ms_ = 0;
   shot_pending_upload_ = false;
+  upload_retry_count_ = 0;
+  upload_retry_interval_ms_ = 0;
   recording_ = true;
   shot_timestamp_ = millis() / 1000;
   ESP_LOGI(TAG, "Shot %u recording started", shot_id_);
