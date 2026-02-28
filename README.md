@@ -198,6 +198,7 @@ espresso_machine_grinder:
 # Espresso Machine — pure orchestrator, references all entities above by id:
 espresso_machine:
   id: my_espresso
+  power_switch: machine_power  # syncs HA switch on idle auto-off / steam cooldown
   brew:
     heater: main_heater
     pump: main_pump
