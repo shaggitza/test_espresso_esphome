@@ -1,5 +1,5 @@
 #include "sprofiler.h"
-#include "components/espresso_machine/espresso_machine.h"
+#include "esphome/components/espresso_machine/espresso_machine.h"
 #include <cstdio>
 #include <cstring>
 
