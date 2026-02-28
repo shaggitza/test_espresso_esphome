@@ -644,9 +644,8 @@ void EspressoMachine::advance_steam_() {
       idle_since_ms_ = millis();
       // If machine_off() was called during the steam sequence, the actual
       // power-off was deferred until the cooldown completed.  Apply it now.
-      if (pending_power_off_) {
+      if (pending_power_off_)
         set_powered_off_();
-      }
       publish_status_();
       break;
 
