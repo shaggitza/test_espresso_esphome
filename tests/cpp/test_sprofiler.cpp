@@ -628,8 +628,10 @@ TEST(SprofilerAutoRecord, EndsRecordingOnBrewStop) {
   f.uploader.loop();  // Falling edge → end_shot() + upload in same tick.
 
   EXPECT_FALSE(f.uploader.is_recording());
-  // The upload may already have been attempted in the same loop() tick.
-  EXPECT_GE(f.uploader.post_call_count + (f.uploader.has_pending_upload() ? 1 : 0), 1);
+  // The upload happens in the same loop() tick as end_shot(), so the shot
+  // has already been posted and pending is cleared.
+  EXPECT_EQ(f.uploader.post_call_count, 1);
+  EXPECT_FALSE(f.uploader.has_pending_upload());
 }
 
 TEST(SprofilerAutoRecord, UploadsAfterBrewEnds) {
@@ -683,8 +685,10 @@ TEST(SprofilerAutoRecord, EndsOnFlowMaxAutoTermination) {
   f.uploader.loop();  // Falling edge → end_shot() + upload.
 
   EXPECT_FALSE(f.uploader.is_recording());
-  // Shot should have been ended and uploaded (or at least attempted).
-  EXPECT_TRUE(f.uploader.post_call_count > 0 || f.uploader.has_pending_upload());
+  // The shot was ended and uploaded in the same loop() tick after the
+  // orchestrator transitioned back to IDLE.
+  EXPECT_EQ(f.uploader.post_call_count, 1);
+  EXPECT_FALSE(f.uploader.has_pending_upload());
 }
 
 TEST(SprofilerAutoRecord, NoRecordingWithoutMachine) {

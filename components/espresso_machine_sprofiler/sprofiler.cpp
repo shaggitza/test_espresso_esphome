@@ -105,7 +105,7 @@ void SprofilerShotUpload::end_shot(uint32_t duration_ms) {
 
 static void append_float(std::string &out, float val) {
   char buf[32];
-  std::snprintf(buf, sizeof(buf), "%.2f", static_cast<double>(val));
+  std::snprintf(buf, sizeof(buf), "%.2f", val);
   out += buf;
 }
 
