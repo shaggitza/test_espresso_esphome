@@ -479,6 +479,101 @@ TEST(SprofilerLoop, LoopDoesNothingWhenNoPending) {
   EXPECT_EQ(u.post_call_count, 0);
 }
 
+TEST(SprofilerLoop, RetryBackoffPreventsImmediateRetry) {
+  // When an upload fails, the loop should NOT retry on the very next tick.
+  // Instead it backs off (initially 5 s).
+  auto u = make_uploader();
+  u.mock_http_status = 500;
+  g_mock_millis = 1000;
+
+  u.begin_shot();
+  u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
+  u.end_shot(1000);
+
+  u.loop();  // first attempt — fails
+  EXPECT_EQ(u.post_call_count, 1);
+  EXPECT_TRUE(u.has_pending_upload());
+
+  // Rapid loop ticks should NOT trigger another HTTP request.
+  g_mock_millis += 10;
+  u.loop();
+  g_mock_millis += 10;
+  u.loop();
+  g_mock_millis += 10;
+  u.loop();
+  EXPECT_EQ(u.post_call_count, 1);  // still only 1 attempt
+
+  // After the backoff interval elapses, retry should fire.
+  g_mock_millis += 5000;
+  u.loop();
+  EXPECT_EQ(u.post_call_count, 2);  // second attempt
+}
+
+TEST(SprofilerLoop, RetrySucceedsAfterBackoff) {
+  auto u = make_uploader();
+  u.mock_http_status = 503;
+  g_mock_millis = 0;
+
+  u.begin_shot();
+  u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
+  u.end_shot(1000);
+
+  u.loop();  // first attempt — fails
+  EXPECT_EQ(u.post_call_count, 1);
+  EXPECT_TRUE(u.has_pending_upload());
+
+  // Server recovers.
+  u.mock_http_status = 200;
+  g_mock_millis += 5000;
+  u.loop();  // retry — succeeds
+  EXPECT_EQ(u.post_call_count, 2);
+  EXPECT_FALSE(u.has_pending_upload());
+}
+
+TEST(SprofilerLoop, RetryAbandonedAfterMaxRetries) {
+  auto u = make_uploader();
+  u.mock_http_status = 500;
+  g_mock_millis = 0;
+
+  u.begin_shot();
+  u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
+  u.end_shot(1000);
+
+  // Exhaust all retries (initial + 10 retries = 11 total attempts).
+  for (int i = 0; i < 11; i++) {
+    g_mock_millis += 600000;  // well past any backoff interval
+    u.loop();
+  }
+
+  // Upload should be abandoned — no longer pending.
+  EXPECT_FALSE(u.has_pending_upload());
+}
+
+TEST(SprofilerLoop, NewShotResetsRetryState) {
+  auto u = make_uploader();
+  u.mock_http_status = 500;
+  g_mock_millis = 0;
+
+  u.begin_shot();
+  u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
+  u.end_shot(1000);
+
+  u.loop();  // first attempt — fails
+  EXPECT_EQ(u.post_call_count, 1);
+
+  // Start a new shot — this should reset the retry state.
+  g_mock_millis += 100;
+  u.mock_http_status = 200;
+  u.begin_shot();
+  u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
+  u.end_shot(2000);
+
+  // The first attempt for the new shot should happen immediately.
+  u.loop();
+  EXPECT_EQ(u.post_call_count, 2);
+  EXPECT_FALSE(u.has_pending_upload());
+}
+
 // ===========================================================================
 // Edge cases
 // ===========================================================================

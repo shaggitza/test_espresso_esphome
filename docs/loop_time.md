@@ -51,6 +51,28 @@ all existing elements to a new heap block.
 **Fix:** `begin_shot()` now calls `datapoints_.reserve(300)` to pre-allocate
 enough capacity for a typical shot. This eliminates all mid-shot reallocations.
 
+### 3. Sprofiler upload retry backoff (HIGH impact — WiFi-dependent)
+
+**Problem:** After a shot ends, `SprofilerShotUpload::loop()` called
+`upload_pending_shot()` on **every tick** while a shot was pending. This
+function:
+
+1. Serialises the entire shot to JSON (~6 KB heap allocation)
+2. Makes a **blocking** `http_request_->start()` call (TCP connect + TLS
+   handshake + HTTP POST)
+3. Waits for the response via `container->end()`
+
+If the upload fails (server unreachable, weak WiFi, DNS timeout), the pending
+flag stays `true` and the **very next tick** retries the blocking HTTP request.
+With degraded WiFi signal, each TCP timeout can block for **5–30 seconds**,
+freezing the entire ESPHome loop and stalling PID control, sensor updates, and
+Home Assistant communication.
+
+**Fix:** Upload retries now use **exponential backoff**: first retry after 5 s,
+then 10 s, 20 s, 40 s, … up to 5 minutes. After 10 consecutive failures the
+upload is abandoned. A new shot resets the retry state. This ensures the loop
+is never blocked by repeated HTTP timeouts.
+
 ---
 
 ## Further Optimisation Opportunities
@@ -58,7 +80,7 @@ enough capacity for a typical shot. This eliminates all mid-shot reallocations.
 The following items are documented for future consideration. They are ordered
 roughly by expected impact on real hardware.
 
-### 3. Cache `status_name()` result across ticks (LOW impact after fix #1)
+### 4. Cache `status_name()` result across ticks (LOW impact after fix #1)
 
 After fix #1, `status_name()` is only called every 250 ms. A further
 optimisation is to cache the formatted string and only regenerate it when the
@@ -66,14 +88,14 @@ mode, sub-state, or one of the displayed sensor values has actually changed.
 This would require tracking a "dirty" flag on every state transition and on
 sensor value changes exceeding a display threshold (e.g. 0.1 ml).
 
-### 4. Use fixed-point formatting instead of `snprintf` (LOW–MEDIUM)
+### 5. Use fixed-point formatting instead of `snprintf` (LOW–MEDIUM)
 
 `snprintf` with `%f` on ESP32 is slow because of full IEEE 754 float-to-string
 conversion. A hand-rolled integer-based formatter (e.g. multiply by 10, print
 as two integers separated by '.') is 5–10× faster. This matters if
 `status_name()` is called frequently.
 
-### 5. Reduce mock component update rate (LOW — mock only)
+### 6. Reduce mock component update rate (LOW — mock only)
 
 `MockPump::loop()` and `MockHeater::loop()` run their physics simulation every
 10 ms, computing multiple `std::exp()` calls (expensive on ESP32). For mock/
@@ -82,21 +104,21 @@ CPU usage by ~5× with minimal loss of simulation fidelity.
 
 This does NOT affect real hardware builds where these components are absent.
 
-### 6. Batch sensor publishes (LOW)
+### 7. Batch sensor publishes (LOW)
 
 Multiple components publish sensor values on every tick or at high frequency.
 ESPHome sensor publishes involve state tracking and optional filter chains. When
 many sensors update simultaneously, batching or staggering their updates across
 different ticks reduces per-tick peak CPU usage.
 
-### 7. Replace `std::exp()` with lookup table in mock components (LOW — mock only)
+### 8. Replace `std::exp()` with lookup table in mock components (LOW — mock only)
 
 The mock pump and heater use `std::exp()` for physics simulation (puck wetting
 model, thermal diffusion, pressure decay). A lookup table with linear
 interpolation would be ~10× faster with negligible accuracy loss. Only affects
 simulation builds.
 
-### 8. Avoid `std::string` heap allocation in hot paths (MEDIUM — architectural)
+### 9. Avoid `std::string` heap allocation in hot paths (MEDIUM — architectural)
 
 `status_name()` returns `std::string` by value, causing a heap allocation on
 every call (unless SSO kicks in for short strings). Refactoring to use a
@@ -134,3 +156,35 @@ sensor:
 ```
 
 Target: **< 1 ms** per orchestrator tick on ESP32 during active brewing.
+
+---
+
+## WiFi Signal and Loop Time
+
+Weak WiFi signal can amplify loop time issues because ESPHome's `sensor::Sensor::publish_state()`
+and `text_sensor::TextSensor::publish_state()` enqueue data for transmission to
+Home Assistant via the native API. When the TCP send buffer is full (due to
+slow WiFi throughput or retransmits), these calls may block briefly.
+
+More critically, **any blocking HTTP request** in `loop()` — such as the
+sprofiler shot upload — will freeze the entire ESPHome loop for the duration of
+the network operation. With weak WiFi this can be 5–30 seconds per attempt.
+
+**Symptoms of WiFi-related loop stalls:**
+- Loop time spikes correlate with physical distance from / orientation of the
+  WiFi access point.
+- The ESP32 WiFi RSSI sensor (if configured) shows values below −75 dBm.
+- `esphome logs` shows intermittent "Component took a long time" warnings.
+
+**Mitigations applied:**
+- Sprofiler upload uses exponential retry backoff (fix #3 above), preventing
+  repeated blocking HTTP requests on every loop tick.
+- Status publishing is throttled (fix #1), reducing the volume of HA API
+  traffic.
+
+**Further mitigations (not yet applied):**
+- Move HTTP uploads to an async task (FreeRTOS task / ESPHome defer) so the
+  main loop is never blocked by network I/O.
+- Reduce sensor publish frequency when WiFi RSSI drops below a threshold.
+- Add an ESPHome WiFi signal strength sensor and log warnings when RSSI is
+  poor.

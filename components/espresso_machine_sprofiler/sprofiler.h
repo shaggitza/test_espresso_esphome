@@ -114,6 +114,17 @@ class SprofilerShotUpload : public Component {
   bool recording_{false};
   bool shot_pending_upload_{false};
 
+  // -- Upload retry state ----------------------------------------------------
+  // Prevents blocking the loop with repeated HTTP requests on every tick.
+  // After a failed upload, the next retry is delayed by upload_retry_interval_ms_
+  // which doubles on each failure (exponential backoff) up to a cap.
+  uint32_t last_upload_attempt_ms_{0};
+  uint32_t upload_retry_interval_ms_{0};
+  uint8_t upload_retry_count_{0};
+  static constexpr uint32_t UPLOAD_INITIAL_RETRY_MS = 5000;   // 5 s
+  static constexpr uint32_t UPLOAD_MAX_RETRY_MS = 300000;     // 5 min
+  static constexpr uint8_t  UPLOAD_MAX_RETRIES = 10;
+
   // -- Auto-recording state --------------------------------------------------
   bool was_brewing_{false};          // previous-tick brewing flag for edge detection
   uint32_t auto_record_start_ms_{0}; // millis() when auto-recording began
