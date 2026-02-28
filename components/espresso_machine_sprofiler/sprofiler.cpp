@@ -74,6 +74,9 @@ void SprofilerShotUpload::loop() {
 
 void SprofilerShotUpload::begin_shot() {
   datapoints_.clear();
+  // Pre-reserve for a typical 30-second shot at 10 Hz (300 datapoints) to
+  // avoid repeated heap reallocations during recording.
+  datapoints_.reserve(EXPECTED_DATAPOINTS_PER_SHOT);
   shot_id_++;
   shot_duration_ms_ = 0;
   shot_pending_upload_ = false;

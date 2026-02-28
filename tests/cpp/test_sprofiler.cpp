@@ -223,6 +223,14 @@ TEST(SprofilerRecording, BeginShotClearsPreviousData) {
   EXPECT_FALSE(u.has_pending_upload());
 }
 
+TEST(SprofilerRecording, BeginShotPreReservesCapacity) {
+  SprofilerShotUpload u;
+  g_mock_millis = 0;
+  u.begin_shot();
+  // Capacity should be pre-reserved so push_back doesn't reallocate during a shot.
+  EXPECT_GE(u.get_datapoints().capacity(), 300u);
+}
+
 // ===========================================================================
 // JSON serialisation
 // ===========================================================================

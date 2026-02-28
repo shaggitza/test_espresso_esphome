@@ -2212,10 +2212,12 @@ TEST(StatusSensor, UpdatesLiveAsFlowIncreases) {
   f.machine.loop();  // → BREWING
 
   f.brew_pump.volume = 10.0f;
+  g_mock_millis += 250;  // advance past status publish throttle interval
   f.machine.loop();  // status should update
   EXPECT_EQ(sens.state, "Brewing: 10.0 ml / 40.0 ml");
 
   f.brew_pump.volume = 25.0f;
+  g_mock_millis += 250;
   f.machine.loop();
   EXPECT_EQ(sens.state, "Brewing: 25.0 ml / 40.0 ml");
 }
@@ -2276,6 +2278,74 @@ TEST(StatusSensor, DeduplicatesIdenticalUpdates) {
   f.machine.loop();  // HEATING → BREWING and publish_status_ in loop → 1 more publish
   f.machine.loop();  // pump still 0 → "Brewing: 0.0 ml / 40.0 ml" already published
   EXPECT_EQ(publish_count, after_start + 1);  // only 1 extra for BREWING state entry
+}
+
+TEST(StatusSensor, LiveUpdatesThrottledBetweenTransitions) {
+  // Verify that the loop()-based status publishing is throttled: rapid loop()
+  // calls within the throttle interval should NOT trigger new publishes, even
+  // when the underlying status string changes (e.g. flow volume increases).
+  OrchestratorFixture f;
+
+  int publish_count = 0;
+  struct CountingSensor : public esphome::text_sensor::TextSensor {
+    int *count;
+    void publish_state(const std::string &v) {
+      (*count)++;
+      esphome::text_sensor::TextSensor::publish_state(v);
+    }
+  } counting_sens;
+  counting_sens.count = &publish_count;
+
+  f.machine.set_status_sensor(&counting_sens);
+  f.machine.brew_start();  // publishes immediately (state transition)
+  f.machine.loop();        // HEATING → BREWING (state transition, immediate publish)
+  int baseline = publish_count;
+
+  // Multiple rapid loop() calls with changing data — should NOT publish because
+  // the throttle interval hasn't elapsed.
+  f.brew_pump.volume = 5.0f;
+  g_mock_millis += 10;
+  f.machine.loop();
+  f.brew_pump.volume = 10.0f;
+  g_mock_millis += 10;
+  f.machine.loop();
+  f.brew_pump.volume = 15.0f;
+  g_mock_millis += 10;
+  f.machine.loop();
+  EXPECT_EQ(publish_count, baseline);  // no new publishes within throttle interval
+
+  // After advancing past the throttle interval, the next loop() should publish.
+  g_mock_millis += 250;
+  f.brew_pump.volume = 20.0f;
+  f.machine.loop();
+  EXPECT_EQ(publish_count, baseline + 1);
+  EXPECT_EQ(counting_sens.state, "Brewing: 20.0 ml / 40.0 ml");
+}
+
+TEST(StatusSensor, StateTransitionPublishesImmediately) {
+  // State transitions always publish immediately regardless of throttle timer.
+  OrchestratorFixture f;
+
+  int publish_count = 0;
+  struct CountingSensor : public esphome::text_sensor::TextSensor {
+    int *count;
+    void publish_state(const std::string &v) {
+      (*count)++;
+      esphome::text_sensor::TextSensor::publish_state(v);
+    }
+  } counting_sens;
+  counting_sens.count = &publish_count;
+
+  f.machine.set_status_sensor(&counting_sens);
+  g_mock_millis = 0;
+  f.machine.brew_start();  // IDLE → BREWING:HEATING → immediate publish
+  int after_start = publish_count;
+  EXPECT_GE(after_start, 1);
+
+  // Call brew_stop() at time 0 (before throttle interval) — should still publish
+  f.machine.brew_stop();  // BREWING → IDLE → immediate publish
+  EXPECT_GT(publish_count, after_start);
+  EXPECT_EQ(counting_sens.state, "Idle");
 }
 
 // ---------------------------------------------------------------------------

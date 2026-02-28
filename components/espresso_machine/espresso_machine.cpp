@@ -77,9 +77,16 @@ void EspressoMachine::loop() {
       }
       break;
   }
-  // Publish verbose status on every tick; deduplication in publish_status_()
-  // ensures HA is only updated when the message actually changes.
-  publish_status_();
+  // Throttle live status updates to avoid expensive string formatting and
+  // heap allocation on every tick.  State transitions already call
+  // publish_status_() directly for immediate feedback; this periodic call
+  // updates live sensor values (volume, temperature, flow) at ~4 Hz.
+  {
+    uint32_t now = millis();
+    if (now - last_status_publish_ms_ >= STATUS_PUBLISH_INTERVAL_MS) {
+      publish_status_();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +848,7 @@ std::string EspressoMachine::status_name() const {
 void EspressoMachine::publish_status_() {
   if (status_sensor_ == nullptr)
     return;
+  last_status_publish_ms_ = millis();  // reset throttle on every call
   std::string current = status_name();
   if (current != last_published_status_) {
     last_published_status_ = current;

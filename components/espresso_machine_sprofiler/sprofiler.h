@@ -119,6 +119,9 @@ class SprofilerShotUpload : public Component {
   uint32_t auto_record_start_ms_{0}; // millis() when auto-recording began
   uint32_t last_sample_ms_{0};       // millis() of last auto-sampled datapoint
   static constexpr uint32_t SAMPLE_INTERVAL_MS = 100;  // ~10 Hz
+  // Expected datapoints for a typical 30 s shot at 10 Hz.
+  // Used to pre-reserve the vector and avoid heap reallocations during recording.
+  static constexpr size_t EXPECTED_DATAPOINTS_PER_SHOT = 300;
 };
 
 }  // namespace espresso_machine_sprofiler
