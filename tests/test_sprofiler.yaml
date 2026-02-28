@@ -4,7 +4,10 @@
 esphome:
   name: test-sprofiler
 
-host:
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
 
 logger:
 

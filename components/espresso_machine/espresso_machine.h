@@ -218,6 +218,18 @@ class EspressoMachine : public Component {
     return yield > 0.0f ? yield : 0.0f;
   }
 
+  // ----- Live telemetry accessors (used by sprofiler for shot recording) ----
+  // Return 0 when the respective hardware interface is not wired.
+  float get_brew_temperature() const {
+    return brew_heater_ctrl_ ? brew_heater_ctrl_->get_current_temperature() : 0.0f;
+  }
+  float get_brew_flow_rate() const {
+    return brew_pump_ ? brew_pump_->get_flow_rate() : 0.0f;
+  }
+  float get_brew_flow_total() const {
+    return brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
+  }
+
   // ----- Shot stat HA sensor entities (P1-5) --------------------------------
   void set_last_shot_time_sensor(sensor::Sensor *s) { last_shot_time_sensor_ = s; }
   void set_last_shot_volume_sensor(sensor::Sensor *s) { last_shot_volume_sensor_ = s; }

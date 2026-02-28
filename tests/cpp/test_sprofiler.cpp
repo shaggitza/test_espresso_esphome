@@ -1,29 +1,30 @@
 // Unit tests for the Sprofiler shot upload component.
 //
 // All HTTP transport is mocked — no real network calls are made.  The tests
-// exercise shot data collection, JSON serialisation (Gaggiuino format), and
-// the upload retry / success / failure paths.
+// exercise shot data collection, JSON serialisation (Gaggiuino format), the
+// upload retry / success / failure paths, and auto-recording when wired to
+// the EspressoMachine orchestrator.
 
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
 #include "components/espresso_machine_sprofiler/sprofiler.h"
+#include "components/espresso_machine/espresso_machine.h"
+#include "components/espresso_machine/interfaces.h"
 
 // Pull in the mock millis() state.
 extern uint32_t g_mock_millis;
 
 using esphome::espresso_machine_sprofiler::ShotDatapoint;
 using esphome::espresso_machine_sprofiler::SprofilerShotUpload;
+using namespace esphome::espresso_machine;
 
 // ---------------------------------------------------------------------------
 // MockSprofilerUpload — captures http_post calls for verification
 // ---------------------------------------------------------------------------
 class MockSprofilerUpload : public SprofilerShotUpload {
  public:
-  // Predetermined HTTP status code returned by http_post().
   int mock_http_status{200};
-
-  // Captured values from the last http_post() call.
   std::string last_url;
   std::string last_auth;
   std::string last_body;
@@ -38,6 +39,44 @@ class MockSprofilerUpload : public SprofilerShotUpload {
     return mock_http_status;
   }
 };
+
+// ---------------------------------------------------------------------------
+// Minimal mock hardware for orchestrator integration tests.
+// Wrapped in an anonymous namespace to avoid ODR collisions with the mocks
+// in test_orchestrator.cpp (which have the same names but different layouts).
+// ---------------------------------------------------------------------------
+namespace {
+
+struct MockValve : public IValve {
+  bool open_state = false;
+  void open() override { open_state = true; }
+  void close() override { open_state = false; }
+  bool is_open() const override { return open_state; }
+};
+
+struct MockPump : public IPump {
+  bool running = false;
+  float volume = 0.0f;
+  float rate = 0.0f;
+
+  void turn_on() override { running = true; }
+  void turn_off() override { running = false; }
+  bool is_running() const override { return running; }
+  float get_flow_rate() const override { return rate; }
+  float get_flow_total() const override { return volume; }
+  void reset_flow() override { volume = 0.0f; rate = 0.0f; }
+};
+
+struct MockHeater : public IHeater {
+  float temp = 25.0f;
+  float target = 90.0f;
+
+  float get_current_temperature() const override { return temp; }
+  void set_target_temperature(float t) override { target = t; }
+  bool is_ready(float target_temp) const override { return temp >= target_temp; }
+};
+
+}  // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // Helper: create a pre-configured MockSprofilerUpload.
@@ -83,6 +122,18 @@ TEST(SprofilerConfig, ProfileNameCustom) {
   SprofilerShotUpload u;
   u.set_profile_name("Lever-Style Decline");
   EXPECT_EQ(u.get_profile_name(), "Lever-Style Decline");
+}
+
+TEST(SprofilerConfig, TrailingSlashNormalized) {
+  SprofilerShotUpload u;
+  u.set_server_url("https://example.io/");
+  EXPECT_EQ(u.get_server_url(), "https://example.io");
+}
+
+TEST(SprofilerConfig, MultipleTrailingSlashesNormalized) {
+  SprofilerShotUpload u;
+  u.set_server_url("https://example.io///");
+  EXPECT_EQ(u.get_server_url(), "https://example.io");
 }
 
 // ===========================================================================
@@ -137,7 +188,6 @@ TEST(SprofilerRecording, DatapointAccumulation) {
 
 TEST(SprofilerRecording, DatapointIgnoredWhenNotRecording) {
   SprofilerShotUpload u;
-  // Not recording — datapoints should be silently dropped.
   u.add_datapoint(0.0f, 0.1f, 92.5f, 7.0f, 0.0f);
   EXPECT_TRUE(u.get_datapoints().empty());
 }
@@ -168,7 +218,6 @@ TEST(SprofilerRecording, BeginShotClearsPreviousData) {
   u.end_shot(10000);
   EXPECT_EQ(u.get_datapoints().size(), 1u);
 
-  // Start a new shot — previous datapoints should be cleared.
   u.begin_shot();
   EXPECT_TRUE(u.get_datapoints().empty());
   EXPECT_FALSE(u.has_pending_upload());
@@ -185,14 +234,13 @@ TEST(SprofilerJson, EmptyDatapointsReturnsEmptyString) {
 
 TEST(SprofilerJson, BasicStructure) {
   auto u = make_uploader();
-  g_mock_millis = 1000000;  // timestamp = 1000
+  g_mock_millis = 1000000;
   u.begin_shot();
   u.add_datapoint(0.0f, 0.1f, 92.5f, 7.0f, 0.0f);
   u.end_shot(25000);
 
   std::string json = u.serialize_shot_json();
 
-  // Verify top-level fields.
   EXPECT_NE(json.find("\"id\":1"), std::string::npos);
   EXPECT_NE(json.find("\"timestamp\":1000"), std::string::npos);
   EXPECT_NE(json.find("\"duration\":25000"), std::string::npos);
@@ -227,7 +275,6 @@ TEST(SprofilerJson, MultipleDatapoints) {
 
   std::string json = u.serialize_shot_json();
 
-  // Count the number of datapoint objects.
   size_t count = 0;
   size_t pos = 0;
   while ((pos = json.find("\"time\":", pos)) != std::string::npos) {
@@ -255,7 +302,7 @@ TEST(SprofilerJson, ProfileNameWithQuotesEscaped) {
 
 TEST(SprofilerUpload, SuccessfulUploadClearsPending) {
   auto u = make_uploader();
-  u.mock_http_status = 201;  // HTTP 201 Created
+  u.mock_http_status = 201;
   g_mock_millis = 0;
 
   u.begin_shot();
@@ -270,7 +317,7 @@ TEST(SprofilerUpload, SuccessfulUploadClearsPending) {
 
 TEST(SprofilerUpload, FailedUploadKeepsPending) {
   auto u = make_uploader();
-  u.mock_http_status = 500;  // Server error
+  u.mock_http_status = 500;
   g_mock_millis = 0;
 
   u.begin_shot();
@@ -279,7 +326,7 @@ TEST(SprofilerUpload, FailedUploadKeepsPending) {
 
   bool ok = u.upload_pending_shot();
   EXPECT_FALSE(ok);
-  EXPECT_TRUE(u.has_pending_upload());  // Still pending for retry.
+  EXPECT_TRUE(u.has_pending_upload());
 }
 
 TEST(SprofilerUpload, NoPendingShotReturns) {
@@ -298,6 +345,19 @@ TEST(SprofilerUpload, CorrectUrlConstructed) {
   u.upload_pending_shot();
 
   EXPECT_EQ(u.last_url, "https://my.server.io/api/shots/upload");
+}
+
+TEST(SprofilerUpload, TrailingSlashUrlNormalized) {
+  auto u = make_uploader("https://test.io/", "tok", "P");
+  g_mock_millis = 0;
+
+  u.begin_shot();
+  u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
+  u.end_shot(1000);
+  u.upload_pending_shot();
+
+  // Trailing slash should be normalised — no double slash.
+  EXPECT_EQ(u.last_url, "https://test.io/api/shots/upload");
 }
 
 TEST(SprofilerUpload, BearerTokenInAuthHeader) {
@@ -321,8 +381,6 @@ TEST(SprofilerUpload, BodyContainsSerializedJson) {
   u.end_shot(25000);
   u.upload_pending_shot();
 
-  // The body sent to http_post should match serialize_shot_json().
-  // Since upload clears pending, we re-serialize from the still-present datapoints.
   EXPECT_FALSE(u.last_body.empty());
   EXPECT_NE(u.last_body.find("\"datapoints\""), std::string::npos);
   EXPECT_NE(u.last_body.find("\"duration\":25000"), std::string::npos);
@@ -330,7 +388,7 @@ TEST(SprofilerUpload, BodyContainsSerializedJson) {
 
 TEST(SprofilerUpload, TransportErrorKeepsPending) {
   auto u = make_uploader();
-  u.mock_http_status = -1;  // Transport failure (no connection)
+  u.mock_http_status = -1;
   g_mock_millis = 0;
 
   u.begin_shot();
@@ -350,12 +408,10 @@ TEST(SprofilerUpload, RetrySucceedsOnSecondAttempt) {
   u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
   u.end_shot(1000);
 
-  // First attempt fails.
   u.mock_http_status = 503;
   EXPECT_FALSE(u.upload_pending_shot());
   EXPECT_TRUE(u.has_pending_upload());
 
-  // Second attempt succeeds.
   u.mock_http_status = 200;
   EXPECT_TRUE(u.upload_pending_shot());
   EXPECT_FALSE(u.has_pending_upload());
@@ -391,7 +447,7 @@ TEST(SprofilerUpload, Http4xxFailsUpload) {
 }
 
 // ===========================================================================
-// Loop integration
+// Loop integration (manual — no orchestrator)
 // ===========================================================================
 
 TEST(SprofilerLoop, LoopUploadsWhenPending) {
@@ -404,7 +460,7 @@ TEST(SprofilerLoop, LoopUploadsWhenPending) {
   u.end_shot(1000);
 
   EXPECT_TRUE(u.has_pending_upload());
-  u.loop();  // Should trigger upload.
+  u.loop();
   EXPECT_FALSE(u.has_pending_upload());
   EXPECT_EQ(u.post_call_count, 1);
 }
@@ -424,7 +480,6 @@ TEST(SprofilerEdge, LargeShotSerializes) {
   g_mock_millis = 0;
   u.begin_shot();
 
-  // Simulate a 30-second shot at 10 Hz = 300 datapoints.
   for (int i = 0; i < 300; i++) {
     float t = i * 0.1f;
     u.add_datapoint(t, 9.0f, 93.0f, 2.5f, t * 1.2f);
@@ -433,7 +488,6 @@ TEST(SprofilerEdge, LargeShotSerializes) {
 
   std::string json = u.serialize_shot_json();
   EXPECT_FALSE(json.empty());
-  // Should contain all 300 datapoints.
   size_t count = 0;
   size_t pos = 0;
   while ((pos = json.find("\"time\":", pos)) != std::string::npos) {
@@ -447,7 +501,7 @@ TEST(SprofilerEdge, EmptyApiTokenStillUploads) {
   MockSprofilerUpload u;
   u.set_server_url("https://test.io");
   u.set_api_token("");
-  u.mock_http_status = 401;  // Expected: server rejects empty token.
+  u.mock_http_status = 401;
   g_mock_millis = 0;
 
   u.begin_shot();
@@ -455,20 +509,239 @@ TEST(SprofilerEdge, EmptyApiTokenStillUploads) {
   u.end_shot(1000);
   u.upload_pending_shot();
 
-  // The component still attempts the upload; the server rejects it.
   EXPECT_EQ(u.last_auth, "Bearer ");
   EXPECT_EQ(u.post_call_count, 1);
 }
 
-TEST(SprofilerEdge, ServerUrlWithTrailingSlash) {
-  auto u = make_uploader("https://test.io/", "tok", "P");
+// ===========================================================================
+// Auto-recording — sprofiler wired to EspressoMachine orchestrator
+// ===========================================================================
+
+// Helper: set up a minimal orchestrator with mock hardware.
+struct SprofilerOrchestratorFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  MockHeater heater;
+  EspressoMachine machine;
+  MockSprofilerUpload uploader;
+
+  SprofilerOrchestratorFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_heater_ctrl(&heater);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    uploader.set_server_url("https://test.sprofiler.io");
+    uploader.set_api_token("test_token");
+    uploader.set_profile_name("Test");
+    uploader.set_machine(&machine);
+    uploader.mock_http_status = 200;
+
+    g_mock_millis = 0;
+    machine.setup();
+    machine.machine_on();
+  }
+};
+
+TEST(SprofilerAutoRecord, StartsRecordingOnBrewStart) {
+  SprofilerOrchestratorFixture f;
+
+  // Heater already at brew temperature (bypass HEATING).
+  f.heater.temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();
+
+  // Sprofiler loop should detect mode == BREWING and start recording.
+  f.uploader.loop();
+
+  EXPECT_TRUE(f.uploader.is_recording());
+  EXPECT_EQ(f.uploader.get_shot_id(), 1u);
+}
+
+TEST(SprofilerAutoRecord, SamplesDatapointsDuringBrew) {
+  SprofilerOrchestratorFixture f;
+  f.heater.temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();
+  f.uploader.loop();  // Rising edge detected, recording starts.
+
+  // Advance time and run loop ticks to accumulate datapoints.
+  for (int i = 1; i <= 5; i++) {
+    g_mock_millis = i * 100;
+    f.brew_pump.rate = 2.5f;
+    f.machine.loop();
+    f.uploader.loop();
+  }
+
+  // 5 ticks at 100ms intervals → 5 datapoints (first sample at tick 1).
+  EXPECT_GE(f.uploader.get_datapoints().size(), 5u);
+}
+
+TEST(SprofilerAutoRecord, DatapointsContainTemperatureAndFlow) {
+  SprofilerOrchestratorFixture f;
+  f.heater.temp = 93.0f;
+  f.machine.brew_start();
+  f.machine.loop();
+  f.uploader.loop();  // Rising edge → recording starts.
+
+  // Set flow rate AFTER brew enters BREWING (orchestrator resets flow on start).
+  f.brew_pump.rate = 2.5f;
+  g_mock_millis = 100;
+  f.machine.loop();
+  f.uploader.loop();
+
+  ASSERT_GE(f.uploader.get_datapoints().size(), 1u);
+  const auto &dp = f.uploader.get_datapoints().back();
+  EXPECT_FLOAT_EQ(dp.temperature_c, 93.0f);
+  EXPECT_FLOAT_EQ(dp.flow_ml_s, 2.5f);
+}
+
+TEST(SprofilerAutoRecord, EndsRecordingOnBrewStop) {
+  SprofilerOrchestratorFixture f;
+  f.heater.temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();
+  f.uploader.loop();  // Recording starts.
+
+  g_mock_millis = 100;
+  f.machine.loop();
+  f.uploader.loop();
+
+  // Stop the brew.
+  f.machine.brew_stop();
+  g_mock_millis = 200;
+  f.machine.loop();
+  f.uploader.loop();  // Falling edge → end_shot() + upload in same tick.
+
+  EXPECT_FALSE(f.uploader.is_recording());
+  // The upload may already have been attempted in the same loop() tick.
+  EXPECT_GE(f.uploader.post_call_count + (f.uploader.has_pending_upload() ? 1 : 0), 1);
+}
+
+TEST(SprofilerAutoRecord, UploadsAfterBrewEnds) {
+  SprofilerOrchestratorFixture f;
+  f.heater.temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();
+  f.uploader.loop();
+
+  g_mock_millis = 100;
+  f.machine.loop();
+  f.uploader.loop();
+
+  f.machine.brew_stop();
+  g_mock_millis = 200;
+  f.machine.loop();
+  f.uploader.loop();  // Ends shot.
+
+  g_mock_millis = 300;
+  f.uploader.loop();  // Uploads.
+
+  EXPECT_EQ(f.uploader.post_call_count, 1);
+  EXPECT_FALSE(f.uploader.has_pending_upload());
+}
+
+TEST(SprofilerAutoRecord, EndsOnFlowMaxAutoTermination) {
+  SprofilerOrchestratorFixture f;
+  f.heater.temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();
+  f.uploader.loop();  // Recording starts.
+
+  // Collect at least one datapoint before flow_max.
+  f.brew_pump.rate = 5.0f;
+  g_mock_millis = 100;
+  f.machine.loop();
+  f.uploader.loop();
+
+  // Simulate reaching flow_max (40 ml).
+  f.brew_pump.volume = 40.0f;
+  g_mock_millis = 1000;
+  f.machine.loop();  // Orchestrator transitions to DONE.
+  f.uploader.loop();
+
+  g_mock_millis = 1100;
+  f.machine.loop();  // DONE → CLEANUP.
+  f.uploader.loop();
+
+  g_mock_millis = 1200;
+  f.machine.loop();  // CLEANUP → IDLE.
+  f.uploader.loop();  // Falling edge → end_shot() + upload.
+
+  EXPECT_FALSE(f.uploader.is_recording());
+  // Shot should have been ended and uploaded (or at least attempted).
+  EXPECT_TRUE(f.uploader.post_call_count > 0 || f.uploader.has_pending_upload());
+}
+
+TEST(SprofilerAutoRecord, NoRecordingWithoutMachine) {
+  MockSprofilerUpload u;
+  u.set_server_url("https://test.io");
+  u.set_api_token("tok");
+  // No set_machine() call — sprofiler has no orchestrator reference.
+
   g_mock_millis = 0;
+  u.loop();
+  g_mock_millis = 100;
+  u.loop();
 
-  u.begin_shot();
-  u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
-  u.end_shot(1000);
-  u.upload_pending_shot();
+  EXPECT_FALSE(u.is_recording());
+  EXPECT_EQ(u.get_shot_id(), 0u);
+}
 
-  // URL should be constructed even with trailing slash (not ideal but functional).
-  EXPECT_EQ(u.last_url, "https://test.io//api/shots/upload");
+TEST(SprofilerAutoRecord, NoRecordingDuringSteam) {
+  SprofilerOrchestratorFixture f;
+  f.heater.temp = 135.0f;
+
+  f.machine.steam_start();
+  f.machine.loop();
+  f.uploader.loop();
+
+  // Steaming is not brew — sprofiler should not start recording.
+  EXPECT_FALSE(f.uploader.is_recording());
+  EXPECT_EQ(f.uploader.get_shot_id(), 0u);
+}
+
+TEST(SprofilerAutoRecord, SecondBrewCreatesNewShot) {
+  SprofilerOrchestratorFixture f;
+  f.heater.temp = 90.0f;
+
+  // First brew.
+  f.machine.brew_start();
+  f.machine.loop();
+  f.uploader.loop();
+  g_mock_millis = 100;
+  f.machine.loop();
+  f.uploader.loop();
+  f.machine.brew_stop();
+  g_mock_millis = 200;
+  f.machine.loop();
+  f.uploader.loop();
+  EXPECT_EQ(f.uploader.get_shot_id(), 1u);
+
+  // Upload first shot.
+  g_mock_millis = 300;
+  f.uploader.loop();
+  EXPECT_EQ(f.uploader.post_call_count, 1);
+
+  // Second brew.
+  g_mock_millis = 1000;
+  f.machine.brew_start();
+  f.machine.loop();
+  f.uploader.loop();
+  EXPECT_EQ(f.uploader.get_shot_id(), 2u);
+  EXPECT_TRUE(f.uploader.is_recording());
 }

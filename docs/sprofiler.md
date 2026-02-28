@@ -39,13 +39,19 @@ After each brew the component:
 external_components:
   - source: github://shaggitza/test_espresso_esphome@main
     components:
+      - espresso_machine
       - espresso_machine_sprofiler
+
+espresso_machine:
+  id: my_espresso
+  # ... brew/steam config ...
 
 espresso_machine_sprofiler:
   id: sprofiler_upload
-  server: "https://sprofiler.io"          # optional — default: https://sprofiler.io
-  api_token: !secret sprofiler_token      # required — Bearer token from your account
-  profile_name: "Manual"                  # optional — default: "Manual"
+  espresso_machine: my_espresso              # auto-records shots on brew end
+  server: "https://sprofiler.io"             # optional — default: https://sprofiler.io
+  api_token: !secret sprofiler_token         # required — Bearer token from your account
+  profile_name: "Manual"                     # optional — default: "Manual"
 ```
 
 ### Configuration Keys
@@ -53,7 +59,8 @@ espresso_machine_sprofiler:
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `id` | ID | yes | — | ESPHome entity ID |
-| `server` | URL string | no | `https://sprofiler.io` | Sprofiler server base URL. Set this to point to a self-hosted instance or the Sprofiler dev server (`https://dev.sprofiler.io`). |
+| `espresso_machine` | ID reference | no | — | Reference to the `espresso_machine` orchestrator. When set, the sprofiler automatically records shot telemetry during brew and uploads on brew end. |
+| `server` | URL string | no | `https://sprofiler.io` | Sprofiler server base URL. Set this to point to a self-hosted instance or the Sprofiler dev server (`https://dev.sprofiler.io`). Trailing slashes are normalised automatically. |
 | `api_token` | string | **yes** | — | Bearer token obtained from your Sprofiler account settings. Store it in `secrets.yaml`. |
 | `profile_name` | string | no | `"Manual"` | Human-readable profile name included in every uploaded shot record. |
 
@@ -69,9 +76,25 @@ sprofiler_token: "paste-your-api-token-here"
 
 ## How It Works
 
-### Shot Recording
+### Auto-Recording (Recommended)
 
-The component exposes three C++ methods that should be called during a brew:
+When wired to the `espresso_machine` orchestrator via the `espresso_machine:`
+key, the sprofiler automatically:
+
+1. **Detects brew start** — watches the orchestrator's mode for the
+   `BREWING` transition (rising edge).
+2. **Samples telemetry at ~10 Hz** — reads temperature from the
+   orchestrator's `IHeater` and flow rate from its `IPump` every 100 ms.
+3. **Detects brew end** — watches for the mode to leave `BREWING`
+   (falling edge), then finalises the shot record.
+4. **Uploads immediately** — serialises the shot and POSTs it on the next
+   `loop()` tick.
+
+No YAML automations or lambdas are needed — just wire the orchestrator ID.
+
+### Manual Recording (Advanced)
+
+The component also exposes three C++ methods for manual control:
 
 | Method | When to call | Purpose |
 |--------|-------------|---------|
@@ -140,7 +163,7 @@ The uploaded JSON follows the Gaggiuino shot data specification:
 
 ## Testing
 
-The component is fully tested with **33 GoogleTest unit tests**
+The component is fully tested with **44 GoogleTest unit tests**
 (`tests/cpp/test_sprofiler.cpp`). All HTTP transport is mocked — **no real
 network calls are ever made during testing**.
 
@@ -148,12 +171,13 @@ network calls are ever made during testing**.
 
 | Suite | Tests | What is verified |
 |-------|-------|-----------------|
-| `SprofilerConfig` | 5 | Default values, custom server/token/profile |
+| `SprofilerConfig` | 7 | Default values, custom server/token/profile, trailing-slash normalisation |
 | `SprofilerRecording` | 8 | Begin/end shot, datapoint accumulation, state transitions |
 | `SprofilerJson` | 5 | JSON structure, datapoint formatting, quote escaping |
-| `SprofilerUpload` | 10 | Success/failure codes, URL construction, auth header, retry |
+| `SprofilerUpload` | 11 | Success/failure codes, URL construction, auth header, retry, trailing-slash |
 | `SprofilerLoop` | 2 | Automatic upload in loop(), no-op when idle |
-| `SprofilerEdge` | 3 | Large shots (300 datapoints), empty token, trailing slash |
+| `SprofilerEdge` | 2 | Large shots (300 datapoints), empty token |
+| `SprofilerAutoRecord` | 9 | Orchestrator integration: auto-start on brew, telemetry sampling, auto-end on brew stop/flow_max, upload, steam exclusion, multi-shot sequences |
 
 ### Running Tests
 

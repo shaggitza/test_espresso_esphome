@@ -31,7 +31,7 @@ planned in this project.
 | `espresso_machine_grinder` | `button` + `number` | ✅ | Timed relay grind; adjustable grind-time number entity |
 | `espresso_machine` (orchestrator) | `component` | ✅ | Brew + steam state machines; purge-before-steam; steam timeout; temperature management via `IHeater`; all P0/P1/P2 items complete |
 | `espresso_machine_profile` | `select` + config | ⬜ | Planned (Phase 12); see `docs/profiles.md` |
-| `espresso_machine_sprofiler` | `component` | ✅ | Sprofiler cloud shot upload; Gaggiuino-compatible JSON serialisation; configurable server URL and Bearer token auth; virtual `http_post()` for test mocking; see `docs/sprofiler.md` |
+| `espresso_machine_sprofiler` | `component` | ✅ | Sprofiler cloud shot upload; accepts `espresso_machine:` reference for auto-recording during brew; Gaggiuino-compatible JSON serialisation; configurable server URL and Bearer token auth; virtual `http_post()` for test mocking; see `docs/sprofiler.md` |
 | `espresso_machine_mock_heater` | `output` + `sensor` | ✅ | Thermal ODE simulation; HA-tunable physics parameters; optional 3-node thermal distance model (dist_water_to_heater_mm, dist_water_to_sensor_mm, dist_sensor_to_heater_mm) to simulate Al block lag and make PID harder |
 | `espresso_machine_mock_pump` | `switch` | ✅ | Puck wetting flow model; HA-tunable physics parameters |
 | `espresso_machine_mock_scale` | `sensor` (weight + flow) | ⬜ | Planned (Phase 13b); cup mode: derives weight from mock pump nozzle output; portafilter mode: accumulates at `dose_rate_g_per_s`; auto-tare on brew/grind start; see `docs/scales.md` |

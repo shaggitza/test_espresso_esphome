@@ -14,6 +14,7 @@ SprofilerShotUpload = espresso_machine_sprofiler_ns.class_(
 CONF_SERVER = "server"
 CONF_API_TOKEN = "api_token"
 CONF_PROFILE_NAME = "profile_name"
+CONF_ESPRESSO_MACHINE = "espresso_machine"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -29,6 +30,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(
             CONF_PROFILE_NAME, default="Manual"
         ): cv.string,
+        # Reference to the espresso_machine orchestrator.  When set the
+        # sprofiler automatically records and uploads shots on brew end.
+        cv.Optional(CONF_ESPRESSO_MACHINE): cv.use_id(cg.Component),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -40,3 +44,7 @@ async def to_code(config):
     cg.add(var.set_server_url(config[CONF_SERVER]))
     cg.add(var.set_api_token(config[CONF_API_TOKEN]))
     cg.add(var.set_profile_name(config[CONF_PROFILE_NAME]))
+
+    if CONF_ESPRESSO_MACHINE in config:
+        machine = await cg.get_variable(config[CONF_ESPRESSO_MACHINE])
+        cg.add(var.set_machine(machine))

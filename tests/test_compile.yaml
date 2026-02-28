@@ -121,3 +121,4 @@ espresso_machine_sprofiler:
   server: "https://sprofiler.io"
   api_token: "test_token_placeholder"
   profile_name: "Test Profile"
+  espresso_machine: my_espresso

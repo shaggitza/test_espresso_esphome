@@ -532,6 +532,7 @@ espresso_machine_grinder:
 # =============================================================================
 espresso_machine_sprofiler:
   id: sprofiler_upload
+  espresso_machine: my_espresso                 # ← auto-records shots on brew end
   server: "https://sprofiler.io"               # ← or your self-hosted instance
   api_token: !secret sprofiler_token            # ← API token from sprofiler.io account
   profile_name: "Manual"                        # ← profile name included in shot records
