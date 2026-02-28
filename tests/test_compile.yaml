@@ -20,6 +20,7 @@ external_components:
       - espresso_machine_pump
       - espresso_machine_grinder
       - espresso_machine_flow_meter
+      - espresso_machine_sprofiler
 
 # --- Fake heater ---
 sensor:
@@ -114,3 +115,10 @@ espresso_machine:
     target_temperature: 135°C
     flow_max: 2ml/s
     cool_down_to: 90°C
+
+espresso_machine_sprofiler:
+  id: sprofiler_upload
+  server: "https://sprofiler.io"
+  api_token: "test_token_placeholder"
+  profile_name: "Test Profile"
+  espresso_machine: my_espresso

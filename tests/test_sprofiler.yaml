@@ -1,0 +1,25 @@
+# Test: espresso_machine_sprofiler schema validation.
+# Validates that the Sprofiler shot upload component's YAML schema is accepted
+# by ESPHome's config parser.
+esphome:
+  name: test-sprofiler
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine_sprofiler
+
+espresso_machine_sprofiler:
+  id: sprofiler_upload
+  server: "https://sprofiler.io"
+  api_token: "test_token_placeholder"
+  profile_name: "Test Profile"
