@@ -17,15 +17,18 @@ For each scenario the document records:
 |---|---|---|
 | Power ON while idle | Heater starts; brew/steam become available | ✅ Covered (C++ + YAML) |
 | Power OFF while idle | Flag cleared; hardware already safe | ✅ Covered (C++ test) |
-| Power OFF during brew | Brew stops immediately; pump off, valves closed | ✅ Covered (C++ test) |
-| Power OFF during steam heat-up | Heat-up cancelled; heater lowered; all off | ✅ Covered (C++ test) |
-| Power OFF during steam purge (PURGING) | Purge cancelled immediately; heater lowered; all off | ✅ Covered (C++ test) |
-| Power OFF during active steaming | Purge sequence initiated; completes automatically | ✅ Covered (C++ test) |
-| Power OFF during steam cool-down | Cool-down + purge continues until IDLE | ✅ Covered (C++ test) |
-| Power ON mid-purge (quick toggle after steam) | On flag set; new operations blocked until IDLE | ✅ Covered (C++ test) |
+| Power OFF during brew | Brew stops immediately; shot stats recorded; pump off, valves closed | ✅ Covered (C++ test) |
+| Power OFF during steam heat-up | Heat-up cancelled; heater lowered; powered off immediately | ✅ Covered (C++ test) |
+| Power OFF during steam purge (PURGING) | Purge cancelled immediately; heater lowered; powered off immediately | ✅ Covered (C++ test) |
+| Power OFF during active steaming | Purge sequence initiated; power-off deferred until cooldown completes | ✅ Covered (C++ test) |
+| Power OFF during steam cool-down | Power-off deferred; cool-down + purge continues until IDLE | ✅ Covered (C++ test) |
+| Power ON mid-purge (quick toggle after steam) | Pending off cancelled; new operations available after IDLE | ✅ Covered (C++ test) |
 | Brew/steam start while machine is OFF | Ignored with warning log | ✅ Covered (C++ test) |
 | Power cycle (flash/reboot) while brewing | GPIO defaults LOW → heater/pump/valves all off | ✅ Hardware default |
 | Power cycle while steam purge is running | Purge stops (GPIO reset); machine boots off | ✅ Hardware default |
+| Idle auto-off with HA switch still ON | `power_switch` syncs HA switch to OFF | ✅ Covered (C++ test) |
+| Manual brew stop (brew_stop) | Shot stats recorded; heater setpoint restored | ✅ Covered (C++ test) |
+| Brew stop during temperature surfing | Heater setpoint restored to `brew_target_temp_` | ✅ Covered (C++ test) |
 
 ---
 
@@ -50,10 +53,17 @@ fittings. Leaving the heater at 135 °C unattended is a burn/fire risk.
    - **Opens the purge valve** (releases residual pressure safely)
    - Lowers the heater setpoint to `cool_down_to` (default 90 °C)
    - Transitions to `SteamState::COOLING`
-3. The orchestrator loop continues advancing COOLING → CLEANUP → IDLE:
+3. `machine_off()` sets `pending_power_off_ = true` instead of immediately
+   clearing `powered_on_`.  This ensures the HA power switch stays in sync
+   during the cooldown — the machine reports "powered on" while actively
+   performing safety-critical work.
+4. The orchestrator loop continues advancing COOLING → CLEANUP → IDLE:
    - COOLING: purge valve stays open; waits for temperature to drop to `cool_down_to`
    - CLEANUP: purge valve closes; transitions to IDLE
-4. The YAML `turn_off_action` also sets the PID climate to `mode: off`,
+5. On the CLEANUP → IDLE transition, `pending_power_off_` is detected:
+   `powered_on_` is set to false, and the optional `power_switch_` entity
+   publishes OFF to HA, keeping the dashboard in sync.
+6. The YAML `turn_off_action` also sets the PID climate to `mode: off`,
    stopping the heater element entirely.
 
 > **Note on PURGING state:** If the machine is off-ed during the `PURGING` phase
@@ -80,11 +90,14 @@ could remain trapped, and a new brew might start before the circuit has cooled.
 **What the firmware does:**
 
 1. `machine_off()` calls `steam_stop()` → COOLING begins (purge valve open).
-2. `machine_on()` sets `powered_on_ = true` immediately, but `mode_` is still
-   `EspressoMode::STEAMING` (in COOLING sub-state).
+   `pending_power_off_` is set to `true`; `powered_on_` remains `true`.
+2. `machine_on()` clears `pending_power_off_` immediately (even though
+   `powered_on_` is already true — the early return still clears the flag).
 3. `brew_start()` and `steam_start()` check `mode_ != EspressoMode::IDLE` **in
    addition to** `powered_on_`.  Since mode is still STEAMING, both are rejected.
 4. The purge sequence completes autonomously: COOLING → CLEANUP → IDLE.
+   Since `pending_power_off_` was cleared by `machine_on()`, `powered_on_`
+   remains `true` — the machine is fully usable immediately.
 5. Once `mode_` becomes IDLE, new brew or steam operations are accepted.
 
 **Net result:** The user can flip the power ON immediately — the heater starts
@@ -124,12 +137,18 @@ latent heat risk that requires a cool-down sequence.
 **What the firmware does:**
 
 1. `machine_off()` detects `EspressoMode::BREWING`.
-2. Calls `safe_stop_all_()`: pump off, all valves closed.
-3. Sets `brew_state_ = IDLE` and `mode_ = IDLE` immediately.
-4. `powered_on_` is cleared.
+2. Records partial shot statistics (time, volume, yield) and publishes them
+   to HA sensor entities (if wired) — the shot data is preserved even though
+   the shot was interrupted.
+3. Restores the heater setpoint to `brew_target_temp_` (in case temperature
+   surfing had modified it mid-shot).
+4. Calls `safe_stop_all_()`: pump off, all valves closed.
+5. Sets `brew_state_ = IDLE` and `mode_ = IDLE` immediately.
+6. `powered_on_` is cleared.
 
 **Net result:** Immediate safe stop. The shot is aborted, which wastes coffee
-but does not create a safety hazard.
+but does not create a safety hazard.  Shot statistics are preserved for
+review in Home Assistant.
 
 ---
 
@@ -248,3 +267,17 @@ The scenarios above are validated by the following GoogleTest tests in
 | `BrewTemperatureCooldown.BrewStopDuringCoolingSafelyReturnsToIdle` | brew_stop() during COOLING → immediate safe stop |
 | `BrewTemperatureCooldown.StatusNameShowsCurrentAndTargetTemperatures` | Status string shows current and target °C during COOLING |
 | `BrewTemperatureCooldown.NoCoolingInsertedAfterDoneWhenEnabled` | DONE→CLEANUP is direct even with cooldown enabled (no end-of-brew cooling) |
+| **Bug-fix tests (power desync, shot stats, heater setpoint)** | |
+| `BugFix.DeferredPowerOffDuringSteamCooldown` | powered_on_ stays true during steam cooldown, goes false after IDLE |
+| `BugFix.MachineOnCancelsPendingPowerOff` | machine_on() mid-cooldown cancels deferred off; machine stays on |
+| `BugFix.MachineOffDuringHeatingPowersOffImmediately` | HEATING cancel needs no cooldown → immediate off |
+| `BugFix.MachineOffDuringCoolingDefersPowerOff` | machine_off() during COOLING defers; off after IDLE |
+| `BugFix.BrewStopRecordsPartialShotStats` | brew_stop() records time, volume, yield |
+| `BugFix.BrewStopRecordsStatsToSensors` | brew_stop() publishes to HA sensor entities |
+| `BugFix.BrewStopDuringHeatingDoesNotRecordStats` | brew_stop() before BREWING does not record empty stats |
+| `BugFix.BrewStopRestoresHeaterSetpointAfterTempSurfing` | brew_stop() after temp surfing restores setpoint |
+| `BugFix.MachineOffDuringBrewRecordsPartialShotStats` | machine_off() during brew records partial stats |
+| `BugFix.MachineOffDuringBrewRestoresHeaterSetpoint` | machine_off() during brew restores heater setpoint |
+| `BugFix.PowerSwitchSyncedOnIdleAutoOff` | Idle auto-off publishes OFF to HA power switch |
+| `BugFix.PowerSwitchSyncedAfterSteamCooldown` | Deferred off publishes OFF to HA power switch after cooldown |
+| `BugFix.PowerSwitchNotSyncedWhenMachineOnCancelsPending` | Cancelled pending off does not publish OFF |

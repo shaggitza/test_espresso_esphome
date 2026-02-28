@@ -185,6 +185,14 @@ class EspressoMachine : public Component {
   void machine_off();
   bool is_powered_on() const { return powered_on_; }
 
+  // Optional HA switch entity that tracks the machine power state.
+  // When wired the orchestrator publishes powered_on_ changes to HA so
+  // the switch stays in sync after internal power-off events (idle auto-off,
+  // steam cooldown completing).  Without this, the HA switch can show ON
+  // while the machine is internally off, causing confusing "machine is off"
+  // rejections on brew_start / steam_start.
+  void set_power_switch(switch_::Switch *sw) { power_switch_ = sw; }
+
   // ----- Public actions (callable from YAML / HA automations) --------------
   void brew_start();
   void brew_stop();
@@ -263,6 +271,13 @@ class EspressoMachine : public Component {
   // -- Power state -----------------------------------------------------------
   // Defaults to false (off) on boot for safety. Call machine_on() to enable.
   bool powered_on_{false};
+  // When true, the machine will transition to powered_on_ = false after the
+  // current steam cooldown sequence completes (CLEANUP → IDLE).  This defers
+  // the power-off so that powered_on_ accurately reflects that the machine is
+  // still performing work during cooldown, preventing confusing HA state desync.
+  bool pending_power_off_{false};
+  // Optional HA switch entity that mirrors the power state.
+  switch_::Switch *power_switch_{nullptr};
 
   // -- Brew hardware ---------------------------------------------------------
   Component *brew_heater_{nullptr};  // native ESPHome climate entity reference
@@ -355,6 +370,15 @@ class EspressoMachine : public Component {
   void advance_flush_();
   void enter_brewing_();
   void safe_stop_all_();
+  // Transitions powered_on_ to false and publishes the state to the HA power
+  // switch (if wired).  Called from machine_off() and from the steam CLEANUP→IDLE
+  // transition when pending_power_off_ is set.
+  void set_powered_off_();
+  // Records partial shot stats (time, volume) for the current brew.
+  // Called from brew_stop() and machine_off() during an active brew.
+  void record_shot_stats_();
+  // Restores the heater setpoint to brew_target_temp_ after temperature surfing.
+  void restore_brew_heater_setpoint_();
   // Publishes the current detailed status string to the status text sensor (if wired).
   // Call immediately after every brew/steam/flush state transition.
   void publish_status_();

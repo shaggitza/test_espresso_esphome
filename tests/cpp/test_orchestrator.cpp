@@ -831,8 +831,8 @@ TEST(Power, MachineOffDuringSteamingInitiatesPurge) {
   EXPECT_TRUE(f.steam_purge_valve.open_state);
   EXPECT_FALSE(f.steam_valve.open_state);
   EXPECT_FALSE(f.steam_pump.running);
-  // Mode is still STEAMING (completing cooldown) but machine is marked off
-  EXPECT_FALSE(f.machine.is_powered_on());
+  // Power-off is deferred until cooldown completes: machine stays "on" during cooldown
+  EXPECT_TRUE(f.machine.is_powered_on());
 }
 
 TEST(Power, PurgeCompletesAfterMachineOffDuringSteaming) {
@@ -857,6 +857,7 @@ TEST(Power, MachineOffDuringHeatUpCancelsImmediately) {
   EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
   f.machine.machine_off();
   EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  // Heat-up cancel is immediate (no cooldown needed) → powered off now
   EXPECT_FALSE(f.machine.is_powered_on());
 }
 
@@ -2692,4 +2693,264 @@ TEST(IdleTimeout, TimerResetOnMachineOn) {
   g_mock_millis += 2;
   f.machine.loop();
   EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// ---------------------------------------------------------------------------
+// Bug fixes — power state desync, shot stats, heater setpoint restore
+//
+// These tests cover the bugs fixed in response to the issue:
+// "steam_start ignored: machine is off" while HA power switch shows ON.
+//
+// Bug 1: machine_off() during steaming deferred power-off (pending_power_off_)
+// Bug 2: brew_stop() records partial shot stats
+// Bug 3: brew_stop() restores heater setpoint after temperature surfing
+// Bug 4: machine_off() during brew records partial shot stats + restores setpoint
+// Bug 5: steam_stop() during COOLING/CLEANUP log message improved
+// Bug 6: power_switch_ syncs HA switch state on internal power-off
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Bug 1: Deferred power-off during steam cooldown
+// ---------------------------------------------------------------------------
+
+// After machine_off() during steaming, powered_on_ stays true during cooldown.
+TEST(BugFix, DeferredPowerOffDuringSteamCooldown) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+
+  f.machine.machine_off();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+  // Power-off is deferred: machine reports ON during cooldown
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  f.machine.loop();  // COOLING → CLEANUP
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  f.machine.loop();  // CLEANUP → IDLE — deferred power-off fires here
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// machine_on() during steam cooldown cancels the pending power-off.
+TEST(BugFix, MachineOnCancelsPendingPowerOff) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+
+  f.machine.machine_off();  // sets pending_power_off_ = true
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+
+  // User quickly turns machine back on — cancels pending off
+  f.machine.machine_on();
+
+  // Complete the cooldown
+  f.machine.loop();  // COOLING → CLEANUP
+  f.machine.loop();  // CLEANUP → IDLE
+
+  // Machine should remain ON because pending off was cancelled
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_TRUE(f.machine.is_powered_on());
+
+  // New operations should work
+  f.machine.brew_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+// machine_off() during HEATING cancels immediately and powers off.
+TEST(BugFix, MachineOffDuringHeatingPowersOffImmediately) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::HEATING);
+
+  f.machine.machine_off();
+  // HEATING cancel is immediate — no cooldown needed
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// machine_off() during COOLING (already cooling) defers power-off.
+TEST(BugFix, MachineOffDuringCoolingDefersPowerOff) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.steam_stop();  // STEAMING → COOLING
+  EXPECT_EQ(f.machine.get_steam_state(), SteamState::COOLING);
+
+  // Now machine_off() while already in COOLING
+  f.machine.machine_off();
+  EXPECT_TRUE(f.machine.is_powered_on());  // deferred
+
+  f.machine.loop();  // COOLING → CLEANUP
+  f.machine.loop();  // CLEANUP → IDLE — deferred off fires
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// ---------------------------------------------------------------------------
+// Bug 2: brew_stop() records partial shot stats
+// ---------------------------------------------------------------------------
+
+TEST(BugFix, BrewStopRecordsPartialShotStats) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  g_mock_millis = 15000;  // 15 seconds
+  f.brew_pump.volume = 25.0f;  // 25 ml extracted
+
+  f.machine.brew_stop();  // manual stop
+
+  EXPECT_NEAR(f.machine.get_last_shot_time_s(), 15.0f, 0.1f);
+  EXPECT_FLOAT_EQ(f.machine.get_last_shot_volume_ml(), 25.0f);
+  EXPECT_FLOAT_EQ(f.machine.get_last_shot_yield_ml(), 5.0f);  // 25 - 20 offset
+}
+
+TEST(BugFix, BrewStopRecordsStatsToSensors) {
+  OrchestratorFixture f;
+  esphome::sensor::Sensor time_sensor, volume_sensor, yield_sensor;
+  f.machine.set_last_shot_time_sensor(&time_sensor);
+  f.machine.set_last_shot_volume_sensor(&volume_sensor);
+  f.machine.set_last_shot_yield_sensor(&yield_sensor);
+
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  g_mock_millis = 10000;
+  f.brew_pump.volume = 30.0f;
+  f.machine.brew_stop();
+
+  EXPECT_NEAR(time_sensor.state, 10.0f, 0.5f);
+  EXPECT_FLOAT_EQ(volume_sensor.state, 30.0f);
+  EXPECT_FLOAT_EQ(yield_sensor.state, 10.0f);  // 30 - 20
+}
+
+// brew_stop() during HEATING (before BREWING) does not record stats.
+TEST(BugFix, BrewStopDuringHeatingDoesNotRecordStats) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  // Still in HEATING — no extraction has happened
+  EXPECT_EQ(f.machine.get_brew_state(), BrewState::HEATING);
+
+  f.machine.brew_stop();
+  EXPECT_FLOAT_EQ(f.machine.get_last_shot_time_s(), 0.0f);
+  EXPECT_FLOAT_EQ(f.machine.get_last_shot_volume_ml(), 0.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Bug 3: brew_stop() restores heater setpoint after temperature surfing
+// ---------------------------------------------------------------------------
+
+TEST(BugFix, BrewStopRestoresHeaterSetpointAfterTempSurfing) {
+  BrewHeaterFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+
+  f.brew_heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+  f.machine.loop();  // BREWING tick: surfing applies raised setpoint
+
+  // During surfing, setpoint is above brew_target_temp_
+  EXPECT_GT(f.brew_heater_ctrl.target_temp, 90.0f);
+
+  f.machine.brew_stop();  // manual stop
+  // Setpoint should be restored to brew_target_temp_
+  EXPECT_FLOAT_EQ(f.brew_heater_ctrl.target_temp, 90.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Bug 4: machine_off() during brew records stats + restores setpoint
+// ---------------------------------------------------------------------------
+
+TEST(BugFix, MachineOffDuringBrewRecordsPartialShotStats) {
+  OrchestratorOffFixture f;
+  f.machine.machine_on();
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  g_mock_millis = 12000;
+  f.brew_pump.volume = 20.0f;
+
+  f.machine.machine_off();
+
+  EXPECT_NEAR(f.machine.get_last_shot_time_s(), 12.0f, 0.1f);
+  EXPECT_FLOAT_EQ(f.machine.get_last_shot_volume_ml(), 20.0f);
+}
+
+TEST(BugFix, MachineOffDuringBrewRestoresHeaterSetpoint) {
+  BrewHeaterFixture f;
+  f.machine.set_brew_temp_offset(5.0f);
+  f.machine.set_brew_temp_ramp_time_ms(20000);
+
+  f.brew_heater_ctrl.current_temp = 90.0f;
+  f.machine.brew_start();
+  f.machine.loop();  // HEATING → BREWING
+
+  f.machine.machine_off();
+  EXPECT_FLOAT_EQ(f.brew_heater_ctrl.target_temp, 90.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Bug 6: power_switch_ syncs HA switch state on internal power-off
+// ---------------------------------------------------------------------------
+
+// Concrete switch stub for test — write_state just stores the state.
+struct TestSwitch : public esphome::switch_::Switch {
+ protected:
+  void write_state(bool state) override { publish_state(state); }
+};
+
+TEST(BugFix, PowerSwitchSyncedOnIdleAutoOff) {
+  IdleTimeoutFixture f;
+  TestSwitch power_sw;
+  power_sw.publish_state(true);  // initially ON
+  f.machine.set_power_switch(&power_sw);
+
+  EXPECT_TRUE(power_sw.state);
+
+  g_mock_millis = IdleTimeoutFixture::kTimeoutMs + 1;
+  f.machine.loop();  // idle auto-off fires
+
+  EXPECT_FALSE(f.machine.is_powered_on());
+  EXPECT_FALSE(power_sw.state);  // HA switch synced to OFF
+}
+
+TEST(BugFix, PowerSwitchSyncedAfterSteamCooldown) {
+  OrchestratorFixture f;
+  TestSwitch power_sw;
+  power_sw.publish_state(true);
+  f.machine.set_power_switch(&power_sw);
+
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.machine_off();  // deferred power-off
+
+  // During cooldown, switch stays ON
+  EXPECT_TRUE(power_sw.state);
+
+  f.machine.loop();  // COOLING → CLEANUP
+  EXPECT_TRUE(power_sw.state);
+
+  f.machine.loop();  // CLEANUP → IDLE — power-off fires
+  EXPECT_FALSE(power_sw.state);
+}
+
+TEST(BugFix, PowerSwitchNotSyncedWhenMachineOnCancelsPending) {
+  OrchestratorFixture f;
+  TestSwitch power_sw;
+  power_sw.publish_state(true);
+  f.machine.set_power_switch(&power_sw);
+
+  f.machine.steam_start();
+  f.machine.loop();  // HEATING → STEAMING
+  f.machine.machine_off();  // pending power-off
+
+  f.machine.machine_on();  // cancels pending off
+
+  f.machine.loop();  // COOLING → CLEANUP
+  f.machine.loop();  // CLEANUP → IDLE
+
+  // Machine stays on, switch stays on
+  EXPECT_TRUE(f.machine.is_powered_on());
+  EXPECT_TRUE(power_sw.state);
 }
