@@ -228,7 +228,8 @@ TEST(SprofilerRecording, BeginShotPreReservesCapacity) {
   g_mock_millis = 0;
   u.begin_shot();
   // Capacity should be pre-reserved so push_back doesn't reallocate during a shot.
-  EXPECT_GE(u.get_datapoints().capacity(), 300u);
+  EXPECT_GE(u.get_datapoints().capacity(),
+            SprofilerShotUpload::EXPECTED_DATAPOINTS_PER_SHOT);
 }
 
 // ===========================================================================
@@ -481,7 +482,7 @@ TEST(SprofilerLoop, LoopDoesNothingWhenNoPending) {
 
 TEST(SprofilerLoop, RetryBackoffPreventsImmediateRetry) {
   // When an upload fails, the loop should NOT retry on the very next tick.
-  // Instead it backs off (initially 5 s).
+  // Instead it backs off (initially UPLOAD_INITIAL_RETRY_MS).
   auto u = make_uploader();
   u.mock_http_status = 500;
   g_mock_millis = 1000;
@@ -504,7 +505,7 @@ TEST(SprofilerLoop, RetryBackoffPreventsImmediateRetry) {
   EXPECT_EQ(u.post_call_count, 1);  // still only 1 attempt
 
   // After the backoff interval elapses, retry should fire.
-  g_mock_millis += 5000;
+  g_mock_millis += SprofilerShotUpload::UPLOAD_INITIAL_RETRY_MS;
   u.loop();
   EXPECT_EQ(u.post_call_count, 2);  // second attempt
 }
@@ -524,7 +525,7 @@ TEST(SprofilerLoop, RetrySucceedsAfterBackoff) {
 
   // Server recovers.
   u.mock_http_status = 200;
-  g_mock_millis += 5000;
+  g_mock_millis += SprofilerShotUpload::UPLOAD_INITIAL_RETRY_MS;
   u.loop();  // retry — succeeds
   EXPECT_EQ(u.post_call_count, 2);
   EXPECT_FALSE(u.has_pending_upload());
@@ -539,8 +540,8 @@ TEST(SprofilerLoop, RetryAbandonedAfterMaxRetries) {
   u.add_datapoint(0.0f, 0.0f, 90.0f, 0.0f, 0.0f);
   u.end_shot(1000);
 
-  // Exhaust all retries (initial + 10 retries = 11 total attempts).
-  for (int i = 0; i < 11; i++) {
+  // Exhaust all retries (initial attempt + UPLOAD_MAX_RETRIES retries).
+  for (int i = 0; i < SprofilerShotUpload::UPLOAD_MAX_RETRIES + 1; i++) {
     g_mock_millis += 600000;  // well past any backoff interval
     u.loop();
   }

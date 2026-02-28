@@ -94,6 +94,12 @@ class SprofilerShotUpload : public Component {
   void setup() override;
   void loop() override;
 
+  // ----- Constants (used by tests) ------------------------------------------
+  static constexpr uint32_t UPLOAD_INITIAL_RETRY_MS = 5000;   // 5 s
+  static constexpr uint32_t UPLOAD_MAX_RETRY_MS = 300000;     // 5 min
+  static constexpr uint8_t  UPLOAD_MAX_RETRIES = 10;
+  static constexpr size_t EXPECTED_DATAPOINTS_PER_SHOT = 300;
+
  protected:
   // -- Configuration ---------------------------------------------------------
   std::string server_url_{"https://sprofiler.io"};
@@ -121,18 +127,12 @@ class SprofilerShotUpload : public Component {
   uint32_t last_upload_attempt_ms_{0};
   uint32_t upload_retry_interval_ms_{0};
   uint8_t upload_retry_count_{0};
-  static constexpr uint32_t UPLOAD_INITIAL_RETRY_MS = 5000;   // 5 s
-  static constexpr uint32_t UPLOAD_MAX_RETRY_MS = 300000;     // 5 min
-  static constexpr uint8_t  UPLOAD_MAX_RETRIES = 10;
 
   // -- Auto-recording state --------------------------------------------------
   bool was_brewing_{false};          // previous-tick brewing flag for edge detection
   uint32_t auto_record_start_ms_{0}; // millis() when auto-recording began
   uint32_t last_sample_ms_{0};       // millis() of last auto-sampled datapoint
   static constexpr uint32_t SAMPLE_INTERVAL_MS = 100;  // ~10 Hz
-  // Expected datapoints for a typical 30 s shot at 10 Hz.
-  // Used to pre-reserve the vector and avoid heap reallocations during recording.
-  static constexpr size_t EXPECTED_DATAPOINTS_PER_SHOT = 300;
 };
 
 }  // namespace espresso_machine_sprofiler

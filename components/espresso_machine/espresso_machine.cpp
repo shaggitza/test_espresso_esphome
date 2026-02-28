@@ -80,7 +80,7 @@ void EspressoMachine::loop() {
   // Throttle live status updates to avoid expensive string formatting and
   // heap allocation on every tick.  State transitions already call
   // publish_status_() directly for immediate feedback; this periodic call
-  // updates live sensor values (volume, temperature, flow) at ~4 Hz.
+  // updates live sensor values (volume, temperature, flow) at 4 Hz.
   {
     uint32_t now = millis();
     if (now - last_status_publish_ms_ >= STATUS_PUBLISH_INTERVAL_MS) {

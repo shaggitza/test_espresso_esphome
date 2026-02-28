@@ -250,6 +250,10 @@ class EspressoMachine : public Component {
   // ----- Safety query for grinder lockout -----------------------------------
   bool is_busy() const { return mode_ != EspressoMode::IDLE; }
 
+  // ----- Constants (used by tests) ------------------------------------------
+  // Throttle interval for live status updates in the main loop (ms).
+  static constexpr uint32_t STATUS_PUBLISH_INTERVAL_MS = 250;
+
  protected:
   // -- Mode / state ---------------------------------------------------------
   EspressoMode mode_{EspressoMode::IDLE};
@@ -321,12 +325,6 @@ class EspressoMachine : public Component {
   text_sensor::TextSensor *status_sensor_{nullptr};
   // Last string sent to the status sensor; used to suppress duplicate publishes.
   std::string last_published_status_;
-  // Throttle interval for live status updates in the main loop (ms).
-  // State transitions call publish_status_() directly for immediate feedback;
-  // the throttled call in loop() only updates live sensor values (e.g.
-  // "Brewing: 15.2 ml / 40.0 ml") at this cadence to avoid expensive string
-  // formatting and heap allocation on every tick.
-  static constexpr uint32_t STATUS_PUBLISH_INTERVAL_MS = 250;
   uint32_t last_status_publish_ms_{0};
 
   // -- Safety: over-temperature cutoff (P0-1 / P0-3) ------------------------

@@ -2212,12 +2212,12 @@ TEST(StatusSensor, UpdatesLiveAsFlowIncreases) {
   f.machine.loop();  // → BREWING
 
   f.brew_pump.volume = 10.0f;
-  g_mock_millis += 250;  // advance past status publish throttle interval
+  g_mock_millis += EspressoMachine::STATUS_PUBLISH_INTERVAL_MS;  // advance past throttle
   f.machine.loop();  // status should update
   EXPECT_EQ(sens.state, "Brewing: 10.0 ml / 40.0 ml");
 
   f.brew_pump.volume = 25.0f;
-  g_mock_millis += 250;
+  g_mock_millis += EspressoMachine::STATUS_PUBLISH_INTERVAL_MS;  // advance past throttle
   f.machine.loop();
   EXPECT_EQ(sens.state, "Brewing: 25.0 ml / 40.0 ml");
 }
@@ -2315,7 +2315,7 @@ TEST(StatusSensor, LiveUpdatesThrottledBetweenTransitions) {
   EXPECT_EQ(publish_count, baseline);  // no new publishes within throttle interval
 
   // After advancing past the throttle interval, the next loop() should publish.
-  g_mock_millis += 250;
+  g_mock_millis += EspressoMachine::STATUS_PUBLISH_INTERVAL_MS;
   f.brew_pump.volume = 20.0f;
   f.machine.loop();
   EXPECT_EQ(publish_count, baseline + 1);
