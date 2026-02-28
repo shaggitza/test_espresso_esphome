@@ -93,6 +93,11 @@ void EspressoMachine::loop() {
 // Power control
 // ---------------------------------------------------------------------------
 void EspressoMachine::machine_on() {
+  // Always clear a pending power-off request — the user wants the machine on.
+  // This must happen before the early return so that machine_on() during a
+  // steam cooldown (where powered_on_ is still true but pending_power_off_ is
+  // set) correctly cancels the deferred shutdown.
+  pending_power_off_ = false;
   if (powered_on_) {
     ESP_LOGD(TAG, "machine_on: already on");
     return;
@@ -108,16 +113,18 @@ void EspressoMachine::machine_off() {
     return;
   }
   ESP_LOGI(TAG, "Machine OFF");
-  powered_on_ = false;
 
   switch (mode_) {
     case EspressoMode::BREWING:
       // Stop brew immediately — it is safe to interrupt at any point.
       ESP_LOGI(TAG, "Machine OFF: stopping active brew");
+      record_shot_stats_();
+      restore_brew_heater_setpoint_();
       safe_stop_all_();
       brew_state_ = BrewState::IDLE;
       mode_ = EspressoMode::IDLE;
       idle_since_ms_ = millis();
+      set_powered_off_();
       publish_status_();
       break;
 
@@ -127,10 +134,15 @@ void EspressoMachine::machine_off() {
         // Initiate cool-down + purge before shutting down (safety: prevents steam burns
         // if the user turns the machine off while steam pressure is still present).
         ESP_LOGI(TAG, "Machine OFF: initiating steam cool-down + purge sequence");
+        // Defer powered_on_ = false until cooldown completes.  This prevents
+        // the HA power switch from showing ON while the machine reports "off",
+        // which would cause confusing "machine is off" rejections.
+        pending_power_off_ = true;
         steam_stop();  // enters COOLING (opens purge valve, lowers heater setpoint)
       } else {
         // Already in COOLING or CLEANUP — the state machine will reach IDLE on its own.
-        ESP_LOGI(TAG, "Machine OFF: steam purge already in progress — completing before shutdown");
+        ESP_LOGI(TAG, "Machine OFF: steam cool-down already in progress — completing before shutdown");
+        pending_power_off_ = true;
       }
       // Do NOT force mode_ = IDLE here; the state machine loop must complete the purge.
       break;
@@ -141,12 +153,14 @@ void EspressoMachine::machine_off() {
       safe_stop_all_();
       mode_ = EspressoMode::IDLE;
       idle_since_ms_ = millis();
+      set_powered_off_();
       publish_status_();
       break;
 
     case EspressoMode::IDLE:
     default:
       // Nothing active — machine hardware is already safe.
+      set_powered_off_();
       break;
   }
 }
@@ -216,6 +230,8 @@ void EspressoMachine::brew_stop() {
     return;
   }
   ESP_LOGI(TAG, "Brew STOP");
+  record_shot_stats_();
+  restore_brew_heater_setpoint_();
   safe_stop_all_();
   brew_state_ = BrewState::IDLE;
   mode_ = EspressoMode::IDLE;
@@ -272,11 +288,15 @@ void EspressoMachine::steam_stop() {
     steam_state_ = SteamState::IDLE;
     mode_ = EspressoMode::IDLE;
     idle_since_ms_ = millis();
+    // If machine_off() triggered this cancel, finalize the power-off now
+    // (no cooldown needed since steam valve was never opened).
+    if (pending_power_off_)
+      set_powered_off_();
     publish_status_();
     return;
   }
   if (steam_state_ != SteamState::STEAMING) {
-    ESP_LOGW(TAG, "steam_stop ignored: not in steaming state");
+    ESP_LOGW(TAG, "steam_stop ignored: cool-down already in progress");
     return;
   }
   ESP_LOGI(TAG, "Steam STOP — entering cool-down");
@@ -622,6 +642,11 @@ void EspressoMachine::advance_steam_() {
       steam_state_ = SteamState::IDLE;
       mode_ = EspressoMode::IDLE;
       idle_since_ms_ = millis();
+      // If machine_off() was called during the steam sequence, the actual
+      // power-off was deferred until the cooldown completed.  Apply it now.
+      if (pending_power_off_) {
+        set_powered_off_();
+      }
       publish_status_();
       break;
 
@@ -690,6 +715,42 @@ void EspressoMachine::safe_stop_all_() {
     steam_valve_->close();
   if (steam_purge_valve_)
     steam_purge_valve_->close();
+}
+
+void EspressoMachine::set_powered_off_() {
+  powered_on_ = false;
+  pending_power_off_ = false;
+  // Sync the HA power switch so the dashboard reflects the actual state.
+  // Without this, internal power-off events (idle auto-off, deferred off
+  // after steam cooldown) leave the HA switch showing ON while the machine
+  // is internally off, causing confusing "machine is off" rejections.
+  if (power_switch_)
+    power_switch_->publish_state(false);
+}
+
+void EspressoMachine::record_shot_stats_() {
+  // Only record if a brew shot was actually in progress (BREWING or later).
+  if (brew_state_ == BrewState::BREWING || brew_state_ == BrewState::DONE) {
+    last_shot_time_s_ = static_cast<float>(millis() - brew_shot_start_ms_) / 1000.0f;
+    last_shot_volume_ml_ = brew_pump_ ? brew_pump_->get_flow_total() : 0.0f;
+    ESP_LOGI(TAG, "Shot stats: volume=%.1fml  yield=%.1fml  time=%.1fs",
+             last_shot_volume_ml_, last_shot_volume_ml_ - brew_flow_offset_ml_,
+             last_shot_time_s_);
+    if (last_shot_time_sensor_ != nullptr)
+      last_shot_time_sensor_->publish_state(last_shot_time_s_);
+    if (last_shot_volume_sensor_ != nullptr)
+      last_shot_volume_sensor_->publish_state(last_shot_volume_ml_);
+    if (last_shot_yield_sensor_ != nullptr)
+      last_shot_yield_sensor_->publish_state(get_last_shot_yield_ml());
+  }
+}
+
+void EspressoMachine::restore_brew_heater_setpoint_() {
+  // After temperature surfing, the heater setpoint may have been ramped to a
+  // value different from brew_target_temp_.  Restore it so the PID returns to
+  // the correct idle setpoint after the shot is stopped or interrupted.
+  if (brew_heater_ctrl_ && brew_target_temp_ > 0.0f)
+    brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
 }
 
 // ---------------------------------------------------------------------------

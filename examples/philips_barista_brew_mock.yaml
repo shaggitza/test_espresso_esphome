@@ -455,6 +455,11 @@ espresso_machine:
   status_sensor:
     name: "Espresso Status"
 
+  # Power switch reference — keeps the HA switch in sync when the machine
+  # powers itself off internally (idle auto-off, deferred off after steam
+  # cooldown).
+  power_switch: machine_power
+
   # Auto power-off when idle for this duration.  Default: 30 min.
   # Set to 0 to disable.  Adjustable only via YAML (not at runtime from HA).
   idle_timeout: 30min

@@ -52,6 +52,9 @@ CONF_SHOT_YIELD_SENSOR = "last_shot_yield"
 # Status text sensor key
 CONF_STATUS_SENSOR = "status_sensor"
 
+# Power switch key
+CONF_POWER_SWITCH = "power_switch"
+
 # Idle auto-off timeout key
 CONF_IDLE_TIMEOUT = "idle_timeout"
 
@@ -163,6 +166,12 @@ CONFIG_SCHEMA = cv.Schema(
         # every state transition (e.g. "Brew: Heating", "Brewing", "Steam: Cooling").
         # More informative than the template machine-mode sensor.
         cv.Optional(CONF_STATUS_SENSOR): text_sensor.text_sensor_schema(),
+        # Optional reference to the HA power switch entity.  When wired the
+        # orchestrator publishes power state changes so the switch stays in sync
+        # after internal power-off events (idle auto-off, deferred off after
+        # steam cooldown).  Without this, the HA switch can show ON while the
+        # machine is internally off.
+        cv.Optional(CONF_POWER_SWITCH): cv.use_id(switch.Switch),
         # Auto power-off when idle for this duration.  Default: 30 min.  Set to
         # 0 to disable.  Adjustable only via YAML (not at runtime from HA).
         cv.Optional(CONF_IDLE_TIMEOUT, default="30min"): cv.positive_time_period_milliseconds,
@@ -177,6 +186,10 @@ async def to_code(config):
     if CONF_STATUS_SENSOR in config:
         sens = await text_sensor.new_text_sensor(config[CONF_STATUS_SENSOR])
         cg.add(var.set_status_sensor(sens))
+
+    if CONF_POWER_SWITCH in config:
+        sw = await cg.get_variable(config[CONF_POWER_SWITCH])
+        cg.add(var.set_power_switch(sw))
 
     cg.add(var.set_idle_timeout_ms(config[CONF_IDLE_TIMEOUT]))
 
