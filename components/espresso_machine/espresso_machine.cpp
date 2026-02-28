@@ -104,6 +104,11 @@ void EspressoMachine::machine_on() {
   }
   powered_on_ = true;
   idle_since_ms_ = millis();
+  // Re-enable the heater (it is force_off'd on machine_off).
+  // set_target_temperature() also re-activates HEAT mode so a previous
+  // force_off() does not leave the PID climate in OFF mode indefinitely.
+  if (brew_heater_ctrl_ && brew_target_temp_ > 0.0f)
+    brew_heater_ctrl_->set_target_temperature(brew_target_temp_);
   ESP_LOGI(TAG, "Machine ON");
 }
 
@@ -719,6 +724,15 @@ void EspressoMachine::safe_stop_all_() {
 void EspressoMachine::set_powered_off_() {
   powered_on_ = false;
   pending_power_off_ = false;
+  // Turn off the heater so it does not continue maintaining temperature after
+  // the machine is powered down (idle auto-off, explicit machine_off, etc.).
+  // force_off() sets the PID climate to OFF mode, stopping all heat output.
+  // set_target_temperature() in machine_on() will restore HEAT mode on next
+  // power-on, so the heater is ready again as soon as the machine is on.
+  if (brew_heater_ctrl_)
+    brew_heater_ctrl_->force_off();
+  if (steam_heater_ctrl_ && steam_heater_ctrl_ != brew_heater_ctrl_)
+    steam_heater_ctrl_->force_off();
   // Sync the HA power switch so the dashboard reflects the actual state.
   // Without this, internal power-off events (idle auto-off, deferred off
   // after steam cooldown) leave the HA switch showing ON while the machine
