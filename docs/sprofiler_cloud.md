@@ -274,7 +274,7 @@ ShotProfiles.com, Sprofiler).
 |---|---|---|---|
 | `id` | string | Yes | Unique identifier for the profile |
 | `name` | string | Yes | Human-readable profile name |
-| `waterTemperature` | number | Yes | Brew temperature in °C (applies to all phases) |
+| `waterTemperature` | number | Yes | Brew temperature in °C (applies globally to all phases; per-phase temperature is not currently supported in the schema but is planned for future Gaggiuino firmware versions) |
 | `description` | string | No | Freeform description |
 | `author` | string | No | Profile creator's name/handle |
 | `created_at` | string | No | ISO 8601 timestamp |
@@ -306,7 +306,7 @@ Each phase controls one aspect of the extraction (pressure, flow, fill):
 |---|---|---|---|
 | `type` | enum | Yes | Phase control mode: `"fill"`, `"pressure"`, `"flow"`, `"wait"` |
 | `value` | number | Yes | Target value (bar for pressure, ml/s for flow) |
-| `duration` | number | Yes | Phase duration in milliseconds |
+| `duration` | number | Yes | Phase duration in **milliseconds** (e.g., `3000` = 3 seconds, `30000` = 30 seconds) |
 | `name` | string | No | Human-readable phase label |
 | `restriction` | object | No | End condition (weight, pressure, flow threshold) |
 | `restriction.targetWeight` | number | No | Stop phase when scale reads this weight (grams) |
@@ -461,7 +461,7 @@ Shot data uploaded to Sprofiler follows the Gaggiuino telemetry format:
 
 | Aspect | Details |
 |---|---|
-| **Sample rate** | ~10 Hz (100ms intervals) typical |
+| **Sample rate** | ~10 Hz (100ms intervals) — observed Gaggiuino behavior; our implementation should target the same rate for Sprofiler compatibility, but this is not a hard API requirement |
 | **Upload timing** | After shot completion (not real-time) |
 | **Upload method** | Single HTTP POST with full shot JSON |
 | **Payload size** | ~5–50 KB per shot (depending on duration and sample rate) |
@@ -724,7 +724,10 @@ Multi-point curves would need to be approximated as multiple discrete phases.
 ```cpp
 void upload_shot_to_sprofiler(const ShotRecord& shot) {
   // Build Gaggiuino-format JSON
-  DynamicJsonDocument doc(8192);  // ~8KB for typical shot
+  // Size buffer based on shot duration: ~60 bytes per datapoint
+  // 25s shot @ 10Hz = 250 datapoints ≈ 15KB; 60s shot ≈ 36KB
+  size_t buf_size = 2048 + (shot.datapoints.size() * 64);
+  DynamicJsonDocument doc(buf_size);
   doc["id"] = shot.id;
   doc["timestamp"] = shot.start_time;
   doc["duration"] = shot.duration_ms;
@@ -766,18 +769,21 @@ void upload_shot_to_sprofiler(const ShotRecord& shot) {
 | Concern | Assessment |
 |---|---|
 | Shot JSON size | ~5–50 KB depending on duration (25s shot ≈ 250 datapoints ≈ 15 KB) |
-| JSON building | Need ~16 KB heap for DynamicJsonDocument |
+| JSON building | Dynamic buffer: `2KB + (datapoints × 64B)` — typically 15–40 KB |
 | HTTP upload | Single POST, no persistent connection needed |
 | TLS overhead | ~15–20 KB for HTTPS handshake |
-| Total peak RAM | ~40–70 KB during upload (can be released immediately after) |
+| **Total peak RAM** | **~40–70 KB during upload** (transient — freed immediately after POST completes) |
+| **Persistent RAM** | **~5 KB** (HTTP client, config, state — always allocated when Sprofiler is enabled) |
 
 ### Retry Strategy
 
 If upload fails (network error, server error):
-1. Store shot locally (LittleFS or SPIFFS)
-2. Retry on next connectivity window
-3. Queue up to 10 failed uploads
-4. Discard oldest if queue exceeds limit
+1. Store shot JSON to LittleFS (not RAM — files on flash).
+2. Retry on next connectivity window (exponential backoff).
+3. Queue up to 5 failed uploads (~250 KB max flash usage, well within ESP32's
+   typical 1.5 MB LittleFS partition). Shots are stored as individual files
+   and deleted after successful upload.
+4. Discard oldest if queue exceeds 5 to bound flash usage.
 
 ---
 
@@ -1061,7 +1067,9 @@ features (e.g., per-phase temperature, advanced flow curves).
 
 ### 5. ESP32 Memory Pressure
 
-**Risk: LOW.** The Sprofiler integration adds ~25 KB RAM (without BLE).
+**Risk: LOW.** The Sprofiler integration adds ~25 KB persistent RAM (without
+BLE), plus ~40–70 KB transient peak during shot uploads (freed immediately
+after each POST completes).
 
 **Mitigation:**
 - Make Sprofiler integration opt-in (compile flag or runtime config).
