@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
@@ -52,9 +53,12 @@ class Grinder : public button::Button, public Component {
 
   // Read-back accessors used by the display component.
   uint32_t get_current_grind_time_ms() const {
-    return grind_time_number_
-               ? static_cast<uint32_t>(grind_time_number_->state)
-               : default_grind_time_ms_;
+    if (grind_time_number_ != nullptr &&
+        !std::isnan(grind_time_number_->state) &&
+        grind_time_number_->state > 0.0f) {
+      return static_cast<uint32_t>(grind_time_number_->state);
+    }
+    return default_grind_time_ms_;
   }
   GrinderTimeNumber *get_grind_time_number() const { return grind_time_number_; }
 

@@ -152,6 +152,7 @@ class EspressoMachineDisplay : public Component {
   bool needs_redraw_{true};
   uint32_t last_input_ms_{0};
   bool screensaver_active_{false};
+  uint32_t last_live_refresh_ms_{0};  // periodic refresh on active-mode screens
 
   // ── Encoder state ─────────────────────────────────────────────────────────
   float last_encoder_val_{0.0f};

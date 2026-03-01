@@ -762,9 +762,9 @@ espresso_machine:
 #   ENC_A, ENC_B, ENC_SW  — must be GPIO0–33 (INPUT_PULLUP support needed)
 #   CS, CLK, MOSI (SID)   — any free GPIO (display-only, no pull needed)
 #
-# Fonts: copy DejaVuSansMono.ttf from components/espresso_machine_display/fonts/
-#   into your ESPHome config directory and reference it below, OR download it from
-#   the DejaVu Fonts project (https://dejavu-fonts.github.io/).
+# Fonts: DejaVuSansMono.ttf is committed at components/espresso_machine_display/fonts/.
+#   Reference it with a path relative to this file (../components/...) or copy it
+#   into your ESPHome config directory and reference it as "DejaVuSansMono.ttf".
 # =============================================================================
 
 # ── Rotary encoder (EXP1 — must be GPIO0–33) ─────────────────────────────────
@@ -805,12 +805,12 @@ espresso_machine:
 #     clk_pin: GPIO17           # ← CHANGE ME — EXP2 SCK (do NOT use GPIO14 = purge valve)
 #     mosi_pin: GPIO13          # ← CHANGE ME — EXP2 SID/MOSI
 #
-# ── Fonts (commit DejaVuSansMono.ttf from components/espresso_machine_display/fonts/) ──
+# ── Fonts — DejaVuSansMono.ttf is committed in components/espresso_machine_display/fonts/
 # font:
-#   - file: "DejaVuSansMono.ttf"   # copy from components/espresso_machine_display/fonts/
+#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
 #     id: font_small
 #     size: 8
-#   - file: "DejaVuSansMono.ttf"
+#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
 #     id: font_large
 #     size: 16
 #

@@ -1,6 +1,7 @@
 #include "display_ui.h"
 #include <cstdio>
 #include <cstring>
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -89,12 +90,11 @@ void EspressoMachineDisplay::loop() {
   }
 
   // On live-data screens refresh every 500 ms even without user input.
-  static uint32_t last_refresh_ms = 0;
   bool live_screen = (screen_ == Screen::HOME &&
                       machine_ != nullptr &&
                       machine_->get_mode() != espresso_machine::EspressoMode::IDLE);
-  if (live_screen && millis() - last_refresh_ms > 500) {
-    last_refresh_ms = millis();
+  if (live_screen && millis() - last_live_refresh_ms_ > 500) {
+    last_live_refresh_ms_ = millis();
     needs_redraw_ = true;
   }
 
@@ -1232,12 +1232,16 @@ const char *EspressoMachineDisplay::active_marker_() const {
 // ============================================================================
 
 float EspressoMachineDisplay::brew_elapsed_s_() const {
-  if (!was_brewing_) return 0.0f;
+  if (machine_ == nullptr ||
+      machine_->get_mode() != espresso_machine::EspressoMode::BREWING)
+    return 0.0f;
   return static_cast<float>(millis() - brew_start_ms_) / 1000.0f;
 }
 
 float EspressoMachineDisplay::steam_elapsed_s_() const {
-  if (!was_steaming_) return 0.0f;
+  if (machine_ == nullptr ||
+      machine_->get_mode() != espresso_machine::EspressoMode::STEAMING)
+    return 0.0f;
   return static_cast<float>(millis() - steam_start_ms_) / 1000.0f;
 }
 

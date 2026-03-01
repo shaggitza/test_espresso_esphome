@@ -168,7 +168,9 @@ binary_sensor:
       - delayed_on: 10ms
 
 # -----------------------------------------------------------------------------
-# Fonts — commit DejaVuSansMono.ttf in components/espresso_machine_display/fonts/
+# Fonts — DejaVuSansMono.ttf is committed in components/espresso_machine_display/fonts/
+# and referenced here with a relative path so ESPHome can locate it during
+# schema validation and compilation without requiring a network connection.
 # -----------------------------------------------------------------------------
 font:
   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
