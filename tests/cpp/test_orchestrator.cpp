@@ -3039,3 +3039,250 @@ TEST(BugFix, PowerSwitchNotSyncedWhenMachineOnCancelsPending) {
   EXPECT_TRUE(f.machine.is_powered_on());
   EXPECT_TRUE(power_sw.state);
 }
+
+// ---------------------------------------------------------------------------
+// Descale state machine
+// ---------------------------------------------------------------------------
+TEST(Descale, DescaleStartEntersDescalingMode) {
+  OrchestratorFixture f;
+  f.machine.set_descale_cycles(3);
+  f.machine.set_descale_pump_time_ms(30000);
+  f.machine.set_descale_soak_time_ms(30000);
+  f.machine.descale_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::DESCALING);
+  EXPECT_STREQ(f.machine.mode_name(), "descaling");
+}
+
+TEST(Descale, DescaleStartOpensPurgeValveAndRunsPump) {
+  OrchestratorFixture f;
+  f.machine.descale_start();
+  EXPECT_TRUE(f.purge_valve.open_state);
+  EXPECT_TRUE(f.brew_pump.running);
+}
+
+TEST(Descale, DescaleStartIgnoredWhenMachineOff) {
+  OrchestratorFixture f;
+  f.machine.machine_off();
+  f.machine.descale_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Descale, DescaleStartIgnoredWhenBrewing) {
+  OrchestratorFixture f;
+  f.machine.brew_start();
+  f.machine.descale_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BREWING);
+}
+
+TEST(Descale, DescaleStopReturnsToIdle) {
+  OrchestratorFixture f;
+  f.machine.descale_start();
+  f.machine.descale_stop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.purge_valve.open_state);
+}
+
+TEST(Descale, DescaleStopIgnoredWhenIdle) {
+  OrchestratorFixture f;
+  f.machine.descale_stop();  // should not crash
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Descale, DescalePumpingTransitionsToSoaking) {
+  OrchestratorFixture f;
+  f.machine.set_descale_pump_time_ms(1000);
+  f.machine.set_descale_soak_time_ms(500);
+  f.machine.set_descale_cycles(1);
+  f.machine.descale_start();
+  EXPECT_EQ(f.machine.get_descale_state(), DescaleState::PUMPING);
+  EXPECT_TRUE(f.brew_pump.running);
+
+  g_mock_millis += 1001;
+  f.machine.loop();  // PUMPING → SOAKING
+  EXPECT_EQ(f.machine.get_descale_state(), DescaleState::SOAKING);
+  EXPECT_FALSE(f.brew_pump.running);
+}
+
+TEST(Descale, DescaleSoakingTransitionsToPumpingForNextCycle) {
+  OrchestratorFixture f;
+  f.machine.set_descale_pump_time_ms(100);
+  f.machine.set_descale_soak_time_ms(100);
+  f.machine.set_descale_cycles(2);
+  f.machine.descale_start();
+
+  g_mock_millis += 101;
+  f.machine.loop();  // PUMPING → SOAKING (cycle 1)
+  EXPECT_EQ(f.machine.get_descale_state(), DescaleState::SOAKING);
+
+  g_mock_millis += 101;
+  f.machine.loop();  // SOAKING → PUMPING (cycle 2)
+  EXPECT_EQ(f.machine.get_descale_state(), DescaleState::PUMPING);
+  EXPECT_TRUE(f.brew_pump.running);
+}
+
+TEST(Descale, DescaleCompletesAfterAllCycles) {
+  OrchestratorFixture f;
+  f.machine.set_descale_pump_time_ms(100);
+  f.machine.set_descale_soak_time_ms(100);
+  f.machine.set_descale_cycles(2);
+  f.machine.descale_start();
+
+  // Cycle 1
+  g_mock_millis += 101;
+  f.machine.loop();  // PUMPING → SOAKING
+  g_mock_millis += 101;
+  f.machine.loop();  // SOAKING → PUMPING (cycle 2)
+  // Cycle 2
+  g_mock_millis += 101;
+  f.machine.loop();  // PUMPING → SOAKING
+  g_mock_millis += 101;
+  f.machine.loop();  // SOAKING → DONE
+  EXPECT_EQ(f.machine.get_descale_state(), DescaleState::DONE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.purge_valve.open_state);
+
+  f.machine.loop();  // DONE → IDLE
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Descale, MachineOffDuringDescaleStops) {
+  OrchestratorFixture f;
+  f.machine.descale_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::DESCALING);
+  f.machine.machine_off();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+// ---------------------------------------------------------------------------
+// Backflush state machine
+// ---------------------------------------------------------------------------
+TEST(Backflush, BackflushStartEntersBackflushingMode) {
+  OrchestratorFixture f;
+  f.machine.set_backflush_cycles(5);
+  f.machine.set_backflush_pressurize_time_ms(10000);
+  f.machine.set_backflush_release_time_ms(10000);
+  f.machine.backflush_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BACKFLUSHING);
+  EXPECT_STREQ(f.machine.mode_name(), "backflushing");
+}
+
+TEST(Backflush, BackflushStartOpensBrewValveAndRunsPump) {
+  OrchestratorFixture f;
+  f.machine.backflush_start();
+  EXPECT_TRUE(f.brew_valve.open_state);
+  EXPECT_TRUE(f.brew_pump.running);
+}
+
+TEST(Backflush, BackflushStartIgnoredWhenMachineOff) {
+  OrchestratorFixture f;
+  f.machine.machine_off();
+  f.machine.backflush_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Backflush, BackflushStartIgnoredWhenSteaming) {
+  OrchestratorFixture f;
+  f.machine.steam_start();
+  f.machine.backflush_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::STEAMING);
+}
+
+TEST(Backflush, BackflushStopReturnsToIdle) {
+  OrchestratorFixture f;
+  f.machine.backflush_start();
+  f.machine.backflush_stop();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+}
+
+TEST(Backflush, BackflushStopIgnoredWhenIdle) {
+  OrchestratorFixture f;
+  f.machine.backflush_stop();  // should not crash
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Backflush, BackflushPressurizingTransitionsToReleasing) {
+  OrchestratorFixture f;
+  f.machine.set_backflush_pressurize_time_ms(500);
+  f.machine.set_backflush_release_time_ms(500);
+  f.machine.set_backflush_cycles(1);
+  f.machine.backflush_start();
+  EXPECT_EQ(f.machine.get_backflush_state(), BackflushState::PRESSURIZING);
+  EXPECT_TRUE(f.brew_pump.running);
+  EXPECT_TRUE(f.brew_valve.open_state);
+
+  g_mock_millis += 501;
+  f.machine.loop();  // PRESSURIZING → RELEASING
+  EXPECT_EQ(f.machine.get_backflush_state(), BackflushState::RELEASING);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+}
+
+TEST(Backflush, BackflushReleasingTransitionsToPressurizingForNextCycle) {
+  OrchestratorFixture f;
+  f.machine.set_backflush_pressurize_time_ms(100);
+  f.machine.set_backflush_release_time_ms(100);
+  f.machine.set_backflush_cycles(2);
+  f.machine.backflush_start();
+
+  g_mock_millis += 101;
+  f.machine.loop();  // PRESSURIZING → RELEASING (cycle 1)
+  EXPECT_EQ(f.machine.get_backflush_state(), BackflushState::RELEASING);
+
+  g_mock_millis += 101;
+  f.machine.loop();  // RELEASING → PRESSURIZING (cycle 2)
+  EXPECT_EQ(f.machine.get_backflush_state(), BackflushState::PRESSURIZING);
+  EXPECT_TRUE(f.brew_pump.running);
+  EXPECT_TRUE(f.brew_valve.open_state);
+}
+
+TEST(Backflush, BackflushCompletesAfterAllCycles) {
+  OrchestratorFixture f;
+  f.machine.set_backflush_pressurize_time_ms(100);
+  f.machine.set_backflush_release_time_ms(100);
+  f.machine.set_backflush_cycles(2);
+  f.machine.backflush_start();
+
+  // Cycle 1
+  g_mock_millis += 101;
+  f.machine.loop();  // PRESSURIZING → RELEASING
+  g_mock_millis += 101;
+  f.machine.loop();  // RELEASING → PRESSURIZING (cycle 2)
+  // Cycle 2
+  g_mock_millis += 101;
+  f.machine.loop();  // PRESSURIZING → RELEASING
+  g_mock_millis += 101;
+  f.machine.loop();  // RELEASING → DONE
+  EXPECT_EQ(f.machine.get_backflush_state(), BackflushState::DONE);
+  EXPECT_FALSE(f.brew_pump.running);
+  EXPECT_FALSE(f.brew_valve.open_state);
+
+  f.machine.loop();  // DONE → IDLE
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+}
+
+TEST(Backflush, MachineOffDuringBackflushStops) {
+  OrchestratorFixture f;
+  f.machine.backflush_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BACKFLUSHING);
+  f.machine.machine_off();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::IDLE);
+  EXPECT_FALSE(f.machine.is_powered_on());
+}
+
+TEST(Backflush, CannotStartDescaleWhileBackflushing) {
+  OrchestratorFixture f;
+  f.machine.backflush_start();
+  f.machine.descale_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::BACKFLUSHING);
+}
+
+TEST(Descale, CannotStartBackflushWhileDescaling) {
+  OrchestratorFixture f;
+  f.machine.descale_start();
+  f.machine.backflush_start();
+  EXPECT_EQ(f.machine.get_mode(), EspressoMode::DESCALING);
+}

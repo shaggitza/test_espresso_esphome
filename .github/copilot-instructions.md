@@ -139,6 +139,14 @@ espresso_machine:
     timeout: 5min          # optional safety auto-stop
     # NOTE: pump_min_on_time is set on the espresso_machine_pump: entity (see above),
     #       not here in the steam section.
+  descale:
+    cycles: 3              # number of pump-on / soak cycles
+    pump_time: 30s         # how long to pump descaling solution per cycle
+    soak_time: 30s         # how long to soak between cycles
+  backflush:
+    cycles: 5              # number of pressurize / release cycles (blind filter required)
+    pressurize_time: 10s   # how long to pump per cycle (builds back-pressure)
+    release_time: 10s      # how long to release per cycle (3-way solenoid expels residue)
 ```
 
 ## Current Development Phase

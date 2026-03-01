@@ -698,6 +698,56 @@ espresso_machine:
     #       volume_ml: 10ml
     #   - espresso_machine_valve.close: purge_valve
 
+  # ---------------------------------------------------------------------------
+  # Descale routine — automated descale cycle (citric acid / descaling solution)
+  # State machine: idle → pumping → soaking → pumping → soaking → ... → done → idle
+  #
+  # HOW TO USE:
+  #   1. Remove and install a blind filter in the portafilter basket (optional,
+  #      to keep descaling solution confined to the brew path).
+  #   2. Fill the water tank with descaling solution (follow your descaler's
+  #      dilution instructions — typically 1 sachet / 500 ml of water).
+  #   3. Press the "Descale Start" button in Home Assistant.
+  #   4. The machine runs N pump-on → soak cycles automatically.  The
+  #      status_sensor shows progress ("Descaling: pumping (cycle 1/3)").
+  #   5. When complete, empty the drip tray, refill with fresh water, and
+  #      run 2–3 manual flush cycles (espresso_machine.flush: 200ml) or
+  #      press "Descale Start" again with fresh water.
+  #
+  # Uses brew_pump and brew_purge_valve — no additional hardware required.
+  # Trigger via the "Descale Start" template button below, or from an
+  # HA automation:  service: esphome.philips_barista_brew_descale_start
+  # ---------------------------------------------------------------------------
+  descale:
+    cycles: 3              # number of pump-on / soak cycles
+    pump_time: 30s         # how long to pump per cycle
+    soak_time: 30s         # how long to soak between cycles
+
+  # ---------------------------------------------------------------------------
+  # Backflush routine — automated backflush cleaning (group head / shower screen)
+  # State machine: idle → pressurizing → releasing → pressurizing → ... → done → idle
+  #
+  # HOW TO USE:
+  #   1. Remove the standard portafilter basket and install a blind filter
+  #      (a solid disc with no holes — required for backflushing).
+  #   2. Optionally add one dose of backflush detergent (e.g. Cafiza, Puly Caff)
+  #      to the blind filter basket.
+  #   3. Press the "Backflush Start" button in Home Assistant.
+  #   4. The machine runs N pressurize → release cycles automatically.  The
+  #      status_sensor shows progress ("Backflush: pressurizing (cycle 1/5)").
+  #   5. Remove the portafilter, rinse it, reinstall without detergent, and
+  #      run 3–5 additional cycles with fresh water to flush out residues.
+  #
+  # Requires a 3-way solenoid brew valve (standard on most semi-auto machines).
+  # Uses brew_pump and brew_valve — no additional hardware required.
+  # Trigger via the "Backflush Start" template button below, or from an
+  # HA automation:  service: esphome.philips_barista_brew_backflush_start
+  # ---------------------------------------------------------------------------
+  backflush:
+    cycles: 5              # number of pressurize / release cycles
+    pressurize_time: 10s   # how long to pump (build back-pressure) per cycle
+    release_time: 10s      # how long to release (depressurise) per cycle
+
 # =============================================================================
 # DISPLAY (optional) — native ESPHome SSD1306 via I2C
 # Comment out this entire block if you do not have a display attached.
@@ -798,6 +848,33 @@ button:
     name: "Steam Stop"
     on_press:
       - lambda: id(my_espresso).steam_stop();
+
+  # ---------------------------------------------------------------------------
+  # Maintenance — descale and backflush
+  # See the descale: and backflush: blocks inside espresso_machine: above for
+  # cycle timing configuration.
+  # ---------------------------------------------------------------------------
+  - platform: template
+    name: "Descale Start"
+    on_press:
+      - espresso_machine.descale_start:
+          id: my_espresso
+
+  - platform: template
+    name: "Descale Stop"
+    on_press:
+      - lambda: id(my_espresso).descale_stop();
+
+  - platform: template
+    name: "Backflush Start"
+    on_press:
+      - espresso_machine.backflush_start:
+          id: my_espresso
+
+  - platform: template
+    name: "Backflush Stop"
+    on_press:
+      - lambda: id(my_espresso).backflush_stop();
 
 # =============================================================================
 # NUMBER ENTITIES — adjustable parameters exposed to HA

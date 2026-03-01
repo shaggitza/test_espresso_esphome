@@ -12,10 +12,14 @@ EspressoMachine = espresso_machine_ns.class_("EspressoMachine", cg.Component)
 BrewFlowMaxNumber = espresso_machine_ns.class_("BrewFlowMaxNumber", number.Number)
 TempSurfSwitch = espresso_machine_ns.class_("TempSurfSwitch", switch.Switch)
 FlushAction = espresso_machine_ns.class_("FlushAction", automation.Action)
+DescaleStartAction = espresso_machine_ns.class_("DescaleStartAction", automation.Action)
+BackflushStartAction = espresso_machine_ns.class_("BackflushStartAction", automation.Action)
 
 # Keys for brew sub-schema
 CONF_BREW = "brew"
 CONF_STEAM = "steam"
+CONF_DESCALE = "descale"
+CONF_BACKFLUSH = "backflush"
 CONF_HEATER = "heater"
 CONF_HEATER_CTRL = "heater_controller"
 CONF_PUMP = "pump"
@@ -30,6 +34,16 @@ CONF_TEMPERATURE_COOLDOWN = "temperature_cooldown"
 CONF_PURGE_VOLUME = "purge_volume"
 CONF_STEAM_TIMEOUT = "timeout"
 CONF_FLUSH_VOLUME = "volume_ml"
+
+# Descale sub-schema keys
+CONF_DESCALE_CYCLES = "cycles"
+CONF_DESCALE_PUMP_TIME = "pump_time"
+CONF_DESCALE_SOAK_TIME = "soak_time"
+
+# Backflush sub-schema keys
+CONF_BACKFLUSH_CYCLES = "cycles"
+CONF_BACKFLUSH_PRESSURIZE_TIME = "pressurize_time"
+CONF_BACKFLUSH_RELEASE_TIME = "release_time"
 
 # Temperature-surfing sub-schema keys
 CONF_TEMPERATURE_PROFILE = "temperature_profile"
@@ -157,11 +171,45 @@ STEAM_SCHEMA = cv.Schema(
     }
 )
 
+DESCALE_SCHEMA = cv.Schema(
+    {
+        # Number of pump-on / soak cycles (default 3).
+        cv.Optional(CONF_DESCALE_CYCLES, default=3): cv.positive_int,
+        # How long the pump runs during each cycle (default 30 s).
+        cv.Optional(CONF_DESCALE_PUMP_TIME, default="30s"): cv.positive_time_period_milliseconds,
+        # How long to soak between pumping cycles (default 30 s).
+        cv.Optional(CONF_DESCALE_SOAK_TIME, default="30s"): cv.positive_time_period_milliseconds,
+    }
+)
+
+BACKFLUSH_SCHEMA = cv.Schema(
+    {
+        # Number of pressurize / release cycles (default 5).
+        cv.Optional(CONF_BACKFLUSH_CYCLES, default=5): cv.positive_int,
+        # How long the pump pressurizes per cycle (default 10 s).
+        cv.Optional(CONF_BACKFLUSH_PRESSURIZE_TIME, default="10s"): (
+            cv.positive_time_period_milliseconds
+        ),
+        # How long the pressure is released per cycle (default 10 s).
+        cv.Optional(CONF_BACKFLUSH_RELEASE_TIME, default="10s"): (
+            cv.positive_time_period_milliseconds
+        ),
+    }
+)
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(EspressoMachine),
         cv.Optional(CONF_BREW): BREW_SCHEMA,
         cv.Optional(CONF_STEAM): STEAM_SCHEMA,
+        # Descale routine: fill tank with descaling solution, then trigger from HA.
+        # Uses the brew pump and purge valve (no additional hardware needed).
+        # Trigger with the espresso_machine.descale_start action.
+        cv.Optional(CONF_DESCALE): DESCALE_SCHEMA,
+        # Backflush routine: install blind filter and optionally add backflush detergent.
+        # Uses the brew pump and brew valve (3-way solenoid required).
+        # Trigger with the espresso_machine.backflush_start action.
+        cv.Optional(CONF_BACKFLUSH): BACKFLUSH_SCHEMA,
         # Optional text sensor that reports a detailed status string to HA on
         # every state transition (e.g. "Brew: Heating", "Brewing", "Steam: Cooling").
         # More informative than the template machine-mode sensor.
@@ -286,6 +334,18 @@ async def to_code(config):
         if CONF_STEAM_TIMEOUT in steam:
             cg.add(var.set_steam_timeout_ms(steam[CONF_STEAM_TIMEOUT]))
 
+    if CONF_DESCALE in config:
+        descale = config[CONF_DESCALE]
+        cg.add(var.set_descale_cycles(descale[CONF_DESCALE_CYCLES]))
+        cg.add(var.set_descale_pump_time_ms(descale[CONF_DESCALE_PUMP_TIME]))
+        cg.add(var.set_descale_soak_time_ms(descale[CONF_DESCALE_SOAK_TIME]))
+
+    if CONF_BACKFLUSH in config:
+        backflush = config[CONF_BACKFLUSH]
+        cg.add(var.set_backflush_cycles(backflush[CONF_BACKFLUSH_CYCLES]))
+        cg.add(var.set_backflush_pressurize_time_ms(backflush[CONF_BACKFLUSH_PRESSURIZE_TIME]))
+        cg.add(var.set_backflush_release_time_ms(backflush[CONF_BACKFLUSH_RELEASE_TIME]))
+
 
 # ---------------------------------------------------------------------------
 # espresso_machine.flush action (P2-2)
@@ -308,4 +368,46 @@ async def flush_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     cg.add(var.set_volume_ml(config[CONF_FLUSH_VOLUME]))
+    return var
+
+
+# ---------------------------------------------------------------------------
+# espresso_machine.descale_start action
+# Usage in YAML:
+#   - espresso_machine.descale_start:
+#       id: my_espresso
+# ---------------------------------------------------------------------------
+@automation.register_action(
+    "espresso_machine.descale_start",
+    DescaleStartAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(EspressoMachine),
+        }
+    ),
+)
+async def descale_start_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+# ---------------------------------------------------------------------------
+# espresso_machine.backflush_start action
+# Usage in YAML:
+#   - espresso_machine.backflush_start:
+#       id: my_espresso
+# ---------------------------------------------------------------------------
+@automation.register_action(
+    "espresso_machine.backflush_start",
+    BackflushStartAction,
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.use_id(EspressoMachine),
+        }
+    ),
+)
+async def backflush_start_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
     return var

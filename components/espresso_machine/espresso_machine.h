@@ -42,13 +42,35 @@ enum class SteamState : uint8_t {
 };
 
 // ---------------------------------------------------------------------------
+// Descale state machine
+// ---------------------------------------------------------------------------
+enum class DescaleState : uint8_t {
+  IDLE = 0,
+  PUMPING = 1,  // pump running through purge path for pump_time_ms
+  SOAKING = 2,  // pump off; descaling solution soaking for soak_time_ms
+  DONE = 3,     // all cycles complete; returning to idle
+};
+
+// ---------------------------------------------------------------------------
+// Backflush state machine
+// ---------------------------------------------------------------------------
+enum class BackflushState : uint8_t {
+  IDLE = 0,
+  PRESSURIZING = 1,  // pump on, brew valve open — building back-pressure
+  RELEASING = 2,     // pump off — 3-way solenoid releases pressure through purge port
+  DONE = 3,          // all cycles complete; returning to idle
+};
+
+// ---------------------------------------------------------------------------
 // Top-level mode (used for grinder lockout, display, HA sensor)
 // ---------------------------------------------------------------------------
 enum class EspressoMode : uint8_t {
   IDLE = 0,
   BREWING = 1,
   STEAMING = 2,
-  FLUSHING = 3,  // P2-2: maintenance flush (pump N ml through purge valve)
+  FLUSHING = 3,    // P2-2: maintenance flush (pump N ml through purge valve)
+  DESCALING = 4,   // automated descale cycle (citric acid / descaler solution)
+  BACKFLUSHING = 5,  // backflush cleaning cycle (blind filter + brew valve)
 };
 
 // ---------------------------------------------------------------------------
@@ -193,6 +215,21 @@ class EspressoMachine : public Component {
   // rejections on brew_start / steam_start.
   void set_power_switch(switch_::Switch *sw) { power_switch_ = sw; }
 
+  // ----- Descale configuration setters -------------------------------------
+  // Automated descale routine: N cycles of pump-on (pump_time) → soak (soak_time)
+  // through the brew purge valve.  Uses brew hardware (brew_pump_, brew_purge_valve_).
+  void set_descale_cycles(uint8_t cycles) { descale_cycles_ = cycles; }
+  void set_descale_pump_time_ms(uint32_t ms) { descale_pump_time_ms_ = ms; }
+  void set_descale_soak_time_ms(uint32_t ms) { descale_soak_time_ms_ = ms; }
+
+  // ----- Backflush configuration setters -----------------------------------
+  // Automated backflush routine: N cycles of pressurize (brew valve open, pump on)
+  // → release (pump off, valve closed — 3-way solenoid expels residue through purge port).
+  // Requires a 3-way solenoid brew valve; uses brew_pump_ and brew_valve_.
+  void set_backflush_cycles(uint8_t cycles) { backflush_cycles_ = cycles; }
+  void set_backflush_pressurize_time_ms(uint32_t ms) { backflush_pressurize_time_ms_ = ms; }
+  void set_backflush_release_time_ms(uint32_t ms) { backflush_release_time_ms_ = ms; }
+
   // ----- Public actions (callable from YAML / HA automations) --------------
   void brew_start();
   void brew_stop();
@@ -201,6 +238,14 @@ class EspressoMachine : public Component {
   // Flush: pump `volume_ml` ml through the brew purge valve (P2-2).
   // Useful for group-head rinsing between shots. Only accepted when IDLE.
   void flush(float volume_ml);
+  // Descale: run automated descale cycle.  Fill tank with descaling solution first.
+  // Only accepted when IDLE.  Stop early with descale_stop().
+  void descale_start();
+  void descale_stop();
+  // Backflush: run automated backflush cleaning cycle.  Install blind filter first.
+  // Only accepted when IDLE.  Stop early with backflush_stop().
+  void backflush_start();
+  void backflush_stop();
 
   // ----- Status accessors ---------------------------------------------------
   EspressoMode get_mode() const { return mode_; }
@@ -215,6 +260,8 @@ class EspressoMachine : public Component {
   std::string status_name() const;
   BrewState get_brew_state() const { return brew_state_; }
   SteamState get_steam_state() const { return steam_state_; }
+  DescaleState get_descale_state() const { return descale_state_; }
+  BackflushState get_backflush_state() const { return backflush_state_; }
 
   // ----- Shot stats (available after each completed shot) ------------------
   float get_last_shot_time_s() const { return last_shot_time_s_; }
@@ -267,6 +314,8 @@ class EspressoMachine : public Component {
   EspressoMode mode_{EspressoMode::IDLE};
   BrewState brew_state_{BrewState::IDLE};
   SteamState steam_state_{SteamState::IDLE};
+  DescaleState descale_state_{DescaleState::IDLE};
+  BackflushState backflush_state_{BackflushState::IDLE};
 
   // -- Power state -----------------------------------------------------------
   // Defaults to false (off) on boot for safety. Call machine_on() to enable.
@@ -360,6 +409,18 @@ class EspressoMachine : public Component {
   // -- Flush state (P2-2) ---------------------------------------------------
   float flush_volume_ml_{0.0f};   // target volume for current maintenance flush
 
+  // -- Descale config and state --------------------------------------------
+  uint8_t descale_cycles_{3};              // number of pump-on/soak cycles
+  uint32_t descale_pump_time_ms_{30000};   // ms to pump per cycle (default 30 s)
+  uint32_t descale_soak_time_ms_{30000};   // ms to soak between cycles (default 30 s)
+  uint8_t descale_cycle_{0};               // current cycle counter (0-based)
+
+  // -- Backflush config and state ------------------------------------------
+  uint8_t backflush_cycles_{5};                // number of pressurize/release cycles
+  uint32_t backflush_pressurize_time_ms_{10000};  // ms to pressurize per cycle (default 10 s)
+  uint32_t backflush_release_time_ms_{10000};     // ms to release per cycle (default 10 s)
+  uint8_t backflush_cycle_{0};                    // current cycle counter (0-based)
+
   // -- Cleanup callbacks (P2-1) ---------------------------------------------
   std::function<void()> brew_cleanup_fn_;   // invoked in brew DONE→CLEANUP
   std::function<void()> steam_cleanup_fn_;  // invoked in steam CLEANUP
@@ -368,6 +429,8 @@ class EspressoMachine : public Component {
   void advance_brew_();
   void advance_steam_();
   void advance_flush_();
+  void advance_descale_();
+  void advance_backflush_();
   void enter_brewing_();
   void safe_stop_all_();
   // Transitions powered_on_ to false and publishes the state to the HA power
@@ -406,6 +469,38 @@ class FlushAction : public Action<Ts...> {
   void set_parent(EspressoMachine *parent) { parent_ = parent; }
   TEMPLATABLE_VALUE(float, volume_ml)
   void play(Ts... x) override { this->parent_->flush(this->volume_ml_.value(x...)); }
+
+ private:
+  EspressoMachine *parent_{nullptr};
+};
+
+// ---------------------------------------------------------------------------
+// DescaleStartAction — starts the automated descale routine.
+// Usage in YAML:
+//   - espresso_machine.descale_start:
+//       id: my_espresso
+// ---------------------------------------------------------------------------
+template<typename... Ts>
+class DescaleStartAction : public Action<Ts...> {
+ public:
+  void set_parent(EspressoMachine *parent) { parent_ = parent; }
+  void play(Ts... x) override { this->parent_->descale_start(); }
+
+ private:
+  EspressoMachine *parent_{nullptr};
+};
+
+// ---------------------------------------------------------------------------
+// BackflushStartAction — starts the automated backflush cleaning routine.
+// Usage in YAML:
+//   - espresso_machine.backflush_start:
+//       id: my_espresso
+// ---------------------------------------------------------------------------
+template<typename... Ts>
+class BackflushStartAction : public Action<Ts...> {
+ public:
+  void set_parent(EspressoMachine *parent) { parent_ = parent; }
+  void play(Ts... x) override { this->parent_->backflush_start(); }
 
  private:
   EspressoMachine *parent_{nullptr};
