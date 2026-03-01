@@ -5,6 +5,15 @@
 > implementation plan for a 128×64 graphic LCD (recovered from a Creality 3D printer)
 > controlled by a rotary encoder with a push-click button.  Review and approve this
 > design before any C++ or YAML work begins.
+>
+> **Updated design goals (v2):**
+> - The home screen is an **action hub** — Brew, Steam, Grind, and Power are reachable
+>   with a single click, without entering any sub-menu.
+> - Each ESPHome component publishes its own display actions; the display component
+>   collects them automatically when components are referenced by `id:`.
+> - A **theme** system lets the user pick a visual style in one YAML line.
+> - The YAML API is designed to be as concise as possible:
+>   `espresso_machine: my_espresso` + `theme: classic` is sufficient for a working UI.
 
 ---
 
@@ -105,151 +114,185 @@ screen, small font everywhere else.
 ## 3. Screen Map
 
 ```
-                     ┌──────────────────────────────┐
-                     │     STATUS SCREEN (home)     │ ← boot default
-                     └──────────────┬───────────────┘
-                              (click)
-                                    ▼
-                     ┌──────────────────────────────┐
-                     │         MAIN MENU            │
-                     └──┬────┬────┬────┬────────────┘
-                         │    │    │    │
-                   Brew Steam Grnd Settings
-                         │    │    │    │
-             ┌───────────┘    │    │    └──────────────────────┐
-             ▼                │    │                            ▼
-    ┌─────────────────┐       │    │               ┌──────────────────────┐
-    │   BREW MENU     │       │    │               │   SETTINGS MENU      │
-    │ • Start Brew    │       │    │               │ Brew Temp            │
-    │   Brew Temp     │       │    │               │ Steam Temp           │
-    │   Flow Max      │       │    │               │ Flow Max             │
-    │   Pre-infusion  │       │    │               │ Flow Offset          │
-    │   Temp Surfing  │       │    │               │ Grind Time           │
-    │   Cooldown      │       │    │               │ Pre-infusion         │
-    └────────┬────────┘       │    │               │ Temp Surfing         │
-             │                │    │               │ Temp Cooldown        │
-     (Start Brew click)       │    │               │ Idle Timeout         │
-             ▼                │    │               │ SSR Period           │
-    ┌─────────────────┐       │    │               │ Maintenance ──►      │
-    │  BREW PROGRESS  │       │    │               └──────────────────────┘
-    │  (live screen)  │       │    │
-    └─────────────────┘       │    │
-                              │    │
-                    ┌─────────┘    └──────────────────────┐
-                    ▼                                       ▼
-         ┌────────────────────┐               ┌────────────────────────┐
-         │   STEAM MENU       │               │   GRINDER MENU         │
-         │ • Start Steam      │               │ • Grind Now            │
-         │   Steam Temp       │               │   Grind Time           │
-         │   Cool Down To     │               └────────────────────────┘
-         │   Purge Volume     │
-         │   Flow Rate        │
-         │   Timeout          │
-         └─────────┬──────────┘
-                   │
-         (Start Steam click)
-                   ▼
-         ┌────────────────────┐
-         │  STEAM PROGRESS    │
-         │  (live screen)     │
-         └────────────────────┘
+ ┌──────────────────────────────────────────────────────────────────┐
+ │             HOME SCREEN  (boot default — action hub)             │
+ │                                                                  │
+ │  Top bar:  live temperature + mode name                          │
+ │  Body:     rotary-navigable quick-action list                    │
+ │            ▶ Brew  /  Steam  /  Grind  /  Settings  /  Power    │
+ │  All primary actions reachable with ONE click here               │
+ └──────┬────────────┬─────────────┬────────────┬───────────────────┘
+ (Brew) │            │ (Steam)     │ (Grind)    │ (Settings)
+        ▼            ▼             ▼            ▼
+ ┌────────────┐ ┌────────────┐ ┌──────────┐ ┌──────────────────────┐
+ │ BREW MENU  │ │ STEAM MENU │ │ GRINDER  │ │   SETTINGS MENU      │
+ │ Confirm +  │ │ Confirm +  │ │   MENU   │ │ All parameters in    │
+ │ params     │ │ params     │ │ (params) │ │ one scrollable list  │
+ └─────┬──────┘ └─────┬──────┘ └────┬─────┘ │ Maintenance ──►      │
+       │              │              │       └──────────────────────┘
+       ▼              ▼              ▼
+ ┌────────────┐ ┌────────────┐ ┌──────────┐
+ │    BREW    │ │   STEAM    │ │  GRIND   │
+ │  PROGRESS  │ │  PROGRESS  │ │ PROGRESS │
+ │ (live)     │ │ (live)     │ │ (bar)    │
+ └────────────┘ └────────────┘ └──────────┘
 ```
+
+> **Key principle:** every primary action (Brew, Steam, Grind, Power toggle) is
+> reachable from the Home Screen by rotating to the action and clicking once.
+> Sub-menus are for parameter tuning, not for starting operations.
+> There is no separate "Main Menu" screen — the Home Screen *is* the main menu.
 
 ---
 
 ## 4. Screen Definitions
 
-### 4.1 Status Screen (Home)
+### 4.1 Home Screen (Action Hub)
 
 **Trigger:** Boot default; returned to after any operation completes.
 
-**Layout (128×64):**
+The Home Screen has two modes: **idle** and **active**.  In idle mode it doubles as the
+main command centre — all primary actions are reachable directly without entering a
+sub-menu.  In active mode it automatically switches to a live progress view for the
+running operation.
+
+---
+
+#### 4.1a — Idle Mode (action hub)
 
 ```
 ┌────────────────────────┐
-│ IDLE  │ T: 89.5°C      │  ← line 0: mode | current temp (large area)
-│                        │
-│   89.5 / 90.0 °C       │  ← lines 1–3: big live temperature display
-│                        │
-│ Vol: --.- ml           │  ← line 5: shot volume (or last shot value)
-│ Wi-Fi: ████ (-65 dBm)  │  ← line 6: Wi-Fi strength (bars)
-│ [click to open menu]   │  ← line 7: hint (dimmed)
+│ IDLE       89.5/90.0°C │  ← line 0: mode name + current/target temp (inverted)
+│ Vol:  --.- ml          │  ← line 1: last shot volume (or "--" if none)
+│▶☕ Brew                │  ← line 2: quick action #1 (cursor here on boot)
+│ ♨ Steam               │  ← line 3: quick action #2
+│ ⚙ Grind               │  ← line 4: quick action #3
+│ ≡ Settings             │  ← line 5: opens Settings Menu
+│ ──────────────────     │  ← line 6: separator
+│ ⏻ Power OFF            │  ← line 7: machine power toggle
 └────────────────────────┘
 ```
 
-**Mode strings** (shown top-left):
+**Interaction:**
+- Rotate moves the cursor (▶) between lines 2–7.
+- Short click on **Brew** → Brew Menu (with confirm + params).
+- Short click on **Steam** → Steam Menu (with confirm + params).
+- Short click on **Grind** → Grinder Menu (with confirm + params).
+- Short click on **Settings** → Settings Menu.
+- Short click on **Power OFF/ON** → toggles `machine_power` immediately (no confirm).
+- Long press from anywhere on the Home Screen → no-op (already home; optional beep).
+
+> No separate "Main Menu" screen exists.  The Home Screen *is* the main menu.
+
+---
+
+#### 4.1b — Active: Brew in Progress
+
+When a brew (or pre-infusion or heating) is active, the Home Screen body changes to
+show live brew data.  Rotating and clicking still work.
+
+```
+┌────────────────────────┐
+│ BREWING    89.5/90.0°C │  ← inverted; mode label updates through all brew states
+│ 22.4 ml / 40.0 ml      │  ← current volume / target volume (large)
+│ Time: 0:23             │  ← elapsed brew time
+│ Rate: 1.8 ml/s         │  ← 3 s average flow rate
+│ ──────────────────     │
+│▶■ Stop Brew            │  ← action list shrinks to relevant items only
+│ ≡ Settings             │
+│                        │
+└────────────────────────┘
+```
+
+State labels cycle through: `HEAT ☕` → `PRE ☕` → `BREWING` → `CLEANUP ☕`.
+
+---
+
+#### 4.1c — Active: Steam in Progress
+
+```
+┌────────────────────────┐
+│ STEAMING   134.2/135°C │
+│ Time: 1:42             │
+│ Rate: 2.1 ml/s         │
+│ Timeout: 3:18 left     │
+│ ──────────────────     │
+│▶■ Stop Steam           │
+│ ≡ Settings             │
+│                        │
+└────────────────────────┘
+```
+
+State labels cycle: `HEAT ♨` → `PURGE ♨` → `STEAMING ♨` → `COOL ♨` → `DONE`.
+
+---
+
+#### 4.1d — Active: Grind in Progress
+
+```
+┌────────────────────────┐
+│ GRINDING               │
+│ [████████░░░░░░░░░░░░] │  ← progress bar
+│   3.2 s / 7.0 s        │
+│                        │
+│ ──────────────────     │
+│▶■ Stop Grind           │
+│                        │
+│                        │
+└────────────────────────┘
+```
+
+---
+
+**Mode strings** (shown in title bar top-left):
 
 | Internal state | Display |
 |---|---|
 | Machine OFF | `OFF` |
 | Idle | `IDLE` |
 | Brew: Heating | `HEAT ☕` |
-| Brewing | `BREW ☕` |
 | Brew: Pre-infusion | `PRE ☕` |
+| Brewing | `BREWING` |
+| Brew: Cleanup | `CLEANUP ☕` |
 | Steam: Heating | `HEAT ♨` |
 | Steam: Purging | `PURGE ♨` |
-| Steaming | `STEAM ♨` |
+| Steaming | `STEAMING ♨` |
 | Steam: Cooling | `COOL ♨` |
 | Flushing | `FLUSH` |
+| Grinding | `GRINDING ⚙` |
 
-**During active brew or steam** the status screen auto-updates (no need to navigate
-to a progress screen); the user can still click to enter the menu while active.
+> The temperature suffix (`89.5/90.0°C`) is appended by the render function, not part of
+> the mode string itself.  Mode strings are short fixed labels; the render function adds
+> live sensor data alongside them in the title bar.
 
----
-
-### 4.2 Main Menu
-
-**Trigger:** Short click from Status Screen.
-
-```
-┌────────────────────────┐
-│ ■ MAIN MENU            │  ← inverted title
-│▶  Brew                 │
-│   Steam                │
-│   Grinder              │
-│   Settings             │
-│   Power OFF            │
-│                        │
-│ [long-press = back]    │
-└────────────────────────┘
-```
-
-Items:
-
-| Item | Action |
-|---|---|
-| **Brew** | Enter Brew Menu |
-| **Steam** | Enter Steam Menu |
-| **Grinder** | Enter Grinder Menu |
-| **Settings** | Enter Settings Menu |
-| **Power OFF / ON** | Toggle `machine_power` switch (label flips with state) |
-
-**Behaviour:** Rotating scrolls the cursor; clicking enters the selected item.
-Long-press returns to Status Screen.
 
 ---
 
-### 4.3 Brew Menu
+### 4.2 Brew Menu
 
-**Trigger:** Select "Brew" from Main Menu.
+> **Note:** There is no separate "Main Menu" screen.  The Home Screen (§ 4.1) acts as
+> the main menu.  Brew, Steam, Grind, Settings, and Power are all reachable with a
+> single click from the Home Screen.  The Brew Menu below is the parameter/confirm
+> screen reached by clicking "Brew" on the Home Screen.
+
+**Trigger:** Click "Brew" on the Home Screen.
 
 ```
 ┌────────────────────────┐
-│ ■ BREW                 │
-│▶● Start Brew           │  ← ● when already brewing
-│   Stop Brew            │  ← visible only when brew is active
+│ ■ BREW                 │  ← inverted title
+│▶  ☕ Start Brew        │  ← primary action at top
 │   Brew Temp  90.0 °C   │
 │   Flow Max   40.0 ml   │
 │   Pre-infusion  ──►    │
 │   Temp Surfing  ON     │
 │   Cooldown      OFF    │
+│ [long-press = home]    │
 └────────────────────────┘
 ```
 
 | Item | Editable | Range | Unit | Maps to |
 |---|---|---|---|---|
-| **Start Brew** | — | — | — | `espresso_machine.brew_start` |
-| **Stop Brew** | — | — | — | `espresso_machine.brew_stop` (shown only while brewing) |
+| **Start Brew** | — | — | — | `espresso_machine.brew_start` (confirm dialog) |
 | **Brew Temp** | ✅ | 70 – 100 | °C | PID setpoint via `IHeater::set_target_temperature()` |
 | **Flow Max** | ✅ | 10 – 100 | ml | `flow_max_number` entity |
 | **Pre-infusion** | — | — | — | → Pre-infusion sub-menu |
@@ -258,12 +301,15 @@ Long-press returns to Status Screen.
 
 **"Start Brew" behaviour:**
 1. Confirm dialog: `Start brew? ▶ YES  NO`
-2. If YES → calls `brew_start()` and transitions to Brew Progress screen.
+2. If YES → calls `brew_start()` and Home Screen switches to Brew-Active mode (§ 4.1b).
 3. If machine is OFF, show error: `Machine is OFF`.
+
+Long-press returns to Home Screen.
+
 
 ---
 
-### 4.3.1 Pre-infusion Sub-menu
+### 4.3 Pre-infusion Sub-menu
 
 ```
 ┌────────────────────────┐
@@ -286,40 +332,31 @@ Long-press returns to Status Screen.
 
 ---
 
-### 4.4 Brew Progress Screen
+### 4.4 Brew Progress (inline on Home Screen)
 
-**Trigger:** Automatically shown when brew starts.
-**Returns:** Automatically on brew complete; or long-press to return without stopping.
+> Brew progress is displayed **in-place on the Home Screen** (§ 4.1b) — there is no
+> separate navigation step.  When a brew starts, the Home Screen body instantly
+> switches to the progress layout below; when the brew finishes it returns to idle layout.
 
-```
-┌────────────────────────┐
-│ ■ BREWING              │  ← inverted; state changes to PRE-INFUSION etc.
-│                        │
-│    22.4 / 40.0 ml      │  ← large font: current / target volume
-│                        │
-│ T: 89.5 / 90.0 °C      │
-│ Time: 0:23             │
-│ Rate: 1.8 ml/s         │
-│ [click=stop]           │
-└────────────────────────┘
-```
+**Layout:** see § 4.1b for the full wireframe.
 
-**Fields:**
+**Data fields:**
 
 | Field | Source |
 |---|---|
-| Volume (big) | `brew_flow.total_volume()` / `flow_max_number` |
+| Volume | `brew_flow.total_volume()` / `flow_max_number` |
 | Temperature | `thermoblock_temp` / PID setpoint |
-| Elapsed time | `last_shot_time_s` running counter |
-| Flow rate | `brew_flow.rate()` (3 s average) |
+| Elapsed time | Running counter since `brew_start()` |
+| Flow rate | `brew_flow.rate()` (3 s rolling average) |
 
 **Short click** while brewing → confirm dialog `Stop brew? ▶ YES  NO`.
+Long-press → return to Home Screen idle layout **without stopping** the brew.
 
 ---
 
 ### 4.5 Steam Menu
 
-**Trigger:** Select "Steam" from Main Menu.
+**Trigger:** Click "Steam" on the Home Screen.
 
 ```
 ┌────────────────────────┐
@@ -346,31 +383,25 @@ Long-press returns to Status Screen.
 
 ---
 
-### 4.6 Steam Progress Screen
+### 4.6 Steam Progress (inline on Home Screen)
 
-**Trigger:** Automatically shown when steam starts.
+> Steam progress is displayed **in-place on the Home Screen** (§ 4.1c) — no separate
+> navigation required.  The Home Screen body switches to steam progress on `steam_start()`
+> and reverts to idle on completion or stop.
 
-```
-┌────────────────────────┐
-│ ■ STEAMING ♨           │
-│                        │
-│     134.2 / 135.0 °C   │  ← large font: current / target temp
-│                        │
-│ Time: 1:42             │
-│ Rate: 2.1 ml/s         │
-│ Timeout: 3:18 left     │
-│ [click=stop]           │
-└────────────────────────┘
-```
+**Layout:** see § 4.1c for the full wireframe.
 
-State label on title bar changes through: `HEATING ♨` → `PURGING ♨` → `STEAMING ♨`
-→ `COOLING ♨` → `DONE`.
+State label on title bar changes through: `HEAT ♨` → `PURGE ♨` → `STEAMING ♨`
+→ `COOL ♨` → `DONE`.
+
+**Short click** while steaming → confirm dialog `Stop steam? ▶ YES  NO`.
+Long-press → return to Home Screen idle layout **without stopping** the steam.
 
 ---
 
 ### 4.7 Grinder Menu
 
-**Trigger:** Select "Grinder" from Main Menu.
+**Trigger:** Click "Grind" on the Home Screen.
 
 ```
 ┌────────────────────────┐
@@ -392,26 +423,14 @@ State label on title bar changes through: `HEATING ♨` → `PURGING ♨` → `S
 
 **"Grind Now" confirmation:** `Start grind? ▶ YES  NO`.
 
-During an active grind a simple progress bar is shown:
-
-```
-┌────────────────────────┐
-│ ■ GRINDING             │
-│                        │
-│ [████████░░░░░░░░░░░░] │
-│   3.2 s / 7.0 s        │
-│                        │
-│ [click=stop]           │
-│                        │
-│                        │
-└────────────────────────┘
-```
+During an active grind, the Home Screen body (§ 4.1d) shows a progress bar
+with elapsed/total time and a "Stop Grind" action.  No separate navigation is needed.
 
 ---
 
 ### 4.8 Settings Menu
 
-**Trigger:** Select "Settings" from Main Menu.
+**Trigger:** Click "Settings" on the Home Screen.
 
 ```
 ┌────────────────────────┐
@@ -461,7 +480,7 @@ Full item table:
 
 ### 4.9 Maintenance Sub-menu
 
-**Trigger:** Select "Maintenance" from Settings Menu.
+**Trigger:** Select "Maintenance ──►" from the Settings Menu.
 
 ```
 ┌────────────────────────┐
@@ -578,111 +597,239 @@ or steam_start while brewing), a non-blocking error overlay shows for 2 s:
 ## 5. Screen Flow Summary
 
 ```
-Boot → Status Screen
-         ↕ (click)
-       Main Menu
-       ├── Brew Menu
-       │     ├── Start Brew → Brew Progress
-       │     ├── (Stop Brew)
-       │     ├── Brew Temp [edit]
-       │     ├── Flow Max [edit]
-       │     ├── Pre-infusion sub-menu
-       │     │     ├── Enabled [toggle]
-       │     │     ├── Volume [edit]
-       │     │     └── Hold Time [edit]
-       │     ├── Temp Surfing [toggle]
-       │     └── Cooldown [toggle]
-       ├── Steam Menu
-       │     ├── Start Steam → Steam Progress
-       │     ├── (Stop Steam)
-       │     ├── Steam Temp [edit]
-       │     ├── Cool Down To [edit]
-       │     ├── Purge Volume [edit]
-       │     ├── Flow Rate [edit]
-       │     └── Timeout [edit]
-       ├── Grinder Menu
-       │     ├── Grind Now → Grind Progress
-       │     └── Grind Time [edit]
-       ├── Settings Menu
-       │     ├── Brew Temp [edit]
-       │     ├── Steam Temp [edit]
-       │     ├── Flow Max [edit]
-       │     ├── Flow Offset [edit]
-       │     ├── Grind Time [edit]
-       │     ├── Pre-infusion sub-menu (shared)
-       │     ├── Temp Surfing [toggle]
-       │     ├── Temp Cooldown [toggle]
-       │     ├── Idle Timeout [edit]
-       │     ├── SSR Period [edit]
-       │     └── Maintenance sub-menu
-       │           ├── Flush N ml [confirm → run]
-       │           ├── Flush Volume [edit]
-       │           ├── Restart ESP [confirm]
-       │           └── PID Autotune [confirm]
-       └── Power OFF/ON [toggle, no confirm]
+Boot → Home Screen  (action hub — idle mode)
+       ├── ☕ Brew  ──────────► Brew Menu (§ 4.2)
+       │                         ├── Start Brew [confirm] → Home Screen brew-active (§ 4.1b)
+       │                         ├── Brew Temp [edit]
+       │                         ├── Flow Max [edit]
+       │                         ├── Pre-infusion sub-menu (§ 4.3)
+       │                         │     ├── Enabled [toggle]
+       │                         │     ├── Volume [edit]
+       │                         │     └── Hold Time [edit]
+       │                         ├── Temp Surfing [toggle]
+       │                         └── Cooldown [toggle]
+       │
+       ├── ♨ Steam ──────────► Steam Menu (§ 4.5)
+       │                         ├── Start Steam [confirm] → Home Screen steam-active (§ 4.1c)
+       │                         ├── Steam Temp [edit]
+       │                         ├── Cool Down To [edit]
+       │                         ├── Purge Volume [edit]
+       │                         ├── Flow Rate [edit]
+       │                         └── Timeout [edit]
+       │
+       ├── ⚙ Grind ──────────► Grinder Menu (§ 4.7)
+       │                         ├── Grind Now [confirm] → Home Screen grind-active (§ 4.1d)
+       │                         └── Grind Time [edit]
+       │
+       ├── ≡ Settings ────────► Settings Menu (§ 4.8)
+       │                         ├── Brew Temp [edit]
+       │                         ├── Steam Temp [edit]
+       │                         ├── Flow Max [edit]
+       │                         ├── Flow Offset [edit]
+       │                         ├── Grind Time [edit]
+       │                         ├── Pre-infusion sub-menu (shared, § 4.3)
+       │                         ├── Temp Surfing [toggle]
+       │                         ├── Temp Cooldown [toggle]
+       │                         ├── Idle Timeout [edit]
+       │                         ├── SSR Period [edit]
+       │                         └── Maintenance sub-menu (§ 4.9)
+       │                               ├── Flush N ml [confirm → run]
+       │                               ├── Flush Volume [edit]
+       │                               ├── Restart ESP [confirm]
+       │                               └── PID Autotune [confirm]
+       │
+       └── ⏻ Power OFF/ON ──── [toggle immediately, no confirm]
+```
+
+> **Legend:**  `[edit]` = number-edit mode (§ 4.10);  `[toggle]` = ON/OFF mode (§ 4.11);
+> `[confirm]` = confirmation dialog (§ 4.12).  Long-press from any sub-menu returns to
+> the Home Screen.
+
+---
+
+## 6. YAML API Design
+
+> This section describes the **declarative YAML configuration** for the display component.
+> No code is written yet — this is the interface contract that the implementation must satisfy.
+
+---
+
+### 6.1 Design Goals
+
+The YAML API must satisfy three goals in order of priority:
+
+1. **Minimal viable config** — a user with a single espresso machine and this display
+   should need to write as little YAML as possible.
+2. **Component-aware** — if an optional component (grinder, heater adapter, flow meter)
+   is referenced, its actions and data automatically appear in the UI; if omitted,
+   the UI adapts silently.
+3. **Themeable** — visual style is a one-word choice, not a custom layout lambda.
+
+---
+
+### 6.2 Minimal Configuration (recommended starting point)
+
+```yaml
+# ── Hardware (native ESPHome entities — declare once, referenced below by id:) ──────────────
+sensor:
+  - platform: rotary_encoder
+    id: rotary_enc
+    pin_a: GPIO32          # ENC_A — must be GPIO0–33
+    pin_b: GPIO33          # ENC_B — must be GPIO0–33
+    resolution: 1          # 1 step per detent; set to 2 or 4 for different EC11 batches
+
+binary_sensor:
+  - platform: gpio
+    id: enc_button
+    pin:
+      number: GPIO16       # ENC_SW — must be GPIO0–33 for INPUT_PULLUP
+      mode: INPUT_PULLUP   # GPIO34–39 do NOT support pull-ups; avoid them here
+      inverted: true
+    filters:
+      - delayed_on: 10ms
+
+display:
+  - platform: st7920_spi
+    id: lcd
+    cs_pin:  GPIO15        # EXP2 CS
+    sid_pin: GPIO13        # EXP2 SID/MOSI
+    clk_pin: GPIO17        # EXP2 SCK — do NOT use GPIO14 (purge valve, see examples/philips_barista_brew.yaml)
+    lambda: |-
+      id(my_display_ui).render(it);
+
+# ── Espresso Machine Display — the single config block that wires everything ─────────────────
+espresso_machine_display:
+  id: my_display_ui
+  espresso_machine: my_espresso    # ← id: of the espresso_machine orchestrator
+  theme: classic                   # ← visual style (see § 6.4)
+```
+
+**That is the full config for a functional UI.** The component auto-discovers the
+display (`lcd`), encoder (`rotary_enc`), and button (`enc_button`) entities by type if
+there is exactly one of each in the YAML.  When multiple displays or encoders exist,
+explicit `display_id:`, `encoder_id:`, and `button_id:` keys are required (see § 6.3).
+
+---
+
+### 6.3 Full Configuration Reference
+
+```yaml
+espresso_machine_display:
+  id: my_display_ui           # (optional) C++ variable name; needed if referenced in lambdas
+
+  # ── Hardware bindings ──────────────────────────────────────────────────────────────────────
+  # If omitted and there is exactly one entity of each type, auto-discovery applies.
+  display_id: lcd             # id: of the display: entity
+  encoder_id: rotary_enc      # id: of the sensor: rotary_encoder entity
+  button_id:  enc_button      # id: of the binary_sensor: gpio entity (click button)
+
+  # ── Machine component bindings (each is optional) ──────────────────────────────────────────
+  # The component queries each bound sub-component for its published actions and live data.
+  # If a binding is omitted, its actions and data fields are silently absent from the UI.
+  espresso_machine: my_espresso   # (required) orchestrator → Brew, Steam, Flush actions
+  grinder: main_grinder           # (optional) → Grind action on Home Screen; Grind Time edit in Grinder Menu
+  heater: heater_ctrl             # (optional) → Brew/Steam Temp edit; SSR Period edit
+  flow_meter: brew_flow           # (optional) → live flow rate + volume on Home Screen
+
+  # ── Theme ─────────────────────────────────────────────────────────────────────────────────
+  # Visual style applied to all screens.  See § 6.4 for theme details.
+  theme: classic           # classic | minimal | barista | dark
+
+  # ── Behaviour ─────────────────────────────────────────────────────────────────────────────
+  long_press_ms: 1000          # ms hold before a press is treated as long-press (default 1000)
+  screensaver_timeout: 5min    # blank display after N minutes idle; any input wakes it (0 = off)
+  beeper_pin: GPIO2            # (optional) PWM GPIO for audible navigation clicks and alerts
+
+  # ── Home Screen quick-action order ────────────────────────────────────────────────────────
+  # Controls which actions appear on the Home Screen and in what order.
+  # Omit to use the theme default.  Actions not listed are hidden from the Home Screen
+  # (still accessible via their sub-menu if the sub-menu itself is reachable from Settings).
+  home_actions:
+    - brew          # Start Brew (requires espresso_machine:)
+    - steam         # Start Steam (requires espresso_machine:)
+    - grind         # Grind Now (requires grinder:)
+    - settings      # Open Settings Menu
+    - power         # Toggle machine power
+    # - flush       # Quick flush (optional; confirm dialog before running)
 ```
 
 ---
 
-## 6. Technical Implementation Plan
+### 6.4 Theme System
 
-> This section describes **how** the UI would be implemented — still no code.
+A **theme** is a named bundle of visual and layout choices applied uniformly to all
+screens.  Themes are compile-time constants selected by the `theme:` key.
 
-### 6.1 ESPHome Component Approach
+#### Built-in themes
 
-The display and input handling are standard ESPHome entities defined in the device YAML.
-The menu logic itself is a new **optional** ESPHome component `espresso_machine_display`
-that:
-
-1. Registers a `display:` lambda against the ST7920 display handle.
-2. Subscribes to `rotary_encoder` sensor updates and `binary_sensor` click/long-press
-   events.
-3. Calls existing entity APIs (`espresso_machine.brew_start()`, number entity `set()`,
-   etc.) — no new C++ in the orchestrator.
-4. Has no mandatory wiring — removing the `espresso_machine_display:` block from the
-   YAML simply removes the display; nothing else changes.
-
-### 6.2 New Component: `espresso_machine_display`
-
-**Location:** `components/espresso_machine_display/`
-
-**Files:**
-
-| File | Purpose |
+| Theme | Description |
 |---|---|
-| `__init__.py` | ESPHome schema: ties the component to the display, rotary encoder, click sensor, and espresso_machine orchestrator id |
-| `espresso_machine_display.h` | `EspressoDisplay` class inheriting `esphome::Component` |
-| `espresso_machine_display.cpp` | `setup()`, `loop()`, menu state machine, render functions |
+| `classic` | Matches the original Creality 12864 UI style: inverted title bar, `▶` cursor, horizontal separator lines, mixed small/large fonts |
+| `minimal` | No borders or separators; plain monospace text only; maximises content density |
+| `barista` | Temperature value dominates the Home Screen (large font, centre-stage); compact action strip at the bottom; navigation model TBD (see Open Question #7) |
+| `dark` | Full white-on-black throughout (inverted entire framebuffer); high contrast in bright kitchens |
 
-**Schema sketch (YAML):**
+#### What a theme controls
 
-```yaml
-espresso_machine_display:
-  id: my_display_ui
-  display_id: lcd              # id: of the display: entity
-  encoder_id: rotary_enc       # id: of the rotary_encoder sensor
-  button_id: enc_button        # id: of the binary_sensor for click
-  espresso_machine_id: my_espresso  # orchestrator
-  long_press_ms: 1000          # ms threshold for long-press (default 1000)
-```
+| Attribute | `classic` | `minimal` | `barista` | `dark` |
+|---|---|---|---|---|
+| Title bar | Inverted | Bold text only | Inverted | Inverted |
+| Cursor glyph | `▶` | `>` | `●` | `▶` |
+| Separator lines | Yes | No | No | Yes |
+| Home Screen layout | List (§ 4.1) | List (§ 4.1) | Hero temp + strip | Inverted list |
+| Primary font | 6×8 (small) | 6×8 (small) | 6×8 body / 12×16 hero | 6×8 (small) |
+| Active item marker | `●` | `*` | filled block | `●` |
 
-### 6.3 Menu State Machine (C++ sketch)
+> **Note:** The `barista` theme has a unique Home Screen layout where the live
+> temperature fills the top 3/4 of the display in large font, and the quick-action
+> strip (`BREW  STEAM  GRIND`) is a compact single line at the bottom.  This gives
+> the machine a "professional appliance" look at a glance.
+
+---
+
+### 6.5 Component Action Publishing
+
+Each bound component contributes a set of **display actions** — named, labelled
+operations the display component can invoke.  This is a compile-time wiring done
+in `__init__.py` (Python schema) rather than a C++ registration bus:
+
+| Bound component | Published actions | Published live data |
+|---|---|---|
+| `espresso_machine:` | Brew Start, Brew Stop, Steam Start, Steam Stop, Flush | Mode string, brew volume, brew time, steam time, steam timeout |
+| `grinder:` | Grind Now, Grind Stop | Grind elapsed time |
+| `heater:` | — (data only) | Current temperature, target temperature |
+| `flow_meter:` | Reset Flow | Current flow rate, total volume |
+
+**How it works in practice:**
+
+- When `grinder: main_grinder` is present in `espresso_machine_display:`, the Python
+  `to_code()` function calls `cg.add(display.set_grinder(grinder_var))` so the C++
+  class has a pointer to the grinder.  The "Grind" quick-action on the Home Screen
+  is automatically included.
+- When `grinder:` is **absent**, `set_grinder()` is never called.  The C++ class
+  detects that no grinder is bound and omits the "Grind" item from the Home Screen
+  list and all menus — no YAML boilerplate needed from the user.
+- The same pattern applies to `heater:` (temperature edit available) and
+  `flow_meter:` (live flow rate shown on Home Screen).
+
+This means the display component is **self-adapting**: add a component reference and
+its controls appear; remove it and they disappear.
+
+---
+
+### 6.6 C++ Menu State Machine
 
 ```
 enum class Screen {
-  STATUS,
-  MAIN_MENU,
+  HOME,              // action hub (idle + all active-progress modes)
   BREW_MENU,
-  BREW_PROGRESS,
-  PRE_INFUSION,
   STEAM_MENU,
-  STEAM_PROGRESS,
   GRINDER_MENU,
-  GRIND_PROGRESS,
   SETTINGS_MENU,
   MAINTENANCE_MENU,
-  EDIT_NUMBER,
-  EDIT_TOGGLE,
+  PRE_INFUSION_MENU,
+  EDIT_NUMBER,       // shared full-screen number editor
+  EDIT_TOGGLE,       // inline ON/OFF toggle (no separate screen)
   CONFIRM_DIALOG,
   ERROR_OVERLAY,
 };
@@ -692,132 +839,106 @@ The `loop()` method:
 1. Reads encoder delta since last tick.
 2. Reads button state (short click / long press from a timer in `on_press`/`on_release`).
 3. Dispatches to the active screen's `handle_input()` function.
-4. Calls `render()` on the display handle if state changed or periodic refresh needed.
+4. Calls `render(display_ref)` if state changed or a periodic refresh is due
+   (every 500 ms for live-data screens is recommended for the ST7920 to avoid display
+   bus saturation and ghosting; static menus need no periodic refresh).
 
-### 6.4 Display Rendering
+---
+
+### 6.7 Display Rendering
 
 Each screen has a dedicated `render_<screen>(display_ref)` function.
-The display is redrawn only when:
-- Input events change state, or
-- A live-data screen (Status, Brew Progress, Steam Progress) needs periodic refresh
-  (suggested: every 250 ms to avoid display bus saturation).
+The theme object is passed into every render function; it controls glyphs, fonts,
+and layout constants so render functions are theme-agnostic.
 
-### 6.5 Live Data Subscriptions
+Fonts required:
 
-The component stores pointers to the relevant sensor/entity objects (passed by
-`to_code()` in `__init__.py`) and reads values directly:
+| Font | Usage | Source |
+|---|---|---|
+| `mono_8` (6×8 px) | Menus, labels, all text | `DejaVuSansMono-8.bdf` (committed to repo) |
+| `mono_16` (10×16 px) | Large numbers on Home/Progress screens | `DejaVuSansMono-16.bdf` |
 
-```cpp
-float temp  = heater_ctrl_->get_current_temperature();
-float sp    = heater_ctrl_->get_target_temperature();
-float vol   = flow_meter_->total_volume();
-float rate  = flow_meter_->average_rate();
-```
+Font files are committed under `components/espresso_machine_display/fonts/` to avoid
+CI failures from blocked Google Fonts downloads.
 
-No polling lambdas needed — all values are already in memory.
-
-### 6.6 Encoder + Button ESPHome YAML Fragments
-
-```yaml
-sensor:
-  - platform: rotary_encoder
-    id: rotary_enc
-    pin_a: GPIO32     # ← CHANGE ME (ENC_A) — must be in GPIO0–33 for pull-up support
-    pin_b: GPIO33     # ← CHANGE ME (ENC_B) — must be in GPIO0–33 for pull-up support
-    resolution: 1     # 1 step per detent
-
-binary_sensor:
-  - platform: gpio
-    id: enc_button
-    pin:
-      number: GPIO16  # ← CHANGE ME (ENC_SW) — MUST be GPIO0–33 for INPUT_PULLUP
-      mode: INPUT_PULLUP   # GPIO34–39 do NOT support pull-ups; avoid them here
-      inverted: true
-    filters:
-      - delayed_on: 10ms
-
-display:
-  - platform: st7920_spi
-    id: lcd
-    cs_pin: GPIO15    # ← CHANGE ME (EXP2 CS)
-    sid_pin: GPIO13   # ← CHANGE ME (EXP2 SID / MOSI)
-    clk_pin: GPIO17   # ← CHANGE ME (EXP2 SCK) — do NOT use GPIO14 (purge valve conflict)
-    pages:
-      - id: page_main
-        lambda: |-
-          // Handled entirely by espresso_machine_display component
-          id(my_display_ui).render(it);
-```
-
-> Note: The `st7920_spi` platform uses software SPI.  The pins above are suggestions
-> only and must not conflict with the flow meter (GPIO34–39) or thermocouple SPI.
-
-### 6.7 Font Requirements
-
-Two fonts are needed:
-- **Small (6×8)**: for menus, labels, hints — built-in ESPHome `8x8` or a GFont
-  equivalent included as a local `.ttf`.
-- **Large (10×16 or 12×24)**: for live numeric values on progress/status screens.
-
-To avoid CI failures from blocked Google Fonts downloads, font files should be committed
-to the repository under `components/espresso_machine_display/fonts/`:
-
-```
-fonts/
-  DejaVuSansMono-8.bdf   (small)
-  DejaVuSansMono-16.bdf  (large)
-```
+---
 
 ### 6.8 Safety Constraints
 
 - Display rendering **must not block** — all render calls complete in one `loop()` tick.
-- No menu action bypasses the orchestrator's own safety checks; the display simply calls
-  the same public API as HA automations.
-- If the machine enters a safety cutoff state the status screen immediately shows:
+- No menu action bypasses the orchestrator's own safety checks; the display calls the
+  same public C++ API as Home Assistant automations.
+- If the over-temperature cutoff is triggered, the Home Screen **immediately** forces
+  the display to show the safety overlay (§ 4.13) regardless of which screen is active,
+  and this overlay cannot be dismissed by the encoder.
 
-  ```
-  ┌────────────────────────┐
-  │ ■ ⚠ OVER-TEMP CUTOFF   │  ← inverted + flashing
-  │                        │
-  │   xxx.x °C  LIMIT 165  │
-  │   Heater forced OFF    │
-  │                        │
-  │   Power cycle to reset │
-  │                        │
-  └────────────────────────┘
-  ```
+---
 
-### 6.9 Scope of Implementation (Phase 10)
+### 6.9 Implementation Roadmap (Phase 10)
 
-Phase 10 in `PLAN.md` is already reserved for "Display & UI (Optional)".  This component
-fills that slot.  Implementation will proceed in two sub-phases:
+Phase 10 in `PLAN.md` is reserved for "Display & UI (Optional)".
 
 | Sub-phase | Deliverable |
 |---|---|
-| **10a** | Schema + `__init__.py`, ST7920 display in example YAML, status screen only (no menu) |
-| **10b** | Full menu navigator: all screens, edit mode, confirmation dialogs |
+| **10a** | `espresso_machine_display` schema + `__init__.py`; ST7920 in example YAML; Home Screen status only (`classic` theme, no menu navigation) |
+| **10b** | Full Home Screen action hub (Brew/Steam/Grind/Settings/Power); Brew Menu + confirm; Brew Progress inline |
+| **10c** | Steam Menu, Grinder Menu, Pre-infusion sub-menu, Settings + Maintenance |
+| **10d** | Number-edit mode, ON/OFF toggle, confirmation dialogs, error overlays |
+| **10e** | Additional themes (`minimal`, `barista`, `dark`); screensaver; beeper support |
 
-Unit testing will cover the menu state machine in isolation (no display hardware needed)
-using a mock display object in the GoogleTest suite under `tests/cpp/`.
+Unit testing covers the menu state machine in isolation via a mock display object in
+the GoogleTest suite under `tests/cpp/`.
 
 ---
 
 ## 7. Open Questions (for approval)
 
-1. **Beeper feedback**: Should audible clicks (short beep on navigation, long beep on
-   action) be included?  Requires one PWM GPIO.
-2. **Sleep / screensaver**: Should the display dim or blank after N minutes of no
-   encoder activity?  If yes, any key/rotation should wake it.
-3. **Value persistence**: Temperature and flow-max edits via the encoder should take
-   effect immediately (live entity update).  Should they also persist across reboots?
-   (Currently the entities use ESPHome `restore_value: true` — this carries over
-   automatically if kept.)
-4. **Encoder resolution**: Some EC11 clones emit 2 or 4 pulses per detent.  The YAML
-   `resolution:` parameter may need tuning per hardware batch.
-5. **Double-click**: Is a double-click gesture (return to home from anywhere) desirable,
-   or is long-press-to-back sufficient?
-6. **`espresso_machine_display` component name**: Should this live in the same external
-   component source as the rest of the project, or be a standalone optional add-on?
+### Resolved by this design revision
+
+| # | Question | Resolution |
+|---|---|---|
+| — | Should there be a separate "Main Menu" screen? | **No** — Home Screen *is* the main menu |
+| — | How to start Brew/Steam/Grind quickly? | **Home Screen action hub** — one click from the home cursor |
+| — | YAML API shape? | **`espresso_machine: id` + `theme: name`** minimal; full ref in § 6.3 |
+| — | How do optional components affect the UI? | **Component publishing** — bind by `id:`, UI adapts automatically |
+
+### Still open (please decide before Phase 10a begins)
+
+1. **Beeper feedback** — audible navigation click + action confirmation beep.
+   `beeper_pin:` is in the schema; should it default to enabled or disabled?
+   Requires one free PWM-capable GPIO (e.g. `GPIO2` on the BEEPER pin from EXP1).
+
+2. **Screensaver** — blank after `screensaver_timeout:` of no input.
+   Proposed default: `5min`.  Set to `0` to disable.
+
+3. **Value persistence** — edits via the encoder take effect immediately (live entity
+   update via ESPHome number/switch API).  Persistence across reboots is handled by
+   the entity's own `restore_value: true` flag — no special action needed.
+   **Resolved:** No extra work required; ESPHome entities already handle this.
+
+4. **Encoder resolution** — some EC11 batches emit 2 or 4 pulses per physical detent.
+   The YAML `resolution:` parameter on `sensor: rotary_encoder` covers this.
+   Proposed: document `resolution: 1` as default and note that users may need
+   `resolution: 2` or `resolution: 4` for their specific hardware batch.
+
+5. **`home_actions:` order default** — The proposed default list is:
+   `brew → steam → grind → settings → power`.
+   Note: wrap-around navigation (last item → first) would make "power" adjacent to "brew",
+   potentially causing accidental power-off.  Proposal: **disable wrap-around on the Home
+   Screen**, or place `power` in the middle of the list (e.g. after `settings`).  Please confirm.
+
+6. **Theme default** — Which theme should be the default when `theme:` is omitted?
+   Proposal: `classic` (matches Creality hardware origin).
+
+7. **`barista` theme Home Screen layout** — The barista theme shows temperature in
+   large font with a compact action strip at the bottom.  Should it still allow the
+   rotary encoder to navigate the action strip, or should it be click-to-cycle only
+   (to avoid the large temp readout jumping out of view)?
+
+8. **Component packaging** — Should `espresso_machine_display` be part of the main
+   `external_components:` source (same repo, same `components/` directory), or a
+   separate optional add-on that users can include independently?
+   Proposal: same repo, same `components/` directory (simplest for end users).
 
 ---
 
