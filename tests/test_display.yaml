@@ -1,0 +1,223 @@
+# Test: espresso_machine_display component schema validation.
+# Validates that the Python schema parses correctly and all entity references
+# are resolved.  This test is validated (esphome config) but NOT compiled
+# (the host platform does not support st7920 or rotary encoders).
+# Target: ESP32 dev board (Creality full-graphic LCD hardware).
+
+esphome:
+  name: test-display
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_heater
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_grinder
+      - espresso_machine_flow_meter
+      - espresso_machine_display
+
+# -----------------------------------------------------------------------------
+# Fake thermocouple sensor (template — no SPI needed for schema validation)
+# -----------------------------------------------------------------------------
+sensor:
+  - platform: template
+    id: fake_temp
+    lambda: "return 90.0f;"
+    update_interval: 1s
+
+  # Rotary encoder — ENC_A on GPIO32, ENC_B on GPIO33 (must be 0–33 for PULLUP)
+  - platform: rotary_encoder
+    id: rotary_enc
+    pin_a:
+      number: GPIO32
+      mode: INPUT_PULLUP
+    pin_b:
+      number: GPIO33
+      mode: INPUT_PULLUP
+    resolution: 1
+
+# -----------------------------------------------------------------------------
+# Heater SSR via slow_pwm
+# -----------------------------------------------------------------------------
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4
+    period: 1s
+
+# -----------------------------------------------------------------------------
+# PID climate
+# -----------------------------------------------------------------------------
+climate:
+  - platform: pid
+    id: main_heater
+    sensor: fake_temp
+    heat_output: heater_ssr
+    default_target_temperature: 90
+    control_parameters:
+      kp: 0.5
+      ki: 0.01
+      kd: 1.0
+
+# -----------------------------------------------------------------------------
+# IHeater adapter
+# -----------------------------------------------------------------------------
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
+
+# -----------------------------------------------------------------------------
+# Flow meter
+# -----------------------------------------------------------------------------
+espresso_machine_flow_meter:
+  id: brew_flow
+  pin:
+    number: GPIO34
+    mode: INPUT   # GPIO34–39 are input-only; no pull-up
+  pulses_per_ml: 0.5195
+
+# -----------------------------------------------------------------------------
+# Valves
+# -----------------------------------------------------------------------------
+espresso_machine_valve:
+  - id: brew_valve
+    pin: GPIO26
+    normally_open: false
+  - id: steam_valve
+    pin: GPIO27
+    normally_open: false
+  - id: purge_valve
+    pin: GPIO14
+    normally_open: false
+
+# -----------------------------------------------------------------------------
+# Pump
+# -----------------------------------------------------------------------------
+espresso_machine_pump:
+  id: main_pump
+  type: relay
+  pin: GPIO25
+  flow_meter: brew_flow
+
+# -----------------------------------------------------------------------------
+# Grinder
+# -----------------------------------------------------------------------------
+espresso_machine_grinder:
+  id: main_grinder
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
+  grind_time_number:
+    name: "Grind Time"
+
+# -----------------------------------------------------------------------------
+# Espresso machine orchestrator
+# -----------------------------------------------------------------------------
+espresso_machine:
+  id: my_espresso
+  brew:
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: purge_valve
+    target_temperature: 90°C
+    flow_max: 40ml
+    flow_offset: 20ml
+    flow_max_number:
+      name: "Brew Flow Max"
+    temperature_profile:
+      offset: 2°C
+      ramp_time: 30s
+      temp_surf_switch:
+        name: "Temp Surfing"
+  steam:
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    flow_max: 2ml/s
+    cool_down_to: 90°C
+    purge_volume: 5ml
+    timeout: 5min
+
+# -----------------------------------------------------------------------------
+# Button binary sensor (ENC_SW on GPIO16 — must be 0–33 for INPUT_PULLUP)
+# -----------------------------------------------------------------------------
+binary_sensor:
+  - platform: gpio
+    id: enc_button
+    pin:
+      number: GPIO16
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 10ms
+
+# -----------------------------------------------------------------------------
+# Fonts — commit DejaVuSansMono.ttf in components/espresso_machine_display/fonts/
+# -----------------------------------------------------------------------------
+font:
+  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+    id: font_small
+    size: 8
+  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+    id: font_large
+    size: 16
+
+# -----------------------------------------------------------------------------
+# SPI bus — used by ST7920 display
+# -----------------------------------------------------------------------------
+spi:
+  clk_pin: GPIO17
+  mosi_pin: GPIO13
+
+# -----------------------------------------------------------------------------
+# ST7920 128×64 SPI display (Creality full-graphic LCD)
+# CS can use any free GPIO.  The st7920 platform uses ESPHome's SPI bus.
+# -----------------------------------------------------------------------------
+display:
+  - platform: st7920
+    id: lcd
+    width: 128
+    height: 64
+    cs_pin: GPIO15
+    lambda: |-
+      id(my_display_ui).render(it);
+
+# -----------------------------------------------------------------------------
+# Espresso machine display — single config block that wires everything
+# -----------------------------------------------------------------------------
+espresso_machine_display:
+  id: my_display_ui
+  display_id: lcd
+  encoder_id: rotary_enc
+  button_id: enc_button
+  espresso_machine: my_espresso
+  grinder: main_grinder
+  heater: heater_ctrl
+  flow_meter: brew_flow
+  font_small: font_small
+  font_large: font_large
+  theme: classic
+  long_press_ms: 1000ms
+  screensaver_timeout: 5min
+  home_actions:
+    - brew
+    - steam
+    - grind
+    - settings
+    - power

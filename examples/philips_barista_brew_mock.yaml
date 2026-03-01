@@ -166,6 +166,7 @@ external_components:
       - espresso_machine_mock_heater   # ← thermal simulation (temp sensor + SSR output)
       - espresso_machine_mock_pump     # ← pump + flow simulation
       - espresso_machine_sprofiler   # Sprofiler cloud shot upload
+      - espresso_machine_display     # Creality ST7920 128×64 LCD menu UI (Phase 10)
 
 # =============================================================================
 # MOCK HEATER — replaces physical thermocouple + slow_pwm + SPI
@@ -532,32 +533,61 @@ espresso_machine:
     release_time: 10s
 
 # =============================================================================
-# DISPLAY — optional (same as real config)
-# Comment out if no I2C display attached.
+# DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder
+# Same configuration as the real device example (philips_barista_brew.yaml).
+# Uncomment and wire GPIO pins to enable the local menu UI.
+# See that file for full wiring instructions.
 # =============================================================================
-# i2c:
-#   sda: GPIO21
-#   scl: GPIO22
+# sensor:   (add alongside existing sensor: entries above)
+#   - platform: rotary_encoder
+#     id: rotary_enc
+#     pin_a:
+#       number: GPIO32
+#       mode: INPUT_PULLUP
+#     pin_b:
+#       number: GPIO33
+#       mode: INPUT_PULLUP
+#     resolution: 1
 #
-# display:
-#   - platform: ssd1306_i2c
-#     model: "SSD1306 128x64"
-#     address: 0x3C
-#     lambda: |-
-#       it.printf(0,  0, id(font_small), "Mode: %s",
-#         id(my_espresso).mode_name());
-#       it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
-#         id(main_heater).current_temperature,
-#         id(main_heater).target_temperature);
-#       it.printf(0, 32, id(font_small), "Vol: %.1f ml",
-#         id(main_pump).get_flow_total());
-#       it.printf(0, 48, id(font_small), "Heat: %.0f%%",
-#         id(main_heater).output_value() * 100.0f);
+# binary_sensor:
+#   - platform: gpio
+#     id: enc_button
+#     pin:
+#       number: GPIO16
+#       mode: INPUT_PULLUP
+#       inverted: true
+#     filters:
+#       - delayed_on: 10ms
 #
 # font:
-#   - file: "gfonts://Roboto Mono"
+#   - file: "DejaVuSansMono.ttf"
 #     id: font_small
-#     size: 12
+#     size: 8
+#   - file: "DejaVuSansMono.ttf"
+#     id: font_large
+#     size: 16
+#
+# display:
+#   - platform: st7920
+#     id: lcd
+#     width: 128
+#     height: 64
+#     cs_pin: GPIO15
+#     lambda: |-
+#       id(my_display_ui).render(it);
+#
+# espresso_machine_display:
+#   id: my_display_ui
+#   display_id: lcd
+#   encoder_id: rotary_enc
+#   button_id:  enc_button
+#   espresso_machine: my_espresso
+#   grinder: main_grinder
+#   heater: heater_ctrl
+#   flow_meter: brew_flow
+#   font_small: font_small
+#   font_large: font_large
+#   theme: classic
 
 # =============================================================================
 # POWER SWITCH — master on/off toggle (same as real config)

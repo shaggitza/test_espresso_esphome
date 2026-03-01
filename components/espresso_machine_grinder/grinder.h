@@ -50,6 +50,14 @@ class Grinder : public button::Button, public Component {
   void stop();
   bool is_grinding() const { return grinding_; }
 
+  // Read-back accessors used by the display component.
+  uint32_t get_current_grind_time_ms() const {
+    return grind_time_number_
+               ? static_cast<uint32_t>(grind_time_number_->state)
+               : default_grind_time_ms_;
+  }
+  GrinderTimeNumber *get_grind_time_number() const { return grind_time_number_; }
+
  protected:
   void press_action() override { grind(); }
 

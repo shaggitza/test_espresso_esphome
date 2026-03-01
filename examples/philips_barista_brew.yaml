@@ -103,6 +103,7 @@ external_components:
       - espresso_machine_grinder   # timed relay grinder with lockout
       - espresso_machine_flow_meter  # pulse-counting volumetric sensor
       - espresso_machine_sprofiler   # Sprofiler cloud shot upload
+      - espresso_machine_display   # Creality ST7920 128×64 LCD menu UI (Phase 10)
 
 # -----------------------------------------------------------------------------
 # SPI bus — used by the MAX6675/MAX31855 thermocouple board
@@ -749,28 +750,103 @@ espresso_machine:
     release_time: 10s      # how long to release (depressurise) per cycle
 
 # =============================================================================
-# DISPLAY (optional) — native ESPHome SSD1306 via I2C
-# Comment out this entire block if you do not have a display attached.
-# =============================================================================
-# display:
-#   - platform: ssd1306_i2c
-#     model: "SSD1306 128x64"
-#     address: 0x3C
-#     lambda: |-
-#       it.printf(0,  0, id(font_small), "Mode: %s",
-#         id(my_espresso).mode_name());
-#       it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
-#         id(main_heater).current_temperature,
-#         id(main_heater).target_temperature);
-#       it.printf(0, 32, id(font_small), "Vol: %.1f ml",
-#         id(brew_flow).total_volume());
-#       it.printf(0, 48, id(font_small), "Heat: %.0f%%",
-#         id(main_heater).output_value() * 100.0f);
+# DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder
+# (recovered from a Creality 3D printer; connects via EXP1/EXP2 ribbon)
 #
+# Uncomment and configure this entire section to enable the local menu UI.
+# The espresso_machine_display component provides a full action-hub menu:
+#   Home Screen → Brew / Steam / Grind / Settings / Power
+#   with real-time temperature + volume feedback during active sequences.
+#
+# GPIO constraints:
+#   ENC_A, ENC_B, ENC_SW  — must be GPIO0–33 (INPUT_PULLUP support needed)
+#   CS, CLK, MOSI (SID)   — any free GPIO (display-only, no pull needed)
+#
+# Fonts: copy DejaVuSansMono.ttf from components/espresso_machine_display/fonts/
+#   into your ESPHome config directory and reference it below, OR download it from
+#   the DejaVu Fonts project (https://dejavu-fonts.github.io/).
+# =============================================================================
+
+# ── Rotary encoder (EXP1 — must be GPIO0–33) ─────────────────────────────────
+# sensor:   (add alongside existing sensor: entries above)
+#   - platform: rotary_encoder
+#     id: rotary_enc
+#     pin_a:
+#       number: GPIO32          # ← CHANGE ME — ENC_A
+#       mode: INPUT_PULLUP
+#     pin_b:
+#       number: GPIO33          # ← CHANGE ME — ENC_B
+#       mode: INPUT_PULLUP
+#     resolution: 1             # 1 step/detent; try 2 or 4 for some EC11 batches
+#
+# ── Encoder button (EXP1 PIN 2 — must be GPIO0–33) ───────────────────────────
+# binary_sensor:   (add alongside existing binary_sensor: entries above)
+#   - platform: gpio
+#     id: enc_button
+#     pin:
+#       number: GPIO16          # ← CHANGE ME — ENC_SW
+#       mode: INPUT_PULLUP
+#       inverted: true
+#     filters:
+#       - delayed_on: 10ms
+#
+# ── SPI bus for ST7920 display (EXP2) ────────────────────────────────────────
+# NOTE: The SPI bus above is shared with the thermocouple board.
+#   The ST7920 uses software SPI or a second hardware SPI bus.
+#   To avoid a conflict, configure a second SPI bus with different pins, OR
+#   use the cs_pin to multiplex (CS low → ST7920, CS high → MAX6675).
+#   The safest option is separate pins for the display SPI.
+#
+# spi:     (add a second spi: block, or add mosi_pin to the existing block)
+#   - id: thermocouple_spi
+#     clk_pin: GPIO18
+#     miso_pin: GPIO19
+#   - id: display_spi
+#     clk_pin: GPIO17           # ← CHANGE ME — EXP2 SCK (do NOT use GPIO14 = purge valve)
+#     mosi_pin: GPIO13          # ← CHANGE ME — EXP2 SID/MOSI
+#
+# ── Fonts (commit DejaVuSansMono.ttf from components/espresso_machine_display/fonts/) ──
 # font:
-#   - file: "gfonts://Roboto Mono"
+#   - file: "DejaVuSansMono.ttf"   # copy from components/espresso_machine_display/fonts/
 #     id: font_small
-#     size: 12
+#     size: 8
+#   - file: "DejaVuSansMono.ttf"
+#     id: font_large
+#     size: 16
+#
+# ── Display entity ────────────────────────────────────────────────────────────
+# display:
+#   - platform: st7920
+#     id: lcd
+#     width: 128
+#     height: 64
+#     cs_pin: GPIO15            # ← CHANGE ME — EXP2 CS
+#     spi_id: display_spi       # reference the display SPI bus above
+#     update_interval: 500ms
+#     lambda: |-
+#       id(my_display_ui).render(it);
+#
+# ── espresso_machine_display — wires everything together ─────────────────────
+# espresso_machine_display:
+#   id: my_display_ui
+#   display_id: lcd             # ← id: of the display: entity above
+#   encoder_id: rotary_enc      # ← id: of the rotary_encoder sensor above
+#   button_id:  enc_button      # ← id: of the binary_sensor (click button)
+#   espresso_machine: my_espresso   # orchestrator (required)
+#   grinder: main_grinder           # optional — Grind action on Home Screen
+#   heater: heater_ctrl             # optional — temp display and editing
+#   flow_meter: brew_flow           # optional — live flow rate / volume
+#   font_small: font_small          # optional — 6×8 pixel menu font
+#   font_large: font_large          # optional — 10×16 pixel large values
+#   theme: classic                  # classic | minimal | barista | dark
+#   long_press_ms: 1000ms           # hold duration for long-press
+#   screensaver_timeout: 5min       # blank display after 5 min idle (0 = off)
+#   home_actions:
+#     - brew
+#     - steam
+#     - grind
+#     - settings
+#     - power
 
 # =============================================================================
 # POWER SWITCH — master on/off toggle

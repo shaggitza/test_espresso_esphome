@@ -204,14 +204,39 @@ Deliverables:
 
 ---
 
-### Phase 10 — Display & UI (Optional)
+### Phase 10 — Display & UI (ST7920 128×64 LCD) 🚧
 
-**Goal:** Local OLED feedback.
+**Goal:** Full local menu UI on a Creality-style full-graphic LCD with rotary encoder.
 
 Tasks:
-- [ ] Document display lambda using entity IDs from the first-class platforms
-- [ ] Default display layout: current temp, setpoint, mode, shot volume
-- [ ] Works with any ESPHome-supported OLED (SSD1306 / SH1106)
+- [x] **10a** — `espresso_machine_display` component: `__init__.py` Python schema
+  - Requires `display_id`, `encoder_id`, `button_id`, `espresso_machine:` (mandatory)
+  - Optional: `grinder:`, `heater:`, `flow_meter:` (UI adapts when bound)
+  - Optional: `font_small:`, `font_large:`, `theme:`, `long_press_ms:`, `screensaver_timeout:`
+  - `theme: classic | minimal | barista | dark`
+  - Fonts committed in `components/espresso_machine_display/fonts/DejaVuSansMono.ttf`
+- [x] **10a** — C++ `EspressoMachineDisplay` class with full navigation state machine
+  - Home Screen (idle action hub + active brew/steam/grind inline progress)
+  - Brew Menu → Pre-infusion sub-menu
+  - Steam Menu
+  - Grinder Menu
+  - Settings Menu (page 1 + page 2)
+  - Maintenance sub-menu (Flush, Restart)
+  - Number-edit mode with encoder acceleration (fast step after 1 s)
+  - Confirmation dialog (YES/NO)
+  - Error overlay (2 s auto-dismiss)
+  - Screensaver (blank after configurable timeout)
+- [x] **10a** — Generic entity access: display reads/writes the same `number:` / `switch:`
+  entities already exposed to HA (brew flow max, grind time, temp surfing toggle) so
+  HA stays in sync and values persist via `restore_value: true` on the entities
+- [x] **10a** — `tests/test_display.yaml` schema validation test added to CI matrix
+- [x] **10a** — Example YAML (`philips_barista_brew.yaml`) updated with full commented-out display config
+
+**Remaining (future phases):**
+- [ ] **10b** — Unit tests for menu state machine (GoogleTest mock display)
+- [ ] **10c** — `barista` theme hero-temperature layout
+- [ ] **10d** — Beeper PWM tone support (`beeper_pin:`)
+- [ ] **10e** — `espresso_machine.flush` action wired through display Maintenance menu
 
 ---
 
