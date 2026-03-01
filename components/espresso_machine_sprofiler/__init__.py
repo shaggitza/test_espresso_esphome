@@ -8,6 +8,12 @@ from esphome.components.http_request import (
 
 CODEOWNERS = ["@shaggitza"]
 
+# NOTE: This component is currently in BETA.  The Sprofiler cloud integration
+# has not been fully verified end-to-end.  Use it at your own risk and expect
+# breaking changes.  It is intentionally excluded from the default example
+# configs — opt in explicitly by adding espresso_machine_sprofiler to your
+# external_components list and configuring the block in your YAML.
+
 espresso_machine_sprofiler_ns = cg.esphome_ns.namespace(
     "espresso_machine_sprofiler"
 )
