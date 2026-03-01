@@ -18,7 +18,7 @@
 6. [Dual Thermoblock Machines](#6-dual-thermoblock-machines)
 7. [Dual Boiler Machines](#7-dual-boiler-machines)
 8. [Dual NTC, Single Thermoblock](#8-dual-ntc-single-thermoblock)
-9. [Dual Pump, Single Thermoblock (Cold Water Injection)](#9-dual-pump-single-thermoblock-cold-water-injection)
+9. [Dual Pump, Single Thermoblock — Active Temperature Profiling via Cool-Water Injection](#9-dual-pump-single-thermoblock--active-temperature-profiling-via-cool-water-injection)
 10. [New Components Required](#10-new-components-required)
 11. [Orchestrator Extensions Required](#11-orchestrator-extensions-required)
 12. [Component Reuse Summary](#12-component-reuse-summary)
@@ -628,29 +628,136 @@ and can be used for:
 
 ---
 
-## 9  Dual Pump, Single Thermoblock (Cold Water Injection)
+## 9  Dual Pump, Single Thermoblock — Active Temperature Profiling via Cool-Water Injection
 
-### 9.1  Concept
+### 9.1  Concept and Inspiration
 
-A second small pump injects **cold water** directly into the thermoblock water path during
-cool-down, dramatically accelerating the temperature drop between steam and brew modes.
+This technique is inspired by the **Decent DE1** and similar lever-influenced machines.
+The core idea: instead of changing the thermoblock setpoint and waiting for it to
+respond (slow, limited by thermal mass), a **second small pump injects cool water from
+the reservoir directly into the group head water path** in real time.  By controlling
+the ratio of hot water (thermoblock output) to cool water (direct injection), the
+system can achieve **rapid, precise temperature changes at the puck** that would be
+physically impossible through heater control alone.
 
 ```
-Normal pump (GPIO25) ──► Group head (brew)
-                     └──► Steam wand (steam)
-
-Cooling pump (GPIO28) ──► Cold water input ──► Thermoblock inlet
-                          (from fresh water tank, before the heat path)
+Water tank
+    │
+    ├──► Main pump (GPIO25) ──► Thermoblock ──► Brew valve ──► Group head ──► Puck
+    │
+    └──► Cool pump  (GPIO28) ─────────────────────────────────► Group head (mixing tee)
+                              bypasses thermoblock entirely
 ```
 
-This eliminates the need for the slow passive cool-down after steaming: instead of waiting
-2–4 minutes for the thermoblock to cool naturally, the cooling pump runs for ~30 seconds
-and the machine is brew-ready.
+The cool pump draws **unheated water** from the same reservoir and injects it
+downstream of the thermoblock, typically via a mixing tee or a Y-fitting just before
+the brew valve or group head inlet.  Both pumps run simultaneously; the cool pump's
+duty cycle or speed controls how much cool water is blended in.
 
-### 9.2  What works today (no new code)
+### 9.2  What this enables
 
-The cooling pump can be wired as a second `espresso_machine_pump` entity.  The cool-down
-can be triggered via an ESPHome automation that watches the machine status text sensor:
+#### 9.2.1  Temperature descent profiles (Decent-style)
+
+The Decent DE1's signature "temperature descent" profile works exactly this way:
+extraction starts at a high temperature (e.g. 95 °C) and temperature ramps down
+smoothly (e.g. to 88 °C by the end of the shot).  This is thought to improve
+extraction uniformity — higher temperature dissolves solubles early in the shot when
+the puck is dense; lower temperature avoids over-extraction at the end when the puck
+is more permeable.
+
+With dual pumps and a thermoblock, the orchestrator can:
+1. Set the thermoblock to a fixed high setpoint (e.g. 96–98 °C) — it never changes.
+2. Ramp the cool pump duty cycle up over the shot to add progressively more cool water.
+3. The actual water temperature at the puck follows the blending ratio, not the
+   thermoblock temperature.
+
+This decouples "fast response" (pump blending ratio, near-instant) from "coarse
+setpoint" (thermoblock PID, slow but stable).
+
+#### 9.2.2  Temperature ascent profiles
+
+The inverse: thermoblock at a lower setpoint, cool pump off at the start, then
+increasing the main pump speed (or reducing main pump slightly) to shift the ratio.
+Less commonly needed but architecturally identical.
+
+#### 9.2.3  Rapid post-steam cool-down (secondary benefit)
+
+Running the cool pump for 20–30 seconds through the group head after a steam session
+flushes residual hot water and rapidly lowers the thermoblock effective temperature,
+cutting steam-to-brew turnaround from 2–4 minutes to under a minute.  This is a
+secondary benefit of the same hardware — the primary value is in-shot temperature
+profiling.
+
+### 9.3  Hardware requirements
+
+| Component | Notes |
+|---|---|
+| Main vibration pump | Standard — drives water through thermoblock |
+| Second vibration pump | Same or smaller model; 3 bar is enough for blending |
+| Mixing tee or Y-fitting | Stainless or food-grade brass; installed just before brew valve |
+| Check valve on cool path | Prevents back-flow of hot water into the cool pump when cool pump is off |
+| Check valve on hot path | Recommended; prevents pressure equalisation through thermoblock |
+
+> ⚠️ **Pressure balance:** Both pumps work against the same downstream pressure (the
+> puck bed resistance, typically 8–9 bar).  A vibration pump's flow rate drops with
+> back-pressure.  At 9 bar, a standard 60 W pump delivers approximately 60–80 mL/min.
+> Without check valves, the higher-pressure pump will push water backward through the
+> other pump, so check valves are mandatory.
+
+### 9.4  Temperature model
+
+The resulting brew temperature at the puck is approximately:
+
+```
+T_puck ≈ (Q_hot × T_hot + Q_cool × T_cool) / (Q_hot + Q_cool)
+
+Where:
+  Q_hot   = main pump flow rate (mL/s)  — controlled by main pump
+  T_hot   = thermoblock output temperature — set by PID, ~96-98 °C
+  Q_cool  = cool pump flow rate (mL/s)   — controlled by cool pump
+  T_cool  = reservoir water temperature  — ambient, typically 15-22 °C
+```
+
+**Example:** If Q_hot = 2 mL/s, T_hot = 97 °C, Q_cool = 0.5 mL/s, T_cool = 18 °C,
+then T_puck ≈ (2 × 97 + 0.5 × 18) / 2.5 ≈ 81 °C.
+
+> **Important:** The actual temperature also depends on heat losses in the brew path,
+> group head thermal mass, and puck temperature.  Real-world calibration is required.
+> A downstream temperature sensor (NTC or TC near the group head inlet) is strongly
+> recommended for closed-loop control (see §8, Dual NTC).
+
+### 9.5  Control strategies
+
+#### Strategy A — Open-loop cool pump duty cycle (simple)
+
+A fixed, pre-programmed duty cycle ramp drives the cool pump.
+No feedback — the profile is purely a time-based ramp.
+
+```
+Time:   0s ──────────────── 25s ──────────────── 50s
+Q_cool: 0  ────────────────  →  ────────────────  0.8 mL/s
+T_puck: 93°C                 →                   88°C (approx)
+```
+
+This is the simplest implementation and requires no new sensors.
+
+#### Strategy B — Closed-loop with downstream NTC (recommended)
+
+If a second NTC sensor is placed at the group head inlet (see §8, Dual NTC), a PID
+loop can drive the cool pump to hit a target temperature at the puck rather than a
+fixed duty cycle.  This compensates for reservoir temperature changes across seasons.
+
+#### Strategy C — Coupled heater + cool pump (full profiling)
+
+The thermoblock PID tracks a moving setpoint (as in temperature surfing, see
+`FEATURES.md`), and the cool pump provides fast correction.  The combination can
+follow steep temperature descent ramps (e.g., −10 °C over 10 seconds) that neither
+the heater nor the cool pump could achieve alone.
+
+### 9.6  What works today (no new code for basic automation use)
+
+The cool pump can be declared as a second `espresso_machine_pump` entity and driven
+via ESPHome automations from HA:
 
 ```yaml
 espresso_machine_pump:
@@ -658,36 +765,110 @@ espresso_machine_pump:
     type: relay
     pin: GPIO25
 
-  - id: cooling_pump
-    type: relay
+  - id: cool_pump
+    type: relay          # or 'dimmer' if using a TRIAC dimmer for flow rate control
     pin: GPIO28
 
-automation:
-  - trigger:
-      platform: text_sensor
-      entity_id: text_sensor.my_espresso_status
-      to: "Cooling"
+# Example HA automation: temperature descent — ramp cool pump during brew
+# (replace with actual ESPHome script/automation as needed)
+script:
+  - id: temp_descent_profile
     then:
-      - switch.turn_on: cooling_pump
-  - trigger:
-      platform: text_sensor
-      entity_id: text_sensor.my_espresso_status
-      to: "Idle"
-    then:
-      - switch.turn_off: cooling_pump
+      - delay: 10s           # first 10 s: brew at full thermoblock temp
+      - switch.turn_on: cool_pump
+      - delay: 20s           # next 20 s: cool injection active
+      - switch.turn_off: cool_pump
+
+# Tie the script into the brew start action
+on_brew_start:          # Phase 11+ hook — not yet implemented; use HA automation today
+  then:
+    - script.execute: temp_descent_profile
 ```
 
-### 9.3  Required changes (first-class support)
+### 9.7  Required changes for first-class orchestrator support
 
-To make the cooling pump a first-class orchestrator feature rather than an automation hack:
+#### Schema additions
 
-- [ ] Add optional `cooling_pump:` key to the `espresso_machine:` top-level schema
-      (or to the `brew:` sub-schema, since cool-down is relevant to pre-brew cooling).
-- [ ] Orchestrator `COOLING` brew state: if `cooling_pump_` is wired, call
-      `cooling_pump_->turn_on()` on entry and `cooling_pump_->turn_off()` on exit.
-- [ ] `espresso_machine_pump` must support `MULTI_CONF = True` (already set).
-- [ ] Create `examples/dual_pump_cooling.yaml` — reference config.
-- [ ] Document cooling pump wiring in `docs/wiring.md`.
+```yaml
+espresso_machine:
+  id: my_espresso
+  brew:
+    pump: main_pump
+    cool_pump: cool_pump               # NEW — optional second pump for cool water injection
+    cool_pump_profile:                 # NEW — time-based cool pump ramp during shot
+      - at: 0s
+        flow_fraction: 0.0             # fraction of cool pump max flow (0.0–1.0)
+      - at: 10s
+        flow_fraction: 0.0             # full thermoblock temp for first 10 s
+      - at: 30s
+        flow_fraction: 0.25            # 25% cool water blend by 30 s
+      - at: 50s
+        flow_fraction: 0.40            # 40% by end of shot
+    ...
+```
+
+#### Task checklist
+
+- [ ] Add optional `cool_pump:` key to `brew:` sub-schema (references an
+      `espresso_machine_pump` entity)
+- [ ] Add optional `cool_pump_profile:` key — a list of `{at: <time>, flow_fraction: <float>}`
+      entries that the orchestrator interpolates during the `BREWING` state
+- [ ] Orchestrator `BREWING` tick: if `cool_pump_` is set, compute the interpolated
+      `flow_fraction` for the current elapsed time and call `cool_pump_->set_target_flow()`
+      (using the pump's existing bang-bang flow rate interface)
+- [ ] Orchestrator `COOLING` state (post-steam): if `cool_pump_` is set, run it at
+      full duty until temperature drops to `cool_down_to:` (secondary benefit)
+- [ ] Add `ICoolPump` interface (or reuse `IPump` with `set_target_flow()`) — verify
+      the existing `IPump` interface covers this use case
+- [ ] `espresso_machine_pump` must support `MULTI_CONF = True` (already set)
+- [ ] Unit tests: profile interpolation at t=0, t=mid, t=end; cool pump on/off in
+      BREWING and COOLING states
+- [ ] Create `examples/dual_pump_temp_descent.yaml` — reference config with annotated
+      temperature descent profile
+- [ ] Document mixing tee wiring, check valve placement, and flow calibration in
+      `docs/wiring.md`
+- [ ] Document temperature model and calibration procedure in `docs/pid_tuning.md`
+
+### 9.8  Relationship to brew profiles (Phase 12)
+
+The `cool_pump_profile:` key described above is a simplified per-key temperature
+profile.  Once the full brew profile system (Phase 12, see `docs/esphome_redesign.md`
+Proposal C) is implemented, the cool pump ramp will be expressed as a phase in the
+profile rather than a separate flat key.  The flat `cool_pump_profile:` is a
+forward-compatible staging step.
+
+### 9.9  Example: Decent-style temperature descent
+
+```yaml
+espresso_machine:
+  id: my_espresso
+  brew:
+    pump: main_pump
+    cool_pump: cool_pump
+    target_temperature: 97°C     # thermoblock held high and fixed
+    cool_pump_profile:
+      - at: 0s
+        flow_fraction: 0.0       # 0–10 s: pure thermoblock water ~97°C
+      - at: 10s
+        flow_fraction: 0.0
+      - at: 15s
+        flow_fraction: 0.10      # blend starts at 15 s → ~90°C at puck (calibrate!)
+      - at: 25s
+        flow_fraction: 0.18      # continuing descent → ~87°C
+      - at: 40s
+        flow_fraction: 0.22      # levelling off → ~85°C
+    flow_max: 40ml
+    flow_offset: 20ml
+    valve: brew_valve
+    purge_valve: purge_valve
+    heater: main_heater
+    heater_controller: heater_ctrl
+```
+
+> **Calibration note:** `flow_fraction` values depend on pump characteristics, check
+> valve cracking pressure, brew path resistance, and ambient water temperature.
+> Always measure the actual puck temperature with a group head thermometer or
+> thermofilter before relying on a profile in production.
 
 ---
 
@@ -701,7 +882,7 @@ To make the cooling pump a first-class orchestrator feature rather than an autom
 | Optional `brew_timeout:` in brew schema | Minimal / GaggiaMate | **High** | Low |
 | Optional `flow_max` / `flow_offset` defaults | Minimal / GaggiaMate | **High** | Low |
 | Allow shared `valve:` + `purge_valve:` id | GaggiaMate / single-boiler | **High** | Low |
-| Optional `cooling_pump:` in orchestrator | Dual pump / cold injection | Medium | Medium |
+| Optional `cool_pump:` + `cool_pump_profile:` in brew schema | Dual pump / temp profiling | Medium | Medium |
 | Optional `secondary_sensor:` on `espresso_machine_heater` | Dual NTC | Medium | Medium |
 | Optional `cool_down_to:` in steam schema | Dual boiler | Medium | Low |
 | `espresso_machine_pressure:` platform | Dual boiler / profiling | Low | High |
@@ -741,7 +922,8 @@ This is a prerequisite for pressure profiling (Phase 12+) and is tracked separat
 | `brew: valve:` — make optional | Minimalist builds | No |
 | `brew: brew_timeout:` — new optional key | Time-based shot termination | No |
 | `steam: cool_down_to:` — make optional | Dual boiler (always hot) | No |
-| `espresso_machine: cooling_pump:` — new optional key | Cold water injection | No |
+| `brew: cool_pump:` — new optional key | Active temp descent profiling | No |
+| `brew: cool_pump_profile:` — new optional list | Time-based cool pump blend ramp | No |
 | Allow `brew: valve:` and `brew: purge_valve:` to share same id | Single solenoid machines | No |
 
 ### 11.2  C++ changes
@@ -750,7 +932,8 @@ This is a prerequisite for pressure profiling (Phase 12+) and is tracked separat
 |---|---|---|
 | `brew_timeout_ms_` field + timer check in `BREWING` tick | `espresso_machine.cpp` | Low |
 | Null-check before using `brew_valve_` in BrewController | `espresso_machine.cpp` | Low |
-| `cooling_pump_` pointer + activation in `COOLING` state | `espresso_machine.cpp` | Medium |
+| `cool_pump_` pointer + profile interpolation in `BREWING` tick | `espresso_machine.cpp` | Medium |
+| `cool_pump_` full-on in `COOLING` state (post-steam secondary benefit) | `espresso_machine.cpp` | Low |
 | `IHeater::get_secondary_temperature()` default impl | `interfaces.h` | Low |
 | Dual-id validation: warn if `brew_valve_` and `brew_purge_valve_` point to same object | `espresso_machine.cpp` | Low |
 
@@ -836,15 +1019,17 @@ Tasks:
 - [ ] Add dual-boiler PID tuning notes to `docs/pid_tuning.md`
 - [ ] Validate in CI
 
-### Phase E — Dual NTC & Dual Pump Examples
+### Phase E — Dual NTC & Dual Pump (Temperature Descent) Examples
 
 Tasks:
 - [ ] `espresso_machine_heater:` — add `secondary_sensor:` optional key
 - [ ] Add `IHeater::get_secondary_temperature()` default in `interfaces.h`
-- [ ] Add optional `cooling_pump:` to orchestrator schema and C++
+- [ ] Add optional `cool_pump:` and `cool_pump_profile:` to `brew:` schema and C++
+- [ ] Implement profile interpolation in orchestrator `BREWING` tick
+- [ ] Implement cool pump full-on in `COOLING` state for post-steam flush
 - [ ] Create `examples/dual_ntc.yaml`
-- [ ] Create `examples/dual_pump_cooling.yaml`
-- [ ] Unit tests for cooling pump activation in COOLING state
+- [ ] Create `examples/dual_pump_temp_descent.yaml` — Decent-style temperature descent
+- [ ] Unit tests: profile interpolation at t=0/mid/end; cool pump state in BREWING/COOLING
 - [ ] Validate in CI
 
 ### Phase F — Pressure Transducer Platform (Future)
@@ -885,6 +1070,13 @@ Tasks:
 5. **GaggiaMate PCB rev compatibility:** GaggiaMate has had multiple PCB revisions with
    different GPIO assignments.  Should we maintain a separate YAML example per PCB revision,
    or use a single YAML with clearly-labelled substitution variables?
+
+6. **Cool pump flow calibration:** The temperature model in §9.4 requires knowing Q_hot and
+   Q_cool in absolute mL/s.  However, both pumps' actual flow rate at operating pressure
+   depends on pump-to-pump variance, check valve cracking pressure, and puck resistance.
+   Should we add a guided calibration routine (e.g., run each pump alone for N seconds
+   through the flow meter, record volume) to derive `cool_pump_max_flow_ml_s:` at build
+   time?  Or leave calibration to the user via the `flow_fraction` values?
 
 ---
 
