@@ -529,12 +529,14 @@ struct MockHeaterCtrl : public IHeater {
   float current_temp{25.0f};
   float target_temp{0.0f};
   int set_target_count{0};
+  int force_off_count{0};
 
   float get_current_temperature() const override { return current_temp; }
   void set_target_temperature(float t) override {
     target_temp = t;
     set_target_count++;
   }
+  void force_off() override { force_off_count++; }
   // Bidirectional: ready only when within 0.5°C of target (both above and below).
   bool is_ready(float t) const override {
     return current_temp >= (t - 0.5f) && current_temp <= (t + 0.5f);
@@ -899,8 +901,90 @@ TEST(Power, MachineOnWhilePurgingAllowsNewOpsAfterIdle) {
 }
 
 // ---------------------------------------------------------------------------
-// 🔴 P0-1 / P0-3 — Hard over-temperature cutoff and sensor fault handling
+// Heater power control — machine_off() stops heater, machine_on() restarts it
 // ---------------------------------------------------------------------------
+
+// Fixture with a brew heater controller wired for power-control tests.
+struct PowerWithHeaterFixture {
+  MockValve brew_valve;
+  MockValve purge_valve;
+  MockValve steam_valve;
+  MockValve steam_purge_valve;
+  MockPump brew_pump;
+  MockPump steam_pump;
+  MockHeaterCtrl brew_heater_ctrl;
+  EspressoMachine machine;
+
+  PowerWithHeaterFixture() {
+    machine.set_brew_valve(&brew_valve);
+    machine.set_brew_purge_valve(&purge_valve);
+    machine.set_brew_pump(&brew_pump);
+    machine.set_brew_target_temperature(90.0f);
+    machine.set_brew_flow_max(40.0f);
+    machine.set_brew_flow_offset(20.0f);
+    machine.set_brew_heater_ctrl(&brew_heater_ctrl);
+
+    machine.set_steam_valve(&steam_valve);
+    machine.set_steam_purge_valve(&steam_purge_valve);
+    machine.set_steam_pump(&steam_pump);
+    machine.set_steam_target_temperature(135.0f);
+    machine.set_steam_flow_max(2.0f);
+    machine.set_steam_cool_down_to(90.0f);
+
+    brew_heater_ctrl.current_temp = 25.0f;
+
+    g_mock_millis = 0;
+    machine.setup();
+    // NOTE: machine_on() intentionally NOT called here — tests call it explicitly
+  }
+};
+
+// machine_off() must call force_off() on the brew heater controller so the
+// PID climate stops heating when the machine powers down.
+TEST(Power, MachineOffCallsForceOffOnBrewHeater) {
+  PowerWithHeaterFixture f;
+  f.machine.machine_on();
+  f.machine.machine_off();
+  EXPECT_GE(f.brew_heater_ctrl.force_off_count, 1);
+}
+
+// machine_off() triggered by idle auto-off must also stop the heater.
+TEST(Power, IdleAutoOffCallsForceOffOnBrewHeater) {
+  PowerWithHeaterFixture f;
+  f.machine.set_idle_timeout_ms(5000);
+  f.machine.machine_on();
+
+  g_mock_millis = 6000;  // past the 5 s timeout
+  f.machine.loop();  // idle timeout fires → machine_off() → force_off()
+
+  EXPECT_FALSE(f.machine.is_powered_on());
+  EXPECT_GE(f.brew_heater_ctrl.force_off_count, 1);
+}
+
+// machine_on() must re-enable the brew heater by calling set_target_temperature()
+// so the PID climate warms back up to the brew setpoint.
+TEST(Power, MachineOnEnablesBrewHeater) {
+  PowerWithHeaterFixture f;
+  f.machine.machine_on();
+  EXPECT_FLOAT_EQ(f.brew_heater_ctrl.target_temp, 90.0f);
+  EXPECT_GE(f.brew_heater_ctrl.set_target_count, 1);
+}
+
+// Full off→on cycle: heater is stopped on off and restarted on on.
+TEST(Power, MachineOffOnCycleStopsAndRestartsHeater) {
+  PowerWithHeaterFixture f;
+  f.machine.machine_on();
+  int force_off_before = f.brew_heater_ctrl.force_off_count;
+  f.machine.machine_off();
+  EXPECT_GT(f.brew_heater_ctrl.force_off_count, force_off_before);
+
+  int set_target_before = f.brew_heater_ctrl.set_target_count;
+  f.machine.machine_on();
+  EXPECT_GT(f.brew_heater_ctrl.set_target_count, set_target_before);
+  EXPECT_FLOAT_EQ(f.brew_heater_ctrl.target_temp, 90.0f);
+}
+
+
 
 // MockHeaterCtrl that can be configured to return a specific temperature
 // (or NaN to simulate a sensor fault).  Also records if force_off() is called.
@@ -1191,9 +1275,10 @@ struct BrewHeaterFixture {
 // P1-2: brew_start() calls set_target_temperature() on the heater controller.
 TEST(P1BrewHeater, BrewStartSetsHeaterTargetToBrewTemperature) {
   BrewHeaterFixture f;
+  int count_before = f.brew_heater_ctrl.set_target_count;  // machine_on() may have called it
   f.machine.brew_start();
   EXPECT_FLOAT_EQ(f.brew_heater_ctrl.target_temp, 90.0f);
-  EXPECT_EQ(f.brew_heater_ctrl.set_target_count, 1);
+  EXPECT_GT(f.brew_heater_ctrl.set_target_count, count_before);
 }
 
 // P1-2: HEATING state waits for temperature when heater controller is wired.

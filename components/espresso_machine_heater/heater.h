@@ -108,11 +108,15 @@ class EspressoMachineHeater : public Component,
     return get_current_temperature() > (target_temp + temperature_tolerance_);
   }
 
-  // IHeater — setpoint command
+  // IHeater — setpoint command.
+  // Also re-activates HEAT mode so that a previous force_off() (e.g. from
+  // machine_off() or an over-temperature safety cutoff that was subsequently
+  // cleared) does not leave the PID climate in OFF mode.
   void set_target_temperature(float t) override {
     if (climate_ == nullptr)
       return;
     auto call = climate_->make_call();
+    call.set_mode(climate::CLIMATE_MODE_HEAT);
     call.set_target_temperature(t);
     call.perform();
   }
