@@ -19,11 +19,15 @@
 7. [Dual Boiler Machines](#7-dual-boiler-machines)
 8. [Dual NTC, Single Thermoblock](#8-dual-ntc-single-thermoblock)
 9. [Dual Pump, Single Thermoblock — Active Temperature Profiling via Cool-Water Injection](#9-dual-pump-single-thermoblock--active-temperature-profiling-via-cool-water-injection)
-10. [New Components Required](#10-new-components-required)
-11. [Orchestrator Extensions Required](#11-orchestrator-extensions-required)
-12. [Component Reuse Summary](#12-component-reuse-summary)
-13. [Phased Implementation Plan](#13-phased-implementation-plan)
-14. [Open Questions](#14-open-questions)
+10. [Boiler with Water Inlet Pre-Heater](#10-boiler-with-water-inlet-pre-heater)
+11. [Heat Exchanger (HX) Machines — E61 Group Head and Thermosyphon](#11-heat-exchanger-hx-machines--e61-group-head-and-thermosyphon)
+12. [Variable-Speed Rotary Pump — Pressure and Flow Profiling](#12-variable-speed-rotary-pump--pressure-and-flow-profiling)
+13. [Advanced Commercial, Lever, and Edge-Case Configurations](#13-advanced-commercial-lever-and-edge-case-configurations)
+14. [New Components Required](#14-new-components-required)
+15. [Orchestrator Extensions Required](#15-orchestrator-extensions-required)
+16. [Component Reuse Summary](#16-component-reuse-summary)
+17. [Phased Implementation Plan](#17-phased-implementation-plan)
+18. [Open Questions](#18-open-questions)
 
 ---
 
@@ -39,9 +43,12 @@ MINIMUM                                                              MAXIMUM
 Pump relay                                                Dual boiler
 + valve relay                                             + dual thermoblock
 (no temp sensor)                                          + dual NTC each
-(pressurestat controls heat)                              + flow meter
-(time-based shot only)                                    + scale
+(pressurestat controls heat)                              + inlet pre-heater
+(time-based shot only)                                    + flow meter
+                                                          + variable-speed rotary pump
+                                                          + dual cool-water pump
                                                           + pressure transducer
+                                                          + scale
                                                           + display
                                                           + cloud logging
 ```
@@ -60,9 +67,13 @@ gracefully when hardware is absent, using safe fallback behaviour.
 | **Single boiler — SSR bypass** | Gaggia Classic (modded), Rancilio Silvia | 1 × boiler + SSR | 1 × NTC or TC | Optional | None | 1 × vibration |
 | **GaggiaMate target** | Gaggia Classic, Breville Barista Express | 1 × boiler + SSR | 1 × NTC | Optional | Optional | 1 × vibration |
 | **Dual NTC, single thermoblock** | Custom Philips mod | 1 × thermoblock + SSR | 2 × NTC at different positions | 1 × AB32 | Optional | 1 × vibration |
-| **Dual pump, single thermoblock** | Custom cooling mod | 1 × thermoblock + SSR | 1 × sensor | 1 × AB32 | Optional | 2 × vibration (brew + cool) |
+| **Dual pump, single thermoblock** | Custom Decent-style mod | 1 × thermoblock + SSR | 1 × sensor (+ optional 2nd for group inlet) | 1 × AB32 | Optional | 2 × vibration (brew + cool) |
 | **Dual thermoblock** | DeLonghi Dinamica Pro | 2 × thermoblock + 2 × SSR | 2 × sensors | Optional | Optional | 1 × vibration |
 | **Dual boiler** | Breville Dual Boiler, ECM Synchronika, Profitec Pro 700 | 2 × boiler + 2 × SSR | 2 × sensors | Optional | None | 1 × vibration |
+| **With inlet pre-heater** | Any thermoblock/boiler machine + secondary element | 1–2 × primary + 1 × inlet heater | 1–2 × primary + 1 × inlet NTC | Optional | Optional | 1 × vibration |
+| **HX / E61** | Rocket Appartamento, ECM Mechanika, Quick Mill, Bezzera, Lelit Bianca | 1 × steam boiler (HX coil inside) | 1 × NTC on boiler | Optional | None | 1 × vibration or rotary |
+| **Variable-speed rotary pump** | La Marzocca Strada EP, Slayer, Decent DE1, VA Black Eagle | 1–2 × boiler/thermoblock | 1–2 × sensors | Optional | Optional | 1 × variable-speed rotary |
+| **Multi-group commercial** | La Marzocca Linea, Dalla Corte, Nuova Simonelli Aurelia | 1–2 × large boiler | 1–2 × sensors | 1 per group (optional) | None | 1 rotary (shared) or 1 per group |
 
 ---
 
@@ -872,9 +883,518 @@ espresso_machine:
 
 ---
 
-## 10  New Components Required
+## 10  Boiler with Water Inlet Pre-Heater
 
-### 10.1  Summary table
+### 10.1  Concept and Motivation
+
+The user's request: "a boiler with a pre-heater right behind it, to better regulate the
+inlet water temperature and not cool the boiler too much, or the other way around."
+
+An **inlet pre-heater** is a secondary heating element positioned in the water path
+**between the reservoir/pump and the main boiler or thermoblock**.  Its purpose:
+
+1. **Prevent thermal shock** — Cold water hitting the boiler causes rapid temperature
+   drops and repeated thermal stress cycles on the boiler walls and seals.
+2. **Maintain temperature stability** — Pre-heating inlet water to e.g. 60 °C means the
+   main boiler only needs to raise water by ~35 °C instead of ~75 °C, dramatically
+   reducing temperature variance between shots.
+3. **Reduce heater recovery time** — Less energy required per shot; recovery faster
+   for back-to-back extractions.
+
+```
+Water tank
+    │
+    ▼
+ Main pump
+    │
+    ▼
+┌─────────────────────┐
+│  Inlet Pre-Heater   │  ← small SSR-controlled element; NTC monitors inlet temp
+│  setpoint: ~60–70°C │    independent PID loop; runs whenever machine is on
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐
+│  Main Thermoblock   │  ← receives ~65°C water instead of ~15°C tap water
+│  setpoint: 93–98°C  │    PID only needs to raise Δ30°C instead of Δ80°C
+└─────────────────────┘
+    │
+    ▼
+ Group head → Puck
+```
+
+### 10.2  Commercial examples
+
+| Manufacturer | Implementation |
+|---|---|
+| **Slayer Espresso** | Routes incoming cold water through a pre-heat jacket *around* the steam boiler, recovering waste heat before the water enters the brew boiler |
+| **Victoria Arduino T3** | "Triple temperature control" — three independent PIDs: inlet water, brew group, steam |
+| **Dalla Corte** | Per-group boiler systems often include inlet temp conditioning to ensure stable fill temps at high throughput |
+| **Decent DE1** | Uses a multi-segment thermoblock; initial segments act as a pre-heater before final segments reach brew temp |
+
+### 10.3  What works today (no new code)
+
+Both the inlet heater and the main heater can already be declared as separate native
+ESPHome `climate.pid` + `output.slow_pwm` blocks.  The inlet heater runs completely
+independently — no orchestrator changes required for basic operation.
+
+```yaml
+# Inlet pre-heater (native ESPHome — no custom component needed)
+sensor:
+  - platform: ntc
+    id: inlet_temp
+    sensor: inlet_adc
+    calibration:
+      b_constant: 3950
+      reference_temperature: 25°C
+      reference_resistance: 10k
+    name: "Inlet Water Temperature"
+    ...
+
+output:
+  - platform: slow_pwm
+    id: inlet_ssr
+    pin: GPIO12
+    period: 2s
+
+climate:
+  - platform: pid
+    id: inlet_heater_pid
+    name: "Inlet Pre-Heater"
+    sensor: inlet_temp
+    heat_output: inlet_ssr
+    default_target_temperature: 65°C
+    control:
+      kp: 0.8
+      ki: 0.003
+      kd: 0.0
+
+# The main thermoblock PID and espresso_machine: are declared as usual
+# No changes to espresso_machine schema required for basic use
+```
+
+### 10.4  Required changes for first-class orchestrator support
+
+For the orchestrator to coordinate the inlet heater as part of the machine lifecycle
+(wait for inlet to reach temp before brew, keep it active in standby, etc.):
+
+#### Schema additions
+
+```yaml
+espresso_machine:
+  id: my_espresso
+  brew:
+    heater: main_heater
+    inlet_heater: inlet_heater_pid      # NEW — optional reference to inlet heater
+    inlet_target_temperature: 65°C      # NEW — inlet setpoint (default: no constraint)
+    ...
+```
+
+#### Task checklist
+
+- [ ] Add optional `brew: inlet_heater:` key — references a native `climate` entity
+- [ ] Add optional `brew: inlet_target_temperature:` key — if set, orchestrator waits for
+      inlet to reach this temperature before entering `BREWING` state
+- [ ] Orchestrator `HEATING` state: if `inlet_heater_` is set, check inlet temperature
+      in addition to main heater temperature before allowing brew
+- [ ] Orchestrator `IDLE` state: if `inlet_heater_` is set, keep it enabled (always-ready)
+- [ ] Add `IInletHeater` interface or reuse `IHeater::get_current_temperature()` (the
+      inlet heater is just another climate entity — no new interface needed)
+- [ ] Create `examples/with_inlet_preheater.yaml` — reference config
+- [ ] Document inlet pre-heater wiring and NTC placement in `docs/wiring.md`
+- [ ] Add inlet pre-heater section to `docs/pid_tuning.md` — tuning is simpler than
+      brew PID (no brewing disturbance, much lower setpoint gradient needed)
+
+### 10.5  Interaction with other machine types
+
+| Combined with | Notes |
+|---|---|
+| Dual thermoblock (§6) | Both the inlet heater and the brew thermoblock receive independent PIDs — fully compatible |
+| Dual boiler (§7) | Inlet pre-heater feeds both the brew boiler and the steam boiler fill path — single inlet heater shared |
+| Dual NTC §8 | The inlet NTC can be the "upstream" sensor in the dual-NTC model, further improving thermal profiling accuracy |
+| Dual pump / cool water §9 | The cool pump bypasses the inlet heater (cool water must remain cool) — the mixing tee is downstream of the thermoblock output only |
+| HX machine §11 | Inlet pre-heater particularly valuable here — cold fill water destabilises HX brew temp; pre-heating to 50–60°C before entering the steam boiler coil improves shot-to-shot consistency significantly |
+
+---
+
+## 11  Heat Exchanger (HX) Machines — E61 Group Head and Thermosyphon
+
+### 11.1  What is an HX machine?
+
+A **heat exchanger (HX) machine** has a **single large boiler held at steam temperature**
+(~125–135 °C).  Brew water is not drawn from the boiler directly; instead, it passes
+through a copper or stainless coil **running inside the steam boiler**, absorbing heat as
+it flows toward the group head.  The brew water never mixes with the steam water.
+
+```
+Water tank
+    │
+    ▼
+ Main pump
+    │
+    ▼  ┌─────────────────────────────────┐
+    └──►│     Steam Boiler (~130°C)       │
+       │  ┌────────────────────────────┐ │──► Steam wand
+       │  │  HX Coil (brew water path) │ │
+       │  └─────────────┬──────────────┘ │
+       └────────────────┼────────────────┘
+                        │
+                        ▼
+                   E61 Group Head (kept warm by thermosyphon loop from boiler)
+                        │
+                        ▼
+                     Puck
+```
+
+The **E61 group head** uses a **thermosyphon loop** — hot water from the boiler
+circulates passively through the group head body by convection, keeping the brass group
+at ~90–95 °C without any pump or active control.
+
+**Commercial examples:** Rocket Appartamento, ECM Synchronika, Quick Mill Vetrano,
+Bezzera Magica, Lelit Bianca, Profitec Pro series, Jura Giga line (commercial).
+
+### 11.2  Key characteristics and challenges
+
+| Characteristic | Impact on ESPHome control |
+|---|---|
+| Boiler runs at ~130°C | Heater PID setpoint is for steam, not brew |
+| Brew temp depends on HX coil geometry + flow rate | Cannot be directly set; must be calibrated |
+| **Temperature surfing required** | If machine is idle >5 min, HX water overheats → must flush 5–15 s before shot |
+| Thermosyphon loop keeps group hot | No active group heater control needed |
+| Brew and steam share the same boiler | Simultaneous brew + steam is possible but brew temp affected by steaming activity |
+| NTC on boiler only | No direct brew temperature measurement without additional probe at group head inlet |
+
+### 11.3  Temperature surfing — the key challenge
+
+When the machine is idle, hot boiler water slowly heats the water sitting in the HX
+coil beyond the target brew temperature.  A standard practice is to flush 5–10 seconds
+of water through the group head just before brewing, cooling the HX coil back to
+target brew temperature.
+
+Without this flush, shots can be 5–15 °C hotter than intended, causing over-extraction.
+
+```
+Machine idle for >5 min:  HX coil water at ~103°C
+After 5s flush:           HX coil back to ~93°C (stable zone)
+Shot extraction begins:   temperature holds stable for the duration
+```
+
+### 11.4  What works today (no new code)
+
+An HX machine uses the same `espresso_machine:` schema as a single boiler machine, with:
+- `brew: heater:` and `steam: heater:` both referencing the **same** climate entity
+- Steam setpoint (~130°C) is the operating setpoint; brew setpoint is also ~130°C
+  (the brew group receives its temperature from the HX coil, not from PID control)
+- The `purge_valve:` or `brew_valve:` can be opened briefly before a shot for the
+  cooling flush, via an ESPHome automation or HA button press
+
+### 11.5  Required changes for first-class HX support
+
+- [ ] Add optional `brew: pre_flush_volume:` key — if set, orchestrator opens the brew
+      valve and runs the pump for this volume (or `pre_flush_timeout:`) before entering
+      `BREWING` state, then stops and pauses 5 s for temperature equilibration
+- [ ] Add optional `brew: pre_flush_timeout:` key — time-based alternative to volume-based
+      pre-flush for machines without a flow meter
+- [ ] Optionally: `brew: hx_stabilise_delay:` — pause after flush before brew starts
+      (allows the HX coil to re-equilibrate to steady state)
+- [ ] New phase in brew state machine: `PRE_FLUSHING` → `FLUSH_PAUSE` → `HEATING` → `BREWING`
+- [ ] Create `examples/hx_e61.yaml` — reference config for HX machines
+- [ ] Add HX temperature surfing section to `docs/pid_tuning.md`
+
+### 11.6  Interaction with the inlet pre-heater (§10)
+
+On an HX machine, cold fill water enters the steam boiler to replenish what was used
+for steam.  If the fill water is cold, the boiler temperature drops during fill, which
+directly affects the HX coil temperature and therefore brew temperature.
+
+An inlet pre-heater (§10) on an HX machine pre-heats fill water to 50–60 °C before
+it enters the steam boiler, dramatically reducing temperature recovery time between
+steam and brew.
+
+---
+
+## 12  Variable-Speed Rotary Pump — Pressure and Flow Profiling
+
+### 12.1  Concept
+
+A **variable-speed rotary pump** replaces or augments the standard vibration pump.
+By controlling the pump speed (via PWM dimmer for AC motors, or a VFD/motor controller
+for DC brushless), the system can dynamically vary **flow rate** and therefore
+**back-pressure** at the puck during extraction.
+
+This enables full **pressure profiling** (controlling bar at the puck) and **flow
+profiling** (controlling mL/s through the puck) — the primary capability of machines
+like the La Marzocca Strada EP, Slayer Espresso, and the Decent DE1.
+
+```
+Profile types enabled by variable-speed pump:
+
+ Pressure (bar)
+ │
+ 9 │     ┌──────────────────────────┐
+   │    /                           \
+ 6 │   /                             └─────
+   │  /  Pre-infusion → Ramp → Hold → Decline
+ 2 │──/
+   └────────────────────────────────── time (s)
+      0    5      15      30      45
+
+ Flow (mL/s)
+ │
+ 4 │         ┌─────────────┐
+   │        /               \
+ 2 │       /                 \──────────
+   │──────/
+   └────────────────────────────────── time (s)
+```
+
+### 12.2  What already works
+
+The existing `espresso_machine_pump` with `type: dimmer` (TRIAC-based PWM control)
+already supports partial speed control of **vibration pumps**.  For vibration pumps,
+speed control is limited (they are resonance-based), but partial duty does affect flow
+rate.
+
+For true **rotary pump** speed control via VFD (Variable Frequency Drive) or
+DC brushless motor controller, the pump's PWM output maps directly to RPM, giving
+precise, linear flow control.
+
+### 12.3  Pump speed ↔ pressure relationship
+
+| Pump duty | Flow rate (approx.) | Back-pressure at 9 bar |
+|---|---|---|
+| 100% | ~80 mL/min | ~80 mL/min (full flow) |
+| 75% | ~55 mL/min | still ~9 bar (pump still reaches max pressure) |
+| 50% | ~35 mL/min | ~5–6 bar (pump cannot reach 9 bar at this speed) |
+| 25% | ~15 mL/min | ~2–3 bar (pre-infusion zone) |
+
+> **Note:** Without a pressure transducer, there is no feedback on actual bar.
+> Open-loop flow profiles are the baseline; closed-loop pressure profiles require
+> adding an `espresso_machine_pressure` transducer (§15).
+
+### 12.4  Required schema additions
+
+```yaml
+espresso_machine:
+  id: my_espresso
+  brew:
+    pump: main_pump              # type: dimmer — supports variable speed
+    pump_profile:                # NEW — time-based pump speed ramp during shot
+      - at: 0s
+        speed_fraction: 0.20    # ~2–3 bar pre-infusion
+      - at: 8s
+        speed_fraction: 0.20    # hold pre-infusion for 8 s
+      - at: 12s
+        speed_fraction: 1.0     # ramp to full pressure
+      - at: 35s
+        speed_fraction: 0.65    # declining pressure at end of shot
+    ...
+```
+
+#### Task checklist
+
+- [ ] Add optional `brew: pump_profile:` key — list of `{at: <time>, speed_fraction: <float>}`
+      entries; orchestrator interpolates between them during `BREWING` state
+- [ ] Orchestrator `BREWING` tick: if `pump_profile_` is set, compute interpolated
+      `speed_fraction` at current elapsed time and call `pump_->set_speed(fraction)`
+- [ ] This is architecturally identical to `cool_pump_profile:` — consider sharing the
+      profile interpolation logic as a `BrewProfileInterpolator` utility class
+- [ ] When both `pump_profile:` and `cool_pump_profile:` are set (§9), both ramps run
+      simultaneously — the orchestrator drives two pumps independently
+- [ ] Create `examples/rotary_pump_profiling.yaml` — reference config with a
+      pre-infusion ramp → hold → declining pressure profile
+- [ ] Unit tests: interpolation at boundary points; pump speed set correctly in BREWING
+- [ ] Add section to `docs/pid_tuning.md` — pressure profiling calibration procedure
+
+### 12.5  Closed-loop pressure profiling (future, requires §15)
+
+When a pressure transducer is available, the `pump_profile:` keys can express target
+**bar** values instead of `speed_fraction` values, and a pressure PID loop in the
+orchestrator controls pump speed to hit the target:
+
+```yaml
+brew:
+  pump_profile:
+    - at: 0s
+      target_bar: 2.0     # low pre-infusion
+    - at: 10s
+      target_bar: 9.0     # ramp to full brew pressure
+    - at: 35s
+      target_bar: 6.0     # declining pressure profile
+```
+
+This requires the `espresso_machine_pressure` platform (§14.2) to be implemented first.
+
+---
+
+## 13  Advanced Commercial, Lever, and Edge-Case Configurations
+
+### 13.1  Multi-Group Commercial Machines
+
+Commercial 2–3 group machines share a single boiler but have **one solenoid valve,
+one group head, and one flow path per group**.  Each group can pull a shot
+independently.
+
+```
+Boiler ──► Group 1 solenoid ──► Group 1 head
+       └──► Group 2 solenoid ──► Group 2 head
+       └──► Group 3 solenoid ──► Group 3 head
+
+Shared: boiler heater, main pump (or one pump per group on some models)
+```
+
+**ESPHome support today:**
+- `espresso_machine_valve` already has `MULTI_CONF = True` — each group valve is a
+  separate entity
+- The orchestrator could reference multiple valve instances, one per `brew:` block —
+  but the current schema only supports a single `brew:` section
+
+**Required changes:**
+- [ ] Allow `brew:` to be a **list** in the orchestrator schema, with each item having
+      its own `valve:` and optional `flow_meter:` reference (one brew controller per group)
+- [ ] Orchestrator manages N independent brew state machines simultaneously
+- [ ] This is a significant orchestrator change — **low priority**; defer to Phase 12+
+- [ ] Create `examples/two_group_commercial.yaml` — reference config
+
+### 13.2  Spring Lever Machines
+
+Spring lever machines (La Pavoni, Elektra, Cremina, Flair Pro) have **no pump**.
+Pressure is generated by a user-operated lever compressing a spring (~8–10 bar at peak).
+
+```
+User pulls lever → spring loaded → releases → spring pushes piston → 9 bar peak → declines
+```
+
+The pressure profile is **mechanically fixed** by the spring constant.
+
+**ESPHome integration possibilities (monitoring only):**
+- Temperature sensor (NTC on boiler) + PID heater control — full support today
+- Flow meter on brew path — volume measurement possible
+- Shot timer via ESPHome button press
+- Group head thermometer via NTC at group inlet
+- **No pump control possible** (no pump to control)
+
+**Unsupported today (and possibly forever):**
+- There is no electrical actuator on the brew circuit to control
+- Pressure sensing is possible (adding a 0–16 bar transducer at group head outlet)
+  but pressure profiling is not — the spring determines the curve
+
+### 13.3  E61 Flow Control Device (Manual Needle Valve)
+
+The **E61 flow control device** is a needle valve installed between the pump and the
+E61 group head.  Manually restricting the valve limits flow and therefore pressure at
+the puck — a mechanical proxy for flow profiling.
+
+**ESPHome integration:**
+- If the needle valve is motorised (BLDC servo or stepper motor), it can be controlled
+  by an additional ESPHome `stepper:` or `servo:` entity
+- The orchestrator would need a `flow_restrictor:` key — currently unsupported
+- **Today:** Manual valve + ESPHome temperature + flow meter + shot timer is the
+  practical combination; no valve motor control in scope
+
+### 13.4  Induction Heating
+
+Some machines (Breville Barista Touch, some custom builds) use **induction coils**
+rather than resistance heating elements.  The induction coil is driven by a
+high-frequency resonant inverter; control is via PWM duty cycle of the inverter enable
+signal.
+
+**ESPHome compatibility:**
+- The inverter's enable pin can be connected to `output: slow_pwm` just like an SSR,
+  provided the inverter accepts a slow digital enable rather than requiring fast RF
+  modulation
+- If the inverter has a PWM speed input (common on off-the-shelf induction modules),
+  this maps to `output: ledc` or a standard PWM output
+- **Risk:** Induction coils heat much faster than resistance elements — PID parameters
+  need aggressive derivative terms and very short periods
+- **Safety:** Same hard over-temperature limit applies; see the safety rules in the
+  custom instruction preamble
+
+### 13.5  Machines with Proprietary Digital Bus Protocols
+
+Several consumer espresso machines use **closed proprietary digital protocols**
+between the controller and heater/pump (Jura GIGA, DeLonghi Dinamica, Breville
+Oracle, Melitta high-end):
+
+- **ESPHome integration: not possible** without reverse-engineering the protocol
+- Relay bypass of the pump/valve at the 230V level may be possible but bypasses
+  all original safety interlocks
+- These machines are **explicitly out of scope** for this firmware
+
+### 13.6  Machines without an Accessible Pump (Pod/Capsule Machines)
+
+Nespresso, Dolce Gusto, and most single-serve pod machines have the pump mechanically
+integrated with the capsule piercing mechanism.  The pump is not separately accessible
+and shot timing is controlled by the OEM controller.
+
+**ESPHome integration: not possible** at the pump or valve level.  Temperature
+monitoring with an NTC added externally is the only feasible integration.
+
+### 13.7  Rotary Pump with Bypass Valve (Pressure Regulation via OPV)
+
+Commercial and high-end prosumer machines use a **rotary pump at fixed speed** with an
+**Over-Pressure Valve (OPV)** — a spring-loaded bypass that recirculates water when
+pressure exceeds the set point (typically 9 bar).
+
+This is the most common commercial architecture.  The OPV mechanically caps pressure;
+flow and pressure at the puck are controlled by the portafilter resistance (grind
+size and dose), not by pump speed.
+
+**ESPHome integration today:** Full support — the pump is a simple on/off relay; the
+OPV is passive hardware; temperature and flow measurement are standard.
+
+**Profiling with an OPV machine:** Only flow profiling via a motorised needle valve
+(§13.3) or by adding a variable-speed motor controller and bypassing the OPV at lower
+speeds.  Pressure profiling requires removing or adjusting the OPV, which is
+non-trivial.
+
+### 13.8  Dual-Boiler with Group-Head Saturated Connection (La Marzocca Style)
+
+La Marzocca Linea, GS3, and similar machines use a **saturated group head** where
+the brew boiler water flows through the group head body constantly (via a small
+thermosyphon or forced circulation), maintaining the group head at exactly brew
+temperature.
+
+```
+Brew boiler (93°C) ────► Solenoid ────► Group head ────► Puck
+         ↑                                   │
+         └─────────── thermosyphon return ───┘
+```
+
+**Key difference from E61:** In E61, the thermosyphon is a heat transfer mechanism
+only.  In a saturated group, actual brew water fills the group head cavity and returns
+to the boiler — so the group head is always primed with brew-temperature water.
+
+**ESPHome integration:**
+- Full support today: the brew boiler PID + brew solenoid + flow meter is the same
+  as any other dual-boiler configuration
+- No additional schema changes needed
+- The thermosyphon circulation requires no electrical control (passive convection)
+
+### 13.9  Open Edge Cases and Unsupported Scenarios Summary
+
+| Scenario | Status | Notes |
+|---|---|---|
+| Water inlet pre-heater | ✅ Works today; orchestrator support planned (§10) | NTC + slow PWM + PID — native ESPHome |
+| HX machine / E61 | ✅ Works today with manual flush; `pre_flush_volume:` planned (§11) | — |
+| Variable-speed vibration pump | ✅ Works with `type: dimmer` | Limited speed range |
+| Variable-speed rotary pump | 🚧 Planned — `pump_profile:` key (§12) | PWM or VFD interface |
+| Spring lever machine | ✅ Temperature + flow monitoring; no pump control | Monitoring only |
+| E61 motorised needle valve | ⬜ Not in scope | Would need `stepper:` entity |
+| Induction heating | 🚧 Probably works with slow_pwm; needs testing | Aggressive PID tuning |
+| Proprietary digital bus (Jura, DeLonghi) | ❌ Not possible | Protocol unknown |
+| Pod/capsule machines | ❌ Not possible | Pump not accessible |
+| OPV rotary pump (commercial) | ✅ Full support | OPV is passive hardware |
+| Saturated group head (La Marzocca) | ✅ Full support | Same as dual boiler |
+| Multi-group (2–3 groups) | ⬜ Future — list-style `brew:` schema | Low priority |
+| Pneumatic pre-infusion | ⬜ Not in scope | No electrical actuator |
+| Plumbed-in (no reservoir) | ✅ Flow meter still works; no "tank empty" detection | Remove empty-tank logic |
+
+---
+
+## 14  New Components Required
+
+### 14.1  Summary table
 
 | Component | Machine types | Priority | Effort |
 |---|---|---|---|
@@ -882,12 +1402,15 @@ espresso_machine:
 | Optional `brew_timeout:` in brew schema | Minimal / GaggiaMate | **High** | Low |
 | Optional `flow_max` / `flow_offset` defaults | Minimal / GaggiaMate | **High** | Low |
 | Allow shared `valve:` + `purge_valve:` id | GaggiaMate / single-boiler | **High** | Low |
+| Optional `brew: inlet_heater:` + `inlet_target_temperature:` | Water inlet pre-heater | Medium | Low |
+| Optional `brew: pre_flush_volume:` / `pre_flush_timeout:` | HX machine pre-flush | Medium | Low |
+| Optional `brew: pump_profile:` | Variable-speed rotary pump profiling | Medium | Medium |
 | Optional `cool_pump:` + `cool_pump_profile:` in brew schema | Dual pump / temp profiling | Medium | Medium |
 | Optional `secondary_sensor:` on `espresso_machine_heater` | Dual NTC | Medium | Medium |
 | Optional `cool_down_to:` in steam schema | Dual boiler | Medium | Low |
 | `espresso_machine_pressure:` platform | Dual boiler / profiling | Low | High |
 
-### 10.2  `espresso_machine_pressure` (future)
+### 14.2  `espresso_machine_pressure` (future)
 
 A new optional platform that wraps a 0–16 bar pressure transducer (e.g., GEMS 2200,
 Honeywell MLH), publishes pressure as a HA sensor entity, and exposes `IPressure`
@@ -911,9 +1434,9 @@ This is a prerequisite for pressure profiling (Phase 12+) and is tracked separat
 
 ---
 
-## 11  Orchestrator Extensions Required
+## 15  Orchestrator Extensions Required
 
-### 11.1  Schema changes
+### 15.1  Schema changes
 
 | Change | Reason | Breaking |
 |---|---|---|
@@ -924,9 +1447,14 @@ This is a prerequisite for pressure profiling (Phase 12+) and is tracked separat
 | `steam: cool_down_to:` — make optional | Dual boiler (always hot) | No |
 | `brew: cool_pump:` — new optional key | Active temp descent profiling | No |
 | `brew: cool_pump_profile:` — new optional list | Time-based cool pump blend ramp | No |
+| `brew: inlet_heater:` — new optional key | Water inlet pre-heater | No |
+| `brew: inlet_target_temperature:` — new optional key | Inlet pre-heater setpoint | No |
+| `brew: pre_flush_volume:` — new optional key | HX machine cooling flush (volume) | No |
+| `brew: pre_flush_timeout:` — new optional key | HX machine cooling flush (time) | No |
+| `brew: pump_profile:` — new optional list | Variable-speed pump profiling | No |
 | Allow `brew: valve:` and `brew: purge_valve:` to share same id | Single solenoid machines | No |
 
-### 11.2  C++ changes
+### 15.2  C++ changes
 
 | Change | File | Effort |
 |---|---|---|
@@ -939,9 +1467,9 @@ This is a prerequisite for pressure profiling (Phase 12+) and is tracked separat
 
 ---
 
-## 12  Component Reuse Summary
+## 16  Component Reuse Summary
 
-### 12.1  Components reusable as-is (zero changes)
+### 16.1  Components reusable as-is (zero changes)
 
 | Component | All machine types? | Notes |
 |---|---|---|
@@ -954,14 +1482,14 @@ This is a prerequisite for pressure profiling (Phase 12+) and is tracked separat
 | Native ESPHome `output.slow_pwm` | Yes | Any number of instances |
 | `espresso_machine_sprofiler` | Yes | Shot logging; machine-type agnostic |
 
-### 12.2  Components needing minor changes
+### 16.2  Components needing minor changes
 
 | Component | Change needed | Effort |
 |---|---|---|
 | `espresso_machine_heater` | Add `MULTI_CONF = True`; add `secondary_sensor:` key | Trivial + Low |
-| `espresso_machine` orchestrator | See §11 | Low–Medium total |
+| `espresso_machine` orchestrator | See §15 | Low–Medium total |
 
-### 12.3  New components (not yet written)
+### 16.3  New components (not yet written)
 
 | Component | Purpose | Needed for |
 |---|---|---|
@@ -969,7 +1497,7 @@ This is a prerequisite for pressure profiling (Phase 12+) and is tracked separat
 
 ---
 
-## 13  Phased Implementation Plan
+## 17  Phased Implementation Plan
 
 ### Phase A — Baseline Decoupling (minimum-viable machine support)
 
@@ -1043,9 +1571,37 @@ Tasks:
 - [ ] Create `examples/with_pressure_transducer.yaml`
 - [ ] Document transducer wiring and calibration in `docs/wiring.md`
 
+### Phase G — Inlet Pre-Heater and HX Machine Support
+
+Tasks:
+- [ ] Add optional `brew: inlet_heater:` and `inlet_target_temperature:` to orchestrator schema
+- [ ] Add `PRE_FLUSHING` → `FLUSH_PAUSE` states to brew state machine
+- [ ] Add optional `brew: pre_flush_volume:` and `pre_flush_timeout:` schema keys
+- [ ] C++ null-checks for all new optional pointers
+- [ ] Create `examples/with_inlet_preheater.yaml` — thermoblock + inlet pre-heater config
+- [ ] Create `examples/hx_e61.yaml` — HX machine reference config
+- [ ] Document inlet pre-heater wiring in `docs/wiring.md`
+- [ ] Document HX temperature surfing and pre-flush in `docs/pid_tuning.md`
+- [ ] Unit tests: inlet not-ready blocks BREWING; pre-flush completes before BREWING starts
+- [ ] Validate in CI
+
+### Phase H — Variable-Speed Pump Profile and Closed-Loop Pressure (Future)
+
+> **Open-loop phase (no transducer) can be implemented independently of Phase F.**
+
+Tasks:
+- [ ] Add optional `brew: pump_profile:` key — speed fraction ramp (open-loop)
+- [ ] Implement pump profile interpolation in orchestrator `BREWING` tick
+- [ ] Share `BrewProfileInterpolator` utility with `cool_pump_profile:` interpolation
+- [ ] When `espresso_machine_pressure` is available: extend `pump_profile:` to accept
+      `target_bar:` entries and implement pressure PID loop in BREWING tick
+- [ ] Create `examples/rotary_pump_profiling.yaml` — pre-infusion ramp profile
+- [ ] Unit tests: pump speed set correctly at each profile waypoint
+- [ ] Validate in CI
+
 ---
 
-## 14  Open Questions
+## 18  Open Questions
 
 1. **Pressurestat bypass wiring:** For Gaggia Classic, bypassing the pressurestat requires
    cutting a wire and inserting an SSR.  Should the wiring guide document a "reversible"
@@ -1078,6 +1634,31 @@ Tasks:
    through the flow meter, record volume) to derive `cool_pump_max_flow_ml_s:` at build
    time?  Or leave calibration to the user via the `flow_fraction` values?
 
+7. **Inlet pre-heater placement:** Should the inlet NTC be placed before the pre-heater
+   element (to measure incoming water temperature) or after it (to measure the output
+   temperature that the main boiler receives)?  The PID input should be the output
+   temperature (after the heater).  A second NTC at the inlet would enable a feedforward
+   term to compensate for seasonal tap water temperature variation (summer vs. winter
+   ambient).
+
+8. **HX cooling flush volume vs. temperature:** The "correct" flush volume for an HX
+   machine depends on how long the machine has been idle and the machine's thermal mass.
+   Should the flush be time-based, volume-based, or temperature-driven (flush until a
+   group-head NTC reads below a threshold)?  Temperature-driven is most accurate but
+   requires a group-head NTC sensor (see §8 Dual NTC).
+
+9. **Motorised needle valve (E61 flow control):** If a user adds a stepper-driven needle
+   valve to an E61 group head for automated flow profiling, should this be a new
+   `espresso_machine_flow_restrictor` platform, or reuse the existing `stepper:` native
+   ESPHome entity with an ESPHome automation?  The former is cleaner but adds code; the
+   latter is flexible but harder to integrate with the brew state machine.
+
+10. **Multi-group orchestrator architecture:** For a two-group commercial machine, should
+    the orchestrator support a list of `brew:` blocks (each with its own valve, flow meter,
+    and pump), or should each group be an independent `espresso_machine` instance referencing
+    the same shared boiler heater?  The latter is architecturally simpler but requires the
+    heater entity to support concurrent references from multiple orchestrators.
+
 ---
 
 ## Related Documents
@@ -1089,6 +1670,6 @@ Tasks:
 | [`docs/scales.md`](scales.md) | Scale platform — weight-based exit applies to all machine types |
 | [`docs/wiring.md`](wiring.md) | Current wiring guide (Philips Barista Brew only — will be extended) |
 | [`docs/pid_tuning.md`](pid_tuning.md) | PID guide — will be extended with boiler-specific tuning |
-| [`PLAN.md`](../PLAN.md) | Phased roadmap — Phases A–F above will be added here |
+| [`PLAN.md`](../PLAN.md) | Phased roadmap — Phases A–H above will be added here |
 | [`FEATURES.md`](../FEATURES.md) | Feature status — update when Phase A tasks complete |
 | [`examples/philips_barista_brew.yaml`](../examples/philips_barista_brew.yaml) | Current reference (single thermoblock) |
