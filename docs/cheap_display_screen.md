@@ -656,13 +656,15 @@ Boot → Home Screen  (action hub — idle mode)
 
 ### 6.1 Design Goals
 
-The YAML API must satisfy three goals in order of priority:
+The YAML API must satisfy these goals in order of priority:
 
-1. **Minimal viable config** — a user with a single espresso machine and this display
-   should need to write as little YAML as possible.
+1. **Explicit, conflict-safe wiring** — every GPIO and every entity reference must be
+   declared by the user in YAML.  No auto-discovery.  The ESP32 in this project already
+   has many GPIO assignments (valves, pump, flow meter, thermocouple SPI) that vary per
+   build; silent auto-wiring would risk pin conflicts that are hard to debug.
 2. **Component-aware** — if an optional component (grinder, heater adapter, flow meter)
-   is referenced, its actions and data automatically appear in the UI; if omitted,
-   the UI adapts silently.
+   is referenced, its actions and data automatically appear in the UI; if omitted, the
+   UI adapts silently.  Component bindings are explicit `id:` references, not scanned.
 3. **Themeable** — visual style is a one-word choice, not a custom layout lambda.
 
 ---
@@ -700,14 +702,22 @@ display:
 # ── Espresso Machine Display — the single config block that wires everything ─────────────────
 espresso_machine_display:
   id: my_display_ui
+  # Required hardware bindings — all three must be declared explicitly (no auto-discovery)
+  display_id:  lcd             # ← id: of the display: entity above
+  encoder_id:  rotary_enc      # ← id: of the sensor: rotary_encoder entity above
+  button_id:   enc_button      # ← id: of the binary_sensor: gpio entity above
+  # Machine orchestrator (required)
   espresso_machine: my_espresso    # ← id: of the espresso_machine orchestrator
-  theme: classic                   # ← visual style (see § 6.4)
+  # Visual style (required)
+  theme: classic                   # ← see § 6.4 for available themes
 ```
 
-**That is the full config for a functional UI.** The component auto-discovers the
-display (`lcd`), encoder (`rotary_enc`), and button (`enc_button`) entities by type if
-there is exactly one of each in the YAML.  When multiple displays or encoders exist,
-explicit `display_id:`, `encoder_id:`, and `button_id:` keys are required (see § 6.3).
+**All hardware bindings must be declared explicitly.**  There is no auto-discovery of
+display, encoder, or button entities.  This is intentional: the ESP32 in this project
+has many GPIO assignments that vary per build (valves on GPIO14/26/27, pump on GPIO25,
+flow meter on GPIO34, thermocouple SPI on other pins).  Silent auto-wiring would risk
+binding to the wrong entity and causing pin conflicts that are difficult to debug.
+See § 6.3 for the full reference schema including optional component bindings.
 
 ---
 
@@ -717,11 +727,12 @@ explicit `display_id:`, `encoder_id:`, and `button_id:` keys are required (see �
 espresso_machine_display:
   id: my_display_ui           # (optional) C++ variable name; needed if referenced in lambdas
 
-  # ── Hardware bindings ──────────────────────────────────────────────────────────────────────
-  # If omitted and there is exactly one entity of each type, auto-discovery applies.
-  display_id: lcd             # id: of the display: entity
-  encoder_id: rotary_enc      # id: of the sensor: rotary_encoder entity
-  button_id:  enc_button      # id: of the binary_sensor: gpio entity (click button)
+  # ── Hardware bindings (ALL THREE REQUIRED — no auto-discovery) ────────────────────────────
+  # Explicit id: references prevent pin conflicts. The ESP32 has many GPIO assignments
+  # across components; silent auto-wiring could bind to the wrong entity silently.
+  display_id: lcd             # (required) id: of the display: entity
+  encoder_id: rotary_enc      # (required) id: of the sensor: rotary_encoder entity
+  button_id:  enc_button      # (required) id: of the binary_sensor: gpio entity (click button)
 
   # ── Machine component bindings (each is optional) ──────────────────────────────────────────
   # The component queries each bound sub-component for its published actions and live data.
