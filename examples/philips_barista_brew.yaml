@@ -103,6 +103,7 @@ external_components:
       - espresso_machine_grinder   # timed relay grinder with lockout
       - espresso_machine_flow_meter  # pulse-counting volumetric sensor
       # - espresso_machine_sprofiler   # Sprofiler cloud shot upload (BETA — opt-in, see docs/sprofiler.md)
+      # - espresso_machine_vizualise   # Vizualise.coffee shot upload (BETA — opt-in, see docs/vizualise.md)
 
 # -----------------------------------------------------------------------------
 # SPI bus — used by the MAX6675/MAX31855 thermocouple board
@@ -546,6 +547,24 @@ espresso_machine_grinder:
 #   server: "https://sprofiler.io"               # ← or your self-hosted instance
 #   api_token: !secret sprofiler_token            # ← API token from sprofiler.io account
 #   profile_name: "Manual"                        # ← profile name included in shot records
+
+# =============================================================================
+# VIZUALISE.COFFEE CLOUD — shot upload (BETA — opt-in, not enabled by default)
+# Uploads completed shot data to visualizer.coffee in the parallel-arrays JSON
+# format compatible with Decent Espresso, Gaggiuino, and similar machines.
+# NOTE: This module is currently in BETA. Integration is not fully verified.
+# To enable: uncomment the block below AND the espresso_machine_vizualise
+# entry in external_components above, then add visualizer_token to secrets.yaml.
+# Requires a visualizer.coffee account and API token (see docs/vizualise.md).
+# =============================================================================
+# espresso_machine_vizualise:
+#   id: vizualise_upload
+#   http_request_id: http_client                  # ← wire the HTTP client
+#   espresso_machine: my_espresso                 # ← auto-records shots on brew end
+#   server: "https://visualizer.coffee"           # ← or your self-hosted instance
+#   api_token: !secret visualizer_token           # ← API token from visualizer.coffee account
+#   profile_name: "Manual"                        # ← profile name shown on visualizer.coffee
+#   machine_name: "ESPHome Espresso Machine"      # ← machine name shown on visualizer.coffee
 
 # =============================================================================
 # ESPRESSO MACHINE — orchestrator (first-class citizen)

@@ -40,6 +40,8 @@ partial / planned). A high-level summary:
 | **Brew profiles** | ⬜ Planned | Multi-phase pressure/flow curves (Phase 12) |
 | **Scale — Bluetooth** (Acaia Lunar, Bookoo, Felicita Arc, Difluid) | ⬜ Planned | ESP32 BLE connection; weight-based brew exit + grinder dosing (Phase 13); see `docs/scales.md` |
 | **Scale — Wired load cell** (HX711 / NAU7802) | ⬜ Planned | Same `IScale` interface as BT variant; fully offline (Phase 13) |
+| **Sprofiler cloud upload** (`espresso_machine_sprofiler`) | 🚧 BETA | Opt-in; uploads shots to sprofiler.io in Gaggiuino JSON format; see `docs/sprofiler.md` |
+| **Vizualise.coffee upload** (`espresso_machine_vizualise`) | 🚧 BETA | Opt-in; uploads shots to visualizer.coffee in parallel-arrays JSON format; see `docs/vizualise.md` |
 | **Home Assistant integration** | ✅ Implemented | All entities auto-discovered via native ESPHome API |
 | **OTA updates** | ✅ Implemented | Standard ESPHome OTA via Wi-Fi |
 

@@ -1,0 +1,26 @@
+# Test: espresso_machine_vizualise schema validation.
+# Validates that the Vizualise shot upload component's YAML schema is accepted
+# by ESPHome's config parser.
+esphome:
+  name: test-vizualise
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine_vizualise
+
+espresso_machine_vizualise:
+  id: vizualise_upload
+  server: "https://visualizer.coffee"
+  api_token: "test_token_placeholder"
+  profile_name: "Test Profile"
+  machine_name: "Test Machine"
