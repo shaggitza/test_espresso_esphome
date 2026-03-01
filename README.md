@@ -35,6 +35,8 @@ partial / planned). A high-level summary:
 | **Temperature surfing** | ✅ Implemented | Configurable offset + ramp time; applied via `IHeater` on each brew tick |
 | **Cleanup script callbacks** | ✅ Implemented | `cleanup_script:` fires at DONE/CLEANUP; reference any ESPHome script by id (P2-1) |
 | **Maintenance flush action** | ✅ Implemented | `espresso_machine.flush`: pumps N ml through purge valve on demand (P2-2) |
+| **Descale routine** | ✅ Implemented | `espresso_machine.descale_start`: automated N-cycle pump-on/soak sequence through purge valve; configurable cycle count, pump time, and soak time; stops with `descale_stop()` |
+| **Backflush routine** | ✅ Implemented | `espresso_machine.backflush_start`: automated N-cycle pressurize/release sequence via brew valve (3-way solenoid); configurable cycle count and timing; stops with `backflush_stop()` |
 | **Brew profiles** | ⬜ Planned | Multi-phase pressure/flow curves (Phase 12) |
 | **Scale — Bluetooth** (Acaia Lunar, Bookoo, Felicita Arc, Difluid) | ⬜ Planned | ESP32 BLE connection; weight-based brew exit + grinder dosing (Phase 13); see `docs/scales.md` |
 | **Scale — Wired load cell** (HX711 / NAU7802) | ⬜ Planned | Same `IScale` interface as BT variant; fully offline (Phase 13) |

@@ -68,6 +68,12 @@ void EspressoMachine::loop() {
     case EspressoMode::FLUSHING:
       advance_flush_();
       break;
+    case EspressoMode::DESCALING:
+      advance_descale_();
+      break;
+    case EspressoMode::BACKFLUSHING:
+      advance_backflush_();
+      break;
     case EspressoMode::IDLE:
     default:
       if (powered_on_ && idle_timeout_ms_ > 0 &&
@@ -156,6 +162,28 @@ void EspressoMachine::machine_off() {
       // Stop flush immediately — no pressure concern.
       ESP_LOGI(TAG, "Machine OFF: stopping active flush");
       safe_stop_all_();
+      mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
+      set_powered_off_();
+      publish_status_();
+      break;
+
+    case EspressoMode::DESCALING:
+      // Stop descale immediately.
+      ESP_LOGI(TAG, "Machine OFF: stopping active descale");
+      safe_stop_all_();
+      descale_state_ = DescaleState::IDLE;
+      mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
+      set_powered_off_();
+      publish_status_();
+      break;
+
+    case EspressoMode::BACKFLUSHING:
+      // Stop backflush immediately.
+      ESP_LOGI(TAG, "Machine OFF: stopping active backflush");
+      safe_stop_all_();
+      backflush_state_ = BackflushState::IDLE;
       mode_ = EspressoMode::IDLE;
       idle_since_ms_ = millis();
       set_powered_off_();
@@ -355,6 +383,97 @@ void EspressoMachine::flush(float volume_ml) {
   }
   if (brew_purge_valve_)
     brew_purge_valve_->open();
+  publish_status_();
+}
+
+// ---------------------------------------------------------------------------
+// Descale start / stop
+// ---------------------------------------------------------------------------
+void EspressoMachine::descale_start() {
+  if (!powered_on_) {
+    ESP_LOGW(TAG, "descale_start ignored: machine is off");
+    return;
+  }
+  if (over_temp_cutoff_triggered_) {
+    ESP_LOGW(TAG, "descale_start ignored: over-temperature safety cutoff is active — reboot required");
+    return;
+  }
+  if (mode_ != EspressoMode::IDLE) {
+    ESP_LOGW(TAG, "descale_start ignored: machine is %s", mode_name());
+    return;
+  }
+  if (brew_pump_ == nullptr || brew_purge_valve_ == nullptr) {
+    ESP_LOGW(TAG, "descale_start ignored: brew pump or purge valve not configured");
+    return;
+  }
+  ESP_LOGI(TAG, "Descale START — %d cycles: pump %ums / soak %ums",
+           descale_cycles_, descale_pump_time_ms_, descale_soak_time_ms_);
+  mode_ = EspressoMode::DESCALING;
+  descale_cycle_ = 0;
+  descale_state_ = DescaleState::PUMPING;
+  state_entered_ms_ = millis();
+  brew_pump_->reset_flow();
+  brew_pump_->set_bypass_mode(true);  // flow through purge valve, no puck resistance
+  brew_pump_->turn_on();
+  brew_purge_valve_->open();
+  publish_status_();
+}
+
+void EspressoMachine::descale_stop() {
+  if (mode_ != EspressoMode::DESCALING) {
+    ESP_LOGW(TAG, "descale_stop ignored: machine is %s", mode_name());
+    return;
+  }
+  ESP_LOGI(TAG, "Descale STOP (cycle %d/%d)", descale_cycle_ + 1, descale_cycles_);
+  safe_stop_all_();
+  descale_state_ = DescaleState::IDLE;
+  mode_ = EspressoMode::IDLE;
+  idle_since_ms_ = millis();
+  publish_status_();
+}
+
+// ---------------------------------------------------------------------------
+// Backflush start / stop
+// ---------------------------------------------------------------------------
+void EspressoMachine::backflush_start() {
+  if (!powered_on_) {
+    ESP_LOGW(TAG, "backflush_start ignored: machine is off");
+    return;
+  }
+  if (over_temp_cutoff_triggered_) {
+    ESP_LOGW(TAG, "backflush_start ignored: over-temperature safety cutoff is active — reboot required");
+    return;
+  }
+  if (mode_ != EspressoMode::IDLE) {
+    ESP_LOGW(TAG, "backflush_start ignored: machine is %s", mode_name());
+    return;
+  }
+  if (brew_pump_ == nullptr || brew_valve_ == nullptr) {
+    ESP_LOGW(TAG, "backflush_start ignored: brew pump or brew valve not configured");
+    return;
+  }
+  ESP_LOGI(TAG, "Backflush START — %d cycles: pressurize %ums / release %ums",
+           backflush_cycles_, backflush_pressurize_time_ms_, backflush_release_time_ms_);
+  mode_ = EspressoMode::BACKFLUSHING;
+  backflush_cycle_ = 0;
+  backflush_state_ = BackflushState::PRESSURIZING;
+  state_entered_ms_ = millis();
+  brew_pump_->set_bypass_mode(false);  // backflush builds pressure through portafilter/blind filter
+  brew_pump_->turn_on();
+  brew_valve_->open();
+  publish_status_();
+}
+
+void EspressoMachine::backflush_stop() {
+  if (mode_ != EspressoMode::BACKFLUSHING) {
+    ESP_LOGW(TAG, "backflush_stop ignored: machine is %s", mode_name());
+    return;
+  }
+  ESP_LOGI(TAG, "Backflush STOP (cycle %d/%d)", backflush_cycle_ + 1, backflush_cycles_);
+  safe_stop_all_();
+  backflush_state_ = BackflushState::IDLE;
+  mode_ = EspressoMode::IDLE;
+  idle_since_ms_ = millis();
   publish_status_();
 }
 
@@ -679,6 +798,118 @@ void EspressoMachine::advance_flush_() {
 }
 
 // ---------------------------------------------------------------------------
+// Descale state machine
+// ---------------------------------------------------------------------------
+void EspressoMachine::advance_descale_() {
+  switch (descale_state_) {
+    case DescaleState::PUMPING:
+      if ((millis() - state_entered_ms_) >= descale_pump_time_ms_) {
+        ESP_LOGI(TAG, "Descale: PUMPING → SOAKING (cycle %d/%d)",
+                 descale_cycle_ + 1, descale_cycles_);
+        if (brew_pump_)
+          brew_pump_->turn_off();
+        descale_state_ = DescaleState::SOAKING;
+        state_entered_ms_ = millis();
+        publish_status_();
+      }
+      break;
+
+    case DescaleState::SOAKING:
+      if ((millis() - state_entered_ms_) >= descale_soak_time_ms_) {
+        descale_cycle_++;
+        if (descale_cycle_ >= descale_cycles_) {
+          ESP_LOGI(TAG, "Descale: DONE after %d cycles — refill tank with fresh water for rinsing",
+                   descale_cycles_);
+          if (brew_pump_) {
+            brew_pump_->turn_off();
+            brew_pump_->set_bypass_mode(false);
+          }
+          if (brew_purge_valve_)
+            brew_purge_valve_->close();
+          descale_state_ = DescaleState::DONE;
+          state_entered_ms_ = millis();
+          publish_status_();
+        } else {
+          ESP_LOGI(TAG, "Descale: SOAKING → PUMPING (cycle %d/%d)",
+                   descale_cycle_ + 1, descale_cycles_);
+          if (brew_pump_)
+            brew_pump_->turn_on();
+          descale_state_ = DescaleState::PUMPING;
+          state_entered_ms_ = millis();
+          publish_status_();
+        }
+      }
+      break;
+
+    case DescaleState::DONE:
+      ESP_LOGI(TAG, "Descale: DONE → IDLE");
+      descale_state_ = DescaleState::IDLE;
+      mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
+      publish_status_();
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backflush state machine
+// ---------------------------------------------------------------------------
+void EspressoMachine::advance_backflush_() {
+  switch (backflush_state_) {
+    case BackflushState::PRESSURIZING:
+      if ((millis() - state_entered_ms_) >= backflush_pressurize_time_ms_) {
+        ESP_LOGI(TAG, "Backflush: PRESSURIZING → RELEASING (cycle %d/%d)",
+                 backflush_cycle_ + 1, backflush_cycles_);
+        if (brew_pump_)
+          brew_pump_->turn_off();
+        // Closing the 3-way solenoid brew valve releases back-pressure through the purge port
+        if (brew_valve_)
+          brew_valve_->close();
+        backflush_state_ = BackflushState::RELEASING;
+        state_entered_ms_ = millis();
+        publish_status_();
+      }
+      break;
+
+    case BackflushState::RELEASING:
+      if ((millis() - state_entered_ms_) >= backflush_release_time_ms_) {
+        backflush_cycle_++;
+        if (backflush_cycle_ >= backflush_cycles_) {
+          ESP_LOGI(TAG, "Backflush: DONE after %d cycles", backflush_cycles_);
+          backflush_state_ = BackflushState::DONE;
+          state_entered_ms_ = millis();
+          publish_status_();
+        } else {
+          ESP_LOGI(TAG, "Backflush: RELEASING → PRESSURIZING (cycle %d/%d)",
+                   backflush_cycle_ + 1, backflush_cycles_);
+          if (brew_valve_)
+            brew_valve_->open();
+          if (brew_pump_)
+            brew_pump_->turn_on();
+          backflush_state_ = BackflushState::PRESSURIZING;
+          state_entered_ms_ = millis();
+          publish_status_();
+        }
+      }
+      break;
+
+    case BackflushState::DONE:
+      ESP_LOGI(TAG, "Backflush: DONE → IDLE");
+      backflush_state_ = BackflushState::IDLE;
+      mode_ = EspressoMode::IDLE;
+      idle_since_ms_ = millis();
+      publish_status_();
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 void EspressoMachine::enter_brewing_() {
@@ -815,6 +1046,10 @@ const char *EspressoMachine::mode_name() const {
       return "steaming";
     case EspressoMode::FLUSHING:
       return "flushing";
+    case EspressoMode::DESCALING:
+      return "descaling";
+    case EspressoMode::BACKFLUSHING:
+      return "backflushing";
     default:
       return "unknown";
   }
@@ -907,6 +1142,40 @@ std::string EspressoMachine::status_name() const {
           return "Steam cleanup";
         default:
           return "Steaming";
+      }
+      break;
+
+    case EspressoMode::DESCALING:
+      switch (descale_state_) {
+        case DescaleState::PUMPING:
+          n = snprintf(buf, STATUS_BUF_SIZE, "Descaling: pumping (cycle %d/%d)",
+                       descale_cycle_ + 1, descale_cycles_);
+          break;
+        case DescaleState::SOAKING:
+          n = snprintf(buf, STATUS_BUF_SIZE, "Descaling: soaking (cycle %d/%d)",
+                       descale_cycle_ + 1, descale_cycles_);
+          break;
+        case DescaleState::DONE:
+          return "Descale done";
+        default:
+          return "Descaling";
+      }
+      break;
+
+    case EspressoMode::BACKFLUSHING:
+      switch (backflush_state_) {
+        case BackflushState::PRESSURIZING:
+          n = snprintf(buf, STATUS_BUF_SIZE, "Backflush: pressurizing (cycle %d/%d)",
+                       backflush_cycle_ + 1, backflush_cycles_);
+          break;
+        case BackflushState::RELEASING:
+          n = snprintf(buf, STATUS_BUF_SIZE, "Backflush: releasing (cycle %d/%d)",
+                       backflush_cycle_ + 1, backflush_cycles_);
+          break;
+        case BackflushState::DONE:
+          return "Backflush done";
+        default:
+          return "Backflushing";
       }
       break;
 

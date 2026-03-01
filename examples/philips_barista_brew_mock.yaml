@@ -515,6 +515,22 @@ espresso_machine:
     # cleanup_script fires when steam enters CLEANUP. Reference a script by id.
     # cleanup_script: my_steam_rinse_script
 
+  # ---------------------------------------------------------------------------
+  # Descale routine — same configuration as the real device
+  # ---------------------------------------------------------------------------
+  descale:
+    cycles: 3
+    pump_time: 30s
+    soak_time: 30s
+
+  # ---------------------------------------------------------------------------
+  # Backflush routine — same configuration as the real device
+  # ---------------------------------------------------------------------------
+  backflush:
+    cycles: 5
+    pressurize_time: 10s
+    release_time: 10s
+
 # =============================================================================
 # DISPLAY — optional (same as real config)
 # Comment out if no I2C display attached.
@@ -594,6 +610,28 @@ button:
     name: "Steam Stop"
     on_press:
       - lambda: id(my_espresso).steam_stop();
+
+  - platform: template
+    name: "Descale Start"
+    on_press:
+      - espresso_machine.descale_start:
+          id: my_espresso
+
+  - platform: template
+    name: "Descale Stop"
+    on_press:
+      - lambda: id(my_espresso).descale_stop();
+
+  - platform: template
+    name: "Backflush Start"
+    on_press:
+      - espresso_machine.backflush_start:
+          id: my_espresso
+
+  - platform: template
+    name: "Backflush Stop"
+    on_press:
+      - lambda: id(my_espresso).backflush_stop();
 
   # Additional button to reset flow counter for new shot
   - platform: template
