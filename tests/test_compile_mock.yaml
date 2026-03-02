@@ -1,0 +1,331 @@
+# Test: full ESP32 compile of mock-hardware stack + display.
+#
+# Mirrors the component configuration of examples/philips_barista_brew_mock.yaml
+# for actual C++ compilation on the ESP32 (Arduino) platform.  No physical
+# hardware is required — the mock_heater and mock_pump components simulate
+# all physics in software.
+#
+# This is the authoritative check that ALL custom C++ compiles together end-to-end:
+#   espresso_machine_mock_heater  (thermal ODE)
+#   espresso_machine_mock_pump    (puck model + flow simulation)
+#   espresso_machine_heater       (IHeater adapter)
+#   espresso_machine_valve        (solenoid interlock)
+#   espresso_machine_pump         (relay mode, references mock pump)
+#   espresso_machine_grinder      (timed relay)
+#   espresso_machine              (brew + steam state machines)
+#   espresso_machine_display      (ST7920 LCD menu UI — requires real ESP32 SPI)
+#
+# No !secret references — all values are inline for CI.
+esphome:
+  name: test-compile-mock
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - espresso_machine
+      - espresso_machine_heater
+      - espresso_machine_valve
+      - espresso_machine_pump
+      - espresso_machine_grinder
+      - espresso_machine_flow_meter
+      - espresso_machine_mock_heater
+      - espresso_machine_mock_pump
+      - espresso_machine_display
+
+# =============================================================================
+# MOCK HEATER — thermal physics simulation
+# Produces thermoblock_temp (sensor) and heater_ssr (output) with same IDs
+# as the physical config so the PID cannot tell the difference.
+# =============================================================================
+espresso_machine_mock_heater:
+  id: mock_heater
+  initial_temperature: 25.0
+  ambient_temperature: 25.0
+  power_watts: 1200.0
+  thermal_mass_j_per_c: 800.0
+  heat_loss_w_per_c: 1.7
+  water_inlet_temp_c: 20.0
+  heat_transfer_k: 2.0
+  dist_water_to_heater_mm: 0.0
+  dist_water_to_sensor_mm: 0.0
+  dist_sensor_to_heater_mm: 0.0
+
+  temperature_sensor:
+    id: thermoblock_temp
+    name: "Thermoblock Temperature"
+    on_value_range:
+      - above: 165
+        then:
+          - climate.control:
+              id: main_heater
+              mode: "off"
+
+  output:
+    id: heater_ssr
+
+  power_number:
+    name: "Mock Heater Power"
+    entity_category: config
+  thermal_mass_number:
+    name: "Mock Thermal Mass"
+    entity_category: config
+  heat_loss_number:
+    name: "Mock Heat Loss"
+    entity_category: config
+  ambient_number:
+    name: "Mock Ambient Temperature"
+    entity_category: config
+  heat_transfer_k_number:
+    name: "Mock Heat Transfer K"
+    entity_category: config
+  duty_sensor:
+    name: "Heater SSR Duty"
+    unit_of_measurement: "%"
+
+# =============================================================================
+# HEATER PID — identical to real device config
+# =============================================================================
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Espresso Heater"
+    sensor: thermoblock_temp
+    default_target_temperature: 90
+    heat_output: heater_ssr
+    control_parameters:
+      kp: 0.55901
+      ki: 0.11624
+      kd: 0.67209
+      output_averaging_samples: 5
+      derivative_averaging_samples: 5
+    deadband_parameters:
+      threshold_high: 0.3
+      threshold_low: -0.3
+
+# =============================================================================
+# HEATER CONTROLLER — IHeater adapter
+# =============================================================================
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
+
+# =============================================================================
+# MOCK PUMP — puck wetting + flow simulation
+# Provides flow data through the IPump interface — no separate flow meter needed.
+# =============================================================================
+espresso_machine_mock_pump:
+  id: main_pump
+  name: "Mock Pump"
+  nominal_flow_ml_per_s: 4.0
+  pump_max_pressure_bar: 15.0
+  puck_time_constant_s: 10.0
+  puck_density: 50
+  internal_volume_ml: 20.0
+  mock_heater: mock_heater
+
+  rate_sensor:
+    name: "Brew Flow Rate"
+  total_sensor:
+    name: "Brew Flow Total"
+  avg_rate_sensor:
+    name: "Brew Flow Rate (3s avg)"
+  pressure_sensor:
+    name: "Mock Brew Pump Pressure"
+  nozzle_rate_sensor:
+    name: "Nozzle Flow Rate"
+  nozzle_total_sensor:
+    name: "Nozzle Flow Total"
+
+  nominal_flow_number:
+    name: "Mock Nominal Flow"
+    entity_category: config
+  pump_max_pressure_number:
+    name: "Mock Pump Max Pressure"
+    entity_category: config
+  puck_time_constant_number:
+    name: "Mock Puck Time Constant"
+    entity_category: config
+  puck_density_number:
+    id: main_pump_puck_density
+    name: "Mock Puck Density"
+    entity_category: config
+  internal_volume_number:
+    name: "Mock Internal Volume"
+    entity_category: config
+
+# =============================================================================
+# VALVES
+# =============================================================================
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve"
+    pin: GPIO26
+    normally_open: false
+  - id: steam_valve
+    name: "Steam Valve"
+    pin: GPIO27
+    normally_open: false
+  - id: purge_valve
+    name: "Purge Valve"
+    pin: GPIO14
+    normally_open: false
+
+# =============================================================================
+# GRINDER
+# =============================================================================
+espresso_machine_grinder:
+  id: main_grinder
+  name: "Grinder"
+  type: relay
+  pin: GPIO23
+  default_grind_time: 7s
+  grind_time_number:
+    name: "Grind Time"
+
+# =============================================================================
+# ORCHESTRATOR
+# =============================================================================
+espresso_machine:
+  id: my_espresso
+  status_sensor:
+    name: "Espresso Status"
+  idle_timeout: 30min
+  brew:
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: purge_valve
+    temperature_profile:
+      offset: 5°C
+      ramp_time: 20s
+      temp_surf_switch:
+        name: "Temperature Surfing"
+    flow_max: 40ml
+    flow_max_number:
+      name: "Brew Flow Max"
+    flow_offset: 20ml
+    shot_stats:
+      last_shot_time:
+        name: "Last Shot Time"
+      last_shot_volume:
+        name: "Last Shot Volume"
+      last_shot_yield:
+        name: "Last Shot Yield"
+    temperature_cooldown: false
+  steam:
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: steam_valve
+    purge_valve: purge_valve
+    target_temperature: 135°C
+    purge_volume: 5ml
+    flow_max: 2ml/s
+    cool_down_to: 90°C
+    timeout: 5min
+  descale:
+    cycles: 3
+    pump_time: 30s
+    soak_time: 30s
+  backflush:
+    cycles: 5
+    pressurize_time: 10s
+    release_time: 10s
+
+# =============================================================================
+# DISPLAY — ST7920 128×64 LCD + rotary encoder
+# Exercises the display C++ (requires real ESP32 SPI — not available on host).
+# =============================================================================
+
+# Rotary encoder (sensor block)
+sensor:
+  - platform: rotary_encoder
+    id: rotary_enc
+    pin_a:
+      number: GPIO32
+      mode: INPUT_PULLUP
+    pin_b:
+      number: GPIO33
+      mode: INPUT_PULLUP
+    resolution: 1
+
+# Encoder push button
+binary_sensor:
+  - platform: gpio
+    id: enc_button
+    pin:
+      number: GPIO16
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 10ms
+
+# SPI bus for display
+spi:
+  clk_pin: GPIO17
+  mosi_pin: GPIO13
+
+# Fonts
+font:
+  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+    id: font_small
+    size: 8
+  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+    id: font_large
+    size: 16
+
+# ST7920 display
+display:
+  - platform: st7920
+    id: lcd
+    width: 128
+    height: 64
+    cs_pin: GPIO15
+    update_interval: 500ms
+    lambda: |-
+      id(my_display_ui).render(it);
+
+# Display UI component
+espresso_machine_display:
+  id: my_display_ui
+  display_id: lcd
+  encoder_id: rotary_enc
+  button_id: enc_button
+  espresso_machine: my_espresso
+  grinder: main_grinder
+  heater: heater_ctrl
+  font_small: font_small
+  font_large: font_large
+  theme: classic
+  long_press_ms: 1000ms
+  screensaver_timeout: 5min
+  home_actions:
+    - brew
+    - steam
+    - grind
+    - settings
+    - power
+
+# =============================================================================
+# POWER SWITCH — same pattern as the real and mock configs
+# =============================================================================
+switch:
+  - platform: template
+    id: machine_power
+    name: "Espresso Machine Power"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: id(my_espresso).machine_on();
+    turn_off_action:
+      - lambda: id(my_espresso).machine_off();

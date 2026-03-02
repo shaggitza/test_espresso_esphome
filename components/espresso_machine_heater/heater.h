@@ -81,6 +81,9 @@ class EspressoMachineHeater : public Component,
   // Wires the optional HA number entity for runtime SSR period adjustment.
   void set_ssr_period_number(SsrPeriodNumber *n) { ssr_period_number_ = n; }
 
+  // Read-back accessor used by the display component.
+  SsrPeriodNumber *get_ssr_period_number() const { return ssr_period_number_; }
+
   // Sets the default SSR period (ms) published to HA on boot.
   void set_ssr_default_period_ms(uint32_t ms) { ssr_period_ms_ = ms; }
 

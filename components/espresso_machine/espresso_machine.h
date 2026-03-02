@@ -247,6 +247,29 @@ class EspressoMachine : public Component {
   void backflush_start();
   void backflush_stop();
 
+  // ----- Configuration read-back (for display rendering) -------------------
+  float get_brew_target_temp() const { return brew_target_temp_; }
+  float get_brew_flow_max() const { return brew_flow_max_ml_; }
+  float get_brew_flow_offset() const { return brew_flow_offset_ml_; }
+  bool get_brew_temperature_cooldown() const { return brew_temperature_cooldown_; }
+  float get_steam_target_temp() const { return steam_target_temp_; }
+  float get_steam_cool_down_to() const { return steam_cool_down_to_; }
+  float get_steam_purge_volume_ml() const { return steam_purge_volume_ml_; }
+  float get_steam_flow_max() const { return steam_flow_max_ml_per_s_; }
+  uint32_t get_steam_timeout_ms() const { return steam_timeout_ms_; }
+  uint32_t get_idle_timeout_ms() const { return idle_timeout_ms_; }
+
+  // Pre-infusion read-back.
+  bool get_pre_infusion_enabled() const { return pre_infusion_enabled_; }
+  float get_pre_infusion_volume_ml() const { return pre_infusion_volume_ml_; }
+  uint32_t get_pre_infusion_hold_time_ms() const { return pre_infusion_hold_time_ms_; }
+
+  // Entity accessors — the display component uses these to call the same
+  // number/switch entities that are already exposed to Home Assistant,
+  // keeping HA state in sync when the user edits values via the encoder.
+  BrewFlowMaxNumber *get_brew_flow_max_number() const { return brew_flow_max_number_; }
+  TempSurfSwitch *get_temp_surf_switch() const { return temp_surf_switch_; }
+
   // ----- Status accessors ---------------------------------------------------
   EspressoMode get_mode() const { return mode_; }
   const char *mode_name() const;

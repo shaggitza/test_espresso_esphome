@@ -167,6 +167,7 @@ external_components:
       - espresso_machine_mock_pump     # ← pump + flow simulation
       # - espresso_machine_sprofiler   # Sprofiler cloud shot upload (BETA — opt-in, see docs/sprofiler.md)
       # - espresso_machine_vizualise   # Vizualise.coffee shot upload (BETA — opt-in, see docs/vizualise.md)
+      - espresso_machine_display     # Creality ST7920 128×64 LCD menu UI (Phase 10)
 
 # =============================================================================
 # MOCK HEATER — replaces physical thermocouple + slow_pwm + SPI
@@ -351,9 +352,16 @@ sensor:
     loop_time:
       name: "Loop Time"
       entity_category: diagnostic
-
-# =============================================================================
-# HEATER PID — IDENTICAL to real config (uses same sensor/output IDs)
+  # Rotary encoder — display UI input
+  - platform: rotary_encoder
+    id: rotary_enc
+    pin_a:
+      number: GPIO32
+      mode: INPUT_PULLUP
+    pin_b:
+      number: GPIO33
+      mode: INPUT_PULLUP
+    resolution: 1
 #
 # This is completely unchanged from philips_barista_brew.yaml.
 # The PID has no idea it's controlling a simulated heater.
@@ -554,32 +562,87 @@ espresso_machine:
     release_time: 10s
 
 # =============================================================================
-# DISPLAY — optional (same as real config)
-# Comment out if no I2C display attached.
+# DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder
+# Fully enabled in the mock config to exercise the display component in CI.
+# GPIO assignments match the suggested wiring in philips_barista_brew.yaml;
+# adjust to match your actual hardware if running on a real board.
 # =============================================================================
-# i2c:
-#   sda: GPIO21
-#   scl: GPIO22
+
+# ── SPI bus — display-only (no thermocouple SPI needed in the mock config) ──
+spi:
+  clk_pin: GPIO17     # EXP2 SCK
+  mosi_pin: GPIO13    # EXP2 SID/MOSI (display is write-only; no MISO needed)
+
+# ── Encoder push button (binary_sensor — no existing binary_sensor: block yet) ──
+binary_sensor:
+  - platform: gpio
+    id: enc_button
+    pin:
+      number: GPIO16
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 10ms
+
+# ── Fonts (optional — built-in 5×7 pixel font is used when not configured) ───
+# Option 1 — built-in font, zero configuration (default when this block is absent):
+#   Remove or comment out this entire font: section.
 #
-# display:
-#   - platform: ssd1306_i2c
-#     model: "SSD1306 128x64"
-#     address: 0x3C
-#     lambda: |-
-#       it.printf(0,  0, id(font_small), "Mode: %s",
-#         id(my_espresso).mode_name());
-#       it.printf(0, 16, id(font_small), "T: %.1f / %.1f C",
-#         id(main_heater).current_temperature,
-#         id(main_heater).target_temperature);
-#       it.printf(0, 32, id(font_small), "Vol: %.1f ml",
-#         id(main_pump).get_flow_total());
-#       it.printf(0, 48, id(font_small), "Heat: %.0f%%",
-#         id(main_heater).output_value() * 100.0f);
-#
+# Option 2 — local file path (when building from the cloned repository):
 # font:
-#   - file: "gfonts://Roboto Mono"
+#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
 #     id: font_small
-#     size: 12
+#     size: 8
+#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+#     id: font_large
+#     size: 16
+#
+# Option 3 — online font (when building from a personal /config directory):
+# font:
+#   - file: "gfonts://Source Code Pro"   # requires internet during build
+#     id: font_small
+#     size: 8
+#   - file: "gfonts://Source Code Pro"
+#     id: font_large
+#     size: 16
+#
+# If you define fonts, also uncomment font_small/font_large in the
+# espresso_machine_display: block below.
+
+# ── ST7920 display entity ─────────────────────────────────────────────────────
+display:
+  - platform: st7920
+    id: lcd
+    width: 128
+    height: 64
+    cs_pin: GPIO15
+    update_interval: 33ms    # 30 FPS target (33 ms period); actual rate is SPI-limited
+                              # render() returns early when nothing changed (needs_redraw_ guard)
+    lambda: |-
+      id(my_display_ui).render(it);
+
+# ── espresso_machine_display — wires all entities together ────────────────────
+espresso_machine_display:
+  id: my_display_ui
+  display_id: lcd
+  encoder_id: rotary_enc
+  button_id:  enc_button
+  espresso_machine: my_espresso
+  grinder: main_grinder
+  heater: heater_ctrl
+  # flow_meter: not wired — the mock pump simulates flow internally and there
+  #   is no separate espresso_machine_flow_meter: entity in this config
+  # font_small: font_small   # uncomment if you declared a font: block above
+  # font_large: font_large   # uncomment if you declared a font: block above
+  theme: classic
+  long_press_ms: 1000ms
+  screensaver_timeout: 5min
+  home_actions:
+    - brew
+    - steam
+    - grind
+    - settings
+    - power
 
 # =============================================================================
 # POWER SWITCH — master on/off toggle (same as real config)

@@ -32,6 +32,7 @@ set(COMPONENT_SOURCES
   ../../components/espresso_machine_mock_heater/mock_heater.cpp
   ../../components/espresso_machine_mock_pump/mock_pump.cpp
   ../../components/espresso_machine_sprofiler/sprofiler.cpp
+  ../../components/espresso_machine_display/display_ui.cpp
   ../../components/espresso_machine_vizualise/vizualise.cpp
 )
 
@@ -51,6 +52,7 @@ add_executable(all_tests
   test_mock_heater.cpp
   test_mock_pump.cpp
   test_sprofiler.cpp
+  test_display_ui.cpp
   test_vizualise.cpp
 )
 
