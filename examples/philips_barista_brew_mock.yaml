@@ -584,7 +584,7 @@ display:
     width: 128
     height: 64
     cs_pin: GPIO15
-    update_interval: 500ms
+    update_interval: 5min   # safety fallback — espresso_machine_display drives updates on-demand
     lambda: |-
       id(my_display_ui).render(it);
 

@@ -80,11 +80,14 @@ void EspressoMachineDisplay::loop() {
     was_grinding_ = grinding;
   }
 
-  // On live-data screens refresh every 500 ms even without user input.
+  // On live-data screens refresh every 1000 ms even without user input.
+  // This controls the live-data sampling rate during active brew/steam/grind;
+  // it is independent of SPI cadence — actual SPI transfers only happen when
+  // needs_redraw_ is set (see demand-driven update below).
   bool live_screen = (screen_ == Screen::HOME &&
                       machine_ != nullptr &&
                       machine_->get_mode() != espresso_machine::EspressoMode::IDLE);
-  if (live_screen && millis() - last_live_refresh_ms_ > 500) {
+  if (live_screen && millis() - last_live_refresh_ms_ > 1000) {
     last_live_refresh_ms_ = millis();
     needs_redraw_ = true;
   }
@@ -101,6 +104,19 @@ void EspressoMachineDisplay::loop() {
   // Error overlay expiry.
   if (screen_ == Screen::ERROR_OVERLAY && millis() > error_until_ms_) {
     go_to_(error_return_screen_);
+  }
+
+  // Demand-driven display refresh: push a new frame to the SPI display only
+  // when content has actually changed.  Relying solely on the display
+  // component's update_interval causes a ~5-15 ms SPI blocking spike on every
+  // tick, regardless of whether the screen changed.  By driving updates from
+  // here we eliminate those unnecessary transfers and keep the main loop free.
+  // The update_interval in the YAML is retained as a safety fallback only.
+  // Note: render() clears needs_redraw_ when it draws, so this block fires at
+  // most once per logical content change — no redundant updates on subsequent
+  // loop iterations.
+  if (needs_redraw_ && display_ != nullptr) {
+    display_->update();
   }
 }
 
