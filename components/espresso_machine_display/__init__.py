@@ -26,6 +26,12 @@ EspressoMachine = _espresso_machine_ns.class_("EspressoMachine", cg.Component)
 _grinder_ns = cg.esphome_ns.namespace("espresso_machine_grinder")
 Grinder = _grinder_ns.class_("Grinder", cg.Component)
 
+_heater_ns = cg.esphome_ns.namespace("espresso_machine_heater")
+EspressoMachineHeater = _heater_ns.class_("EspressoMachineHeater", cg.Component)
+
+_flow_meter_ns = cg.esphome_ns.namespace("espresso_machine_flow_meter")
+FlowMeter = _flow_meter_ns.class_("FlowMeter", cg.Component)
+
 # Font type — fonts created by the 'font:' platform are font::Font objects
 _font_ns = cg.esphome_ns.namespace("font")
 Font = _font_ns.class_("Font")
@@ -70,10 +76,10 @@ CONFIG_SCHEMA = cv.Schema(
         # ── Optional sub-component bindings ──────────────────────────────────
         # When bound the corresponding actions/data appear in the UI automatically.
         cv.Optional(CONF_GRINDER): cv.use_id(Grinder),
-        # IHeater and IFlowMeter implementations: use Component* for schema
-        # validation; concrete types are known at C++ compile time.
-        cv.Optional(CONF_HEATER): cv.use_id(cg.Component),
-        cv.Optional(CONF_FLOW_METER): cv.use_id(cg.Component),
+        # Concrete types so the C++ setter receives the right typed pointer
+        # (EspressoMachineHeater* / FlowMeter*) — both implement IHeater / IFlowMeter.
+        cv.Optional(CONF_HEATER): cv.use_id(EspressoMachineHeater),
+        cv.Optional(CONF_FLOW_METER): cv.use_id(FlowMeter),
         # ── Fonts (optional) ──────────────────────────────────────────────────
         # When omitted, text is rendered using the fall-back 5×7 built-in font.
         # Declare fonts in the standard ESPHome font: platform block and

@@ -16,6 +16,8 @@
 #include "../espresso_machine/espresso_machine.h"
 #include "../espresso_machine_grinder/grinder.h"
 #include "../espresso_machine/interfaces.h"
+#include "../espresso_machine_heater/heater.h"
+#include "../espresso_machine_flow_meter/flow_meter.h"
 
 namespace esphome {
 namespace espresso_machine_display {
@@ -96,10 +98,10 @@ class EspressoMachineDisplay : public Component {
   // ----- Component bindings ------------------------------------------------
   void set_espresso_machine(espresso_machine::EspressoMachine *m) { machine_ = m; }
   void set_grinder(espresso_machine_grinder::Grinder *g) { grinder_ = g; }
-  // IHeater / IFlowMeter come from sibling external components; stored as
-  // Component* here and interface-cast on first access via helpers below.
-  void set_heater(Component *h) { heater_component_ = h; }
-  void set_flow_meter(Component *f) { flow_meter_component_ = f; }
+  // Concrete typed setters — EspressoMachineHeater and FlowMeter both inherit
+  // from IHeater / IFlowMeter, so the upcast in setup() is safe and direct.
+  void set_heater(espresso_machine_heater::EspressoMachineHeater *h) { heater_ = h; }
+  void set_flow_meter(espresso_machine_flow_meter::FlowMeter *f) { flow_meter_ = f; }
 
   // ----- Fonts (optional) --------------------------------------------------
   void set_font_small(display::BaseFont *f) { font_small_ = f; }
@@ -129,10 +131,10 @@ class EspressoMachineDisplay : public Component {
   // ── Components ────────────────────────────────────────────────────────────
   espresso_machine::EspressoMachine *machine_{nullptr};
   espresso_machine_grinder::Grinder *grinder_{nullptr};
-  Component *heater_component_{nullptr};
-  Component *flow_meter_component_{nullptr};
 
-  // Typed interface casts — resolved once in setup()
+  // Typed pointers — set directly from concrete types in set_heater/set_flow_meter.
+  // IHeater and IFlowMeter are base classes of the concrete components, so no
+  // cast is needed; upcasts happen implicitly at the assignment site.
   espresso_machine::IHeater *heater_{nullptr};
   espresso_machine::IFlowMeter *flow_meter_{nullptr};
 

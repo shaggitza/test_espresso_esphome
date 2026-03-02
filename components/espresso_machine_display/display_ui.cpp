@@ -23,17 +23,8 @@ static const char *const TAG = "espresso_machine_display";
 void EspressoMachineDisplay::setup() {
   ESP_LOGI(TAG, "EspressoMachineDisplay initializing");
 
-  // Attempt interface casts for optional component pointers.
-  // The concrete types (EspressoMachineHeater, FlowMeter) both implement
-  // IHeater / IFlowMeter. dynamic_cast isn't available in the Arduino env,
-  // so we use a compile-time static_cast — the component author is responsible
-  // for passing the right types in YAML.
-  if (heater_component_ != nullptr) {
-    heater_ = static_cast<espresso_machine::IHeater *>(heater_component_);
-  }
-  if (flow_meter_component_ != nullptr) {
-    flow_meter_ = static_cast<espresso_machine::IFlowMeter *>(flow_meter_component_);
-  }
+  // heater_ and flow_meter_ are set directly to the concrete typed pointers
+  // via set_heater() / set_flow_meter() — no cast needed here.
 
   // Mirror initial pre-infusion values from machine if available.
   // (These are already set from YAML; we track them locally for display.)
