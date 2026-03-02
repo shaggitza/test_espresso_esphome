@@ -16,8 +16,6 @@
 #include "../espresso_machine/espresso_machine.h"
 #include "../espresso_machine_grinder/grinder.h"
 #include "../espresso_machine/interfaces.h"
-#include "../espresso_machine_heater/heater.h"
-#include "../espresso_machine_flow_meter/flow_meter.h"
 
 namespace esphome {
 namespace espresso_machine_display {
@@ -98,10 +96,11 @@ class EspressoMachineDisplay : public Component {
   // ----- Component bindings ------------------------------------------------
   void set_espresso_machine(espresso_machine::EspressoMachine *m) { machine_ = m; }
   void set_grinder(espresso_machine_grinder::Grinder *g) { grinder_ = g; }
-  // Concrete typed setters — EspressoMachineHeater and FlowMeter both inherit
-  // from IHeater / IFlowMeter, so the upcast in setup() is safe and direct.
-  void set_heater(espresso_machine_heater::EspressoMachineHeater *h) { heater_ = h; }
-  void set_flow_meter(espresso_machine_flow_meter::FlowMeter *f) { flow_meter_ = f; }
+  // Interface-typed setters — accept IHeater* / IFlowMeter* directly so the
+  // display component does not depend on concrete heater/flow_meter headers.
+  // The Python codegen passes concrete types which are implicitly upcast.
+  void set_heater(espresso_machine::IHeater *h) { heater_ = h; }
+  void set_flow_meter(espresso_machine::IFlowMeter *f) { flow_meter_ = f; }
 
   // ----- Fonts (optional) --------------------------------------------------
   void set_font_small(display::BaseFont *f) { font_small_ = f; }
@@ -132,9 +131,9 @@ class EspressoMachineDisplay : public Component {
   espresso_machine::EspressoMachine *machine_{nullptr};
   espresso_machine_grinder::Grinder *grinder_{nullptr};
 
-  // Typed pointers — set directly from concrete types in set_heater/set_flow_meter.
-  // IHeater and IFlowMeter are base classes of the concrete components, so no
-  // cast is needed; upcasts happen implicitly at the assignment site.
+  // Typed pointers — set directly by set_heater/set_flow_meter using interface types.
+  // IHeater and IFlowMeter are defined in interfaces.h; the display component
+  // is decoupled from the concrete heater/flow_meter implementations.
   espresso_machine::IHeater *heater_{nullptr};
   espresso_machine::IFlowMeter *flow_meter_{nullptr};
 

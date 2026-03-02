@@ -23,7 +23,7 @@ static const char *const TAG = "espresso_machine_display";
 void EspressoMachineDisplay::setup() {
   ESP_LOGI(TAG, "EspressoMachineDisplay initializing");
 
-  // heater_ and flow_meter_ are set directly to the concrete typed pointers
+  // heater_ and flow_meter_ are set directly to interface-typed pointers
   // via set_heater() / set_flow_meter() — no cast needed here.
 
   // Mirror initial pre-infusion values from machine if available.
