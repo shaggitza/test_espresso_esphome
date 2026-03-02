@@ -34,6 +34,15 @@ void EspressoMachineDisplay::setup() {
     pi_hold_s_ = static_cast<float>(machine_->get_pre_infusion_hold_time_ms()) / 1000.0f;
   }
 
+  // Disable automatic buffer clear before each render call.  ESPHome's
+  // DisplayBuffer normally zeroes the framebuffer before invoking the lambda,
+  // which would blank the screen on every update tick when render() returns
+  // early (nothing changed).  With auto_clear off the stale buffer is preserved
+  // between renders; render() calls it.clear() itself when needs_redraw_ is set.
+  if (display_ != nullptr) {
+    display_->set_auto_clear(false);
+  }
+
   last_input_ms_ = millis();
   needs_redraw_ = true;
 }
@@ -106,18 +115,16 @@ void EspressoMachineDisplay::loop() {
     go_to_(error_return_screen_);
   }
 
-  // Demand-driven display refresh: push a new frame to the SPI display only
-  // when content has actually changed.  Relying solely on the display
-  // component's update_interval causes a ~5-15 ms SPI blocking spike on every
-  // tick, regardless of whether the screen changed.  By driving updates from
-  // here we eliminate those unnecessary transfers and keep the main loop free.
-  // The update_interval in the YAML is retained as a safety fallback only.
-  // Note: render() clears needs_redraw_ when it draws, so this block fires at
-  // most once per logical content change — no redundant updates on subsequent
-  // loop iterations.
-  if (needs_redraw_ && display_ != nullptr) {
-    display_->update();
-  }
+  // Display updates are driven entirely by the display component's own
+  // update_interval (set to ~33 ms in YAML for ~30 FPS).  ESPHome's scheduler
+  // calls display_->update() → our render() lambda on that schedule.
+  // render() checks needs_redraw_ and returns early when nothing changed,
+  // keeping the SPI bus quiet while preserving the on-screen content
+  // (auto_clear is disabled in setup() so stale buffer is retained).
+  //
+  // Calling display_->update() here was the original approach, but it blocked
+  // loop() for the full SPI transfer duration (~300+ ms on the ST7920), causing
+  // the "espresso_machine_display took a long time" warning and a 600 ms loop.
 }
 
 // ============================================================================
@@ -1150,8 +1157,9 @@ void EspressoMachineDisplay::print_small_(display::DisplayBuffer &it,
                                           int x, int y, const char *text) {
   if (font_small_ != nullptr) {
     it.print(x, y, font_small_, text);
+  } else {
+    it.print(x, y, text);  // ESPHome built-in 5×7 pixel font
   }
-  // No-op when no font is configured — display shows UI chrome only.
 }
 
 void EspressoMachineDisplay::print_large_(display::DisplayBuffer &it,
@@ -1160,18 +1168,21 @@ void EspressoMachineDisplay::print_large_(display::DisplayBuffer &it,
     it.print(x, y, font_large_, text);
   } else if (font_small_ != nullptr) {
     it.print(x, y, font_small_, text);
+  } else {
+    it.print(x, y, text);  // ESPHome built-in 5×7 pixel font
   }
-  // No-op when no font is configured.
 }
 
 void EspressoMachineDisplay::draw_title_bar_(display::DisplayBuffer &it,
                                              const char *title) {
   // Fill title bar with lit pixels (inverted background).
   it.filled_rectangle(0, 0, DISPLAY_W, FONT_H);
-  // Draw text in dark pixels on the lit background (only when font available).
+  // Draw text in dark pixels on the lit background.
   if (font_small_ != nullptr) {
     it.print(1, 0, font_small_, CLR_OFF,
              display::TextAlign::TOP_LEFT, title);
+  } else {
+    it.print(1, 0, title);  // ESPHome built-in font; no color inversion without custom font
   }
 }
 

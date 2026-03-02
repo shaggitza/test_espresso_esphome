@@ -197,6 +197,8 @@ display:
     width: 128
     height: 64
     cs_pin: GPIO15
+    update_interval: 33ms   # 30 FPS target (33 ms period); actual rate is SPI-limited
+                             # render() returns early when nothing changed (needs_redraw_ guard)
     lambda: |-
       id(my_display_ui).render(it);
 

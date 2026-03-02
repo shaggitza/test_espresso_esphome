@@ -568,14 +568,30 @@ binary_sensor:
     filters:
       - delayed_on: 10ms
 
-# ── Fonts (DejaVuSansMono.ttf committed at components/espresso_machine_display/fonts/) ──
-font:
-  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
-    id: font_small
-    size: 8
-  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
-    id: font_large
-    size: 16
+# ── Fonts (optional — built-in 5×7 pixel font is used when not configured) ───
+# Option 1 — built-in font, zero configuration (default when this block is absent):
+#   Remove or comment out this entire font: section.
+#
+# Option 2 — local file path (when building from the cloned repository):
+# font:
+#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+#     id: font_small
+#     size: 8
+#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+#     id: font_large
+#     size: 16
+#
+# Option 3 — online font (when building from a personal /config directory):
+# font:
+#   - file: "gfonts://Source Code Pro"   # requires internet during build
+#     id: font_small
+#     size: 8
+#   - file: "gfonts://Source Code Pro"
+#     id: font_large
+#     size: 16
+#
+# If you define fonts, also uncomment font_small/font_large in the
+# espresso_machine_display: block below.
 
 # ── ST7920 display entity ─────────────────────────────────────────────────────
 display:
@@ -584,7 +600,8 @@ display:
     width: 128
     height: 64
     cs_pin: GPIO15
-    update_interval: 5min   # safety fallback — espresso_machine_display drives updates on-demand
+    update_interval: 33ms    # 30 FPS target (33 ms period); actual rate is SPI-limited
+                              # render() returns early when nothing changed (needs_redraw_ guard)
     lambda: |-
       id(my_display_ui).render(it);
 
@@ -599,8 +616,8 @@ espresso_machine_display:
   heater: heater_ctrl
   # flow_meter: not wired — the mock pump simulates flow internally and there
   #   is no separate espresso_machine_flow_meter: entity in this config
-  font_small: font_small
-  font_large: font_large
+  # font_small: font_small   # uncomment if you declared a font: block above
+  # font_large: font_large   # uncomment if you declared a font: block above
   theme: classic
   long_press_ms: 1000ms
   screensaver_timeout: 5min
