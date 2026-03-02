@@ -24,6 +24,11 @@ external_components:
       - espresso_machine_grinder
       - espresso_machine_flow_meter
       - espresso_machine_sprofiler
+      # espresso_machine_display: Python schema is imported here so the module is
+      # validated during the compile step. C++ compilation requires a real display
+      # driver (ST7920 via SPI) which is not available on the host platform; the
+      # C++ is validated via tests/test_display.yaml on the ESP32 validate step.
+      - espresso_machine_display
 
 # --- Fake heater ---
 sensor:

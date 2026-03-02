@@ -115,6 +115,7 @@ configuration and documented in the example YAML.
 | Home Assistant native API | ✅ | All entities auto-discovered; API encryption supported |
 | OTA updates | ✅ | Standard ESPHome OTA via Wi-Fi |
 | OLED display (SSD1306) | ✅ | Optional; display lambda documented in example YAML |
+| ST7920 128×64 display menu (`espresso_machine_display`) | 🚧 | Phase 10a: full action-hub UI — Home Screen (idle + brew/steam/grind active), Brew/Steam/Grinder/Settings/Maintenance menus, number-edit mode, confirm dialogs, error overlays, 4 themes (classic/minimal/barista/dark), screensaver. Wired via `display_id/encoder_id/button_id`; adapts automatically to optional grinder/heater/flow-meter bindings |
 | PID autotune button | ✅ | Template button triggers `climate.pid.autotune` |
 | HA dashboard — unified (`dashboard.yaml`) | ✅ | 3-column Control view (controls · buttons+sensors · simulation) + Live Data graphs + Advanced; no HACS required; paste into HA raw config editor; see `home_assistant/dashboards/dashboard.yaml` |
 | HA dashboard — simulation (`dashboard_mock.yaml`) | ✅ | Dedicated mock dashboard: 3-column Control (controls · buttons+sensors · puck presets+physics) + Live Data graphs + Advanced; no HACS required; see `home_assistant/dashboards/dashboard_mock.yaml` |
