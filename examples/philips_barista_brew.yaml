@@ -110,13 +110,15 @@ external_components:
 # -----------------------------------------------------------------------------
 spi:
   clk_pin: GPIO18     # ← CHANGE ME
-  miso_pin: GPIO19    # ← CHANGE ME
+  miso_pin: GPIO19    # ← CHANGE ME — thermocouple board uses MISO
+  mosi_pin: GPIO13    # ← CHANGE ME — ST7920 display uses MOSI (write-only)
 
 # -----------------------------------------------------------------------------
-# I2C bus — used by the optional OLED display
+# I2C bus — available for other I2C sensors/devices (remove if not needed)
+# Note: The ST7920 display uses the SPI bus above, not I2C.
 # -----------------------------------------------------------------------------
 i2c:
-  sda: GPIO21         # ← CHANGE ME (or remove this block if no display)
+  sda: GPIO21         # ← CHANGE ME (or remove this block if not using I2C devices)
   scl: GPIO22         # ← CHANGE ME
 
 # =============================================================================
@@ -233,10 +235,16 @@ sensor:
     loop_time:
       name: "Loop Time"
       entity_category: diagnostic
-
-  # NOTE: Shot statistics (last shot time, volume, yield) are now declared
-  # natively under espresso_machine: brew: shot_stats: (P1-5).
-  # Remove the template sensor blocks below if upgrading from an older config.
+  # Rotary encoder — display UI navigation input
+  - platform: rotary_encoder
+    id: rotary_enc
+    pin_a:
+      number: GPIO32          # ← CHANGE ME — ENC_A (EXP1)
+      mode: INPUT_PULLUP
+    pin_b:
+      number: GPIO33          # ← CHANGE ME — ENC_B (EXP1)
+      mode: INPUT_PULLUP
+    resolution: 1             # 1 step/detent; try 2 or 4 for some EC11 batches
 
 # =============================================================================
 # FLOW METER — espresso_machine_flow_meter platform (first-class citizen)
@@ -753,100 +761,67 @@ espresso_machine:
 # DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder
 # (recovered from a Creality 3D printer; connects via EXP1/EXP2 ribbon)
 #
-# Uncomment and configure this entire section to enable the local menu UI.
 # The espresso_machine_display component provides a full action-hub menu:
 #   Home Screen → Brew / Steam / Grind / Settings / Power
 #   with real-time temperature + volume feedback during active sequences.
 #
-# GPIO constraints:
-#   ENC_A, ENC_B, ENC_SW  — must be GPIO0–33 (INPUT_PULLUP support needed)
-#   CS, CLK, MOSI (SID)   — any free GPIO (display-only, no pull needed)
-#
-# Fonts: DejaVuSansMono.ttf is committed at components/espresso_machine_display/fonts/.
-#   Reference it with a path relative to this file (../components/...) or copy it
-#   into your ESPHome config directory and reference it as "DejaVuSansMono.ttf".
+# WIRING (adjust GPIOs to match your hardware):
+#   Encoder: ENC_A=GPIO32, ENC_B=GPIO33, ENC_SW=GPIO16  (EXP1 ribbon)
+#   Display: SID/MOSI=GPIO13 (shared SPI bus), SCK=GPIO18, CS=GPIO15 (EXP2)
 # =============================================================================
 
-# ── Rotary encoder (EXP1 — must be GPIO0–33) ─────────────────────────────────
-# sensor:   (add alongside existing sensor: entries above)
-#   - platform: rotary_encoder
-#     id: rotary_enc
-#     pin_a:
-#       number: GPIO32          # ← CHANGE ME — ENC_A
-#       mode: INPUT_PULLUP
-#     pin_b:
-#       number: GPIO33          # ← CHANGE ME — ENC_B
-#       mode: INPUT_PULLUP
-#     resolution: 1             # 1 step/detent; try 2 or 4 for some EC11 batches
-#
-# ── Encoder button (EXP1 PIN 2 — must be GPIO0–33) ───────────────────────────
-# binary_sensor:   (add alongside existing binary_sensor: entries above)
-#   - platform: gpio
-#     id: enc_button
-#     pin:
-#       number: GPIO16          # ← CHANGE ME — ENC_SW
-#       mode: INPUT_PULLUP
-#       inverted: true
-#     filters:
-#       - delayed_on: 10ms
-#
-# ── SPI bus for ST7920 display (EXP2) ────────────────────────────────────────
-# NOTE: The SPI bus above is shared with the thermocouple board.
-#   The ST7920 uses software SPI or a second hardware SPI bus.
-#   To avoid a conflict, configure a second SPI bus with different pins, OR
-#   use the cs_pin to multiplex (CS low → ST7920, CS high → MAX6675).
-#   The safest option is separate pins for the display SPI.
-#
-# spi:     (add a second spi: block, or add mosi_pin to the existing block)
-#   - id: thermocouple_spi
-#     clk_pin: GPIO18
-#     miso_pin: GPIO19
-#   - id: display_spi
-#     clk_pin: GPIO17           # ← CHANGE ME — EXP2 SCK (do NOT use GPIO14 = purge valve)
-#     mosi_pin: GPIO13          # ← CHANGE ME — EXP2 SID/MOSI
-#
-# ── Fonts — DejaVuSansMono.ttf is committed in components/espresso_machine_display/fonts/
-# font:
-#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
-#     id: font_small
-#     size: 8
-#   - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
-#     id: font_large
-#     size: 16
-#
-# ── Display entity ────────────────────────────────────────────────────────────
-# display:
-#   - platform: st7920
-#     id: lcd
-#     width: 128
-#     height: 64
-#     cs_pin: GPIO15            # ← CHANGE ME — EXP2 CS
-#     spi_id: display_spi       # reference the display SPI bus above
-#     update_interval: 500ms
-#     lambda: |-
-#       id(my_display_ui).render(it);
-#
-# ── espresso_machine_display — wires everything together ─────────────────────
-# espresso_machine_display:
-#   id: my_display_ui
-#   display_id: lcd             # ← id: of the display: entity above
-#   encoder_id: rotary_enc      # ← id: of the rotary_encoder sensor above
-#   button_id:  enc_button      # ← id: of the binary_sensor (click button)
-#   espresso_machine: my_espresso   # orchestrator (required)
-#   grinder: main_grinder           # optional — Grind action on Home Screen
-#   heater: heater_ctrl             # optional — temp display and editing
-#   flow_meter: brew_flow           # optional — live flow rate / volume
-#   font_small: font_small          # optional — 6×8 pixel menu font
-#   font_large: font_large          # optional — 10×16 pixel large values
-#   theme: classic                  # classic | minimal | barista | dark
-#   long_press_ms: 1000ms           # hold duration for long-press
-#   screensaver_timeout: 5min       # blank display after 5 min idle (0 = off)
-#   home_actions:
-#     - brew
-#     - steam
-#     - grind
-#     - settings
-#     - power
+# ── Encoder push button ───────────────────────────────────────────────────────
+binary_sensor:
+  - platform: gpio
+    id: enc_button
+    pin:
+      number: GPIO16          # ← CHANGE ME — ENC_SW (EXP1)
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 10ms
+
+# ── Fonts (DejaVuSansMono.ttf committed in components/espresso_machine_display/fonts/) ──
+font:
+  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+    id: font_small
+    size: 8
+  - file: "../components/espresso_machine_display/fonts/DejaVuSansMono.ttf"
+    id: font_large
+    size: 16
+
+# ── ST7920 display (shares thermocouple SPI bus; write-only) ─────────────────
+display:
+  - platform: st7920
+    id: lcd
+    width: 128
+    height: 64
+    cs_pin: GPIO15            # ← CHANGE ME — EXP2 CS
+    update_interval: 500ms
+    lambda: |-
+      id(my_display_ui).render(it);
+
+# ── espresso_machine_display — wires all entities together ────────────────────
+espresso_machine_display:
+  id: my_display_ui
+  display_id: lcd
+  encoder_id: rotary_enc
+  button_id:  enc_button
+  espresso_machine: my_espresso
+  grinder: main_grinder
+  heater: heater_ctrl
+  flow_meter: brew_flow
+  font_small: font_small
+  font_large: font_large
+  theme: classic
+  long_press_ms: 1000ms
+  screensaver_timeout: 5min
+  home_actions:
+    - brew
+    - steam
+    - grind
+    - settings
+    - power
 
 # =============================================================================
 # POWER SWITCH — master on/off toggle
