@@ -36,6 +36,7 @@ external_components:
       - espresso_machine_valve
       - espresso_machine_pump
       - espresso_machine_grinder
+      - espresso_machine_flow_meter
       - espresso_machine_mock_heater
       - espresso_machine_mock_pump
       - espresso_machine_display
