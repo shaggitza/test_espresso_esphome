@@ -1157,9 +1157,8 @@ void EspressoMachineDisplay::print_small_(display::DisplayBuffer &it,
                                           int x, int y, const char *text) {
   if (font_small_ != nullptr) {
     it.print(x, y, font_small_, text);
-  } else {
-    it.print(x, y, text);  // ESPHome built-in 5×7 pixel font
   }
+  // No-op when no font is configured — configure font_small in YAML to render text.
 }
 
 void EspressoMachineDisplay::print_large_(display::DisplayBuffer &it,
@@ -1168,21 +1167,18 @@ void EspressoMachineDisplay::print_large_(display::DisplayBuffer &it,
     it.print(x, y, font_large_, text);
   } else if (font_small_ != nullptr) {
     it.print(x, y, font_small_, text);
-  } else {
-    it.print(x, y, text);  // ESPHome built-in 5×7 pixel font
   }
+  // No-op when no font is configured — configure font_small/font_large in YAML to render text.
 }
 
 void EspressoMachineDisplay::draw_title_bar_(display::DisplayBuffer &it,
                                              const char *title) {
   // Fill title bar with lit pixels (inverted background).
   it.filled_rectangle(0, 0, DISPLAY_W, FONT_H);
-  // Draw text in dark pixels on the lit background.
+  // Draw text in dark pixels on the lit background (requires font_small configured in YAML).
   if (font_small_ != nullptr) {
     it.print(1, 0, font_small_, CLR_OFF,
              display::TextAlign::TOP_LEFT, title);
-  } else {
-    it.print(1, 0, title);  // ESPHome built-in font; no color inversion without custom font
   }
 }
 
