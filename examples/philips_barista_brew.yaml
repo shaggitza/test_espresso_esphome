@@ -102,7 +102,7 @@ external_components:
       - espresso_machine_pump      # vibration pump (relay or dimmer)
       - espresso_machine_grinder   # timed relay grinder with lockout
       - espresso_machine_flow_meter  # pulse-counting volumetric sensor
-      - espresso_machine_sprofiler   # Sprofiler cloud shot upload
+      # - espresso_machine_sprofiler   # Sprofiler cloud shot upload (BETA — opt-in, see docs/sprofiler.md)
       - espresso_machine_display   # Creality ST7920 128×64 LCD menu UI (Phase 10)
 
 # -----------------------------------------------------------------------------
@@ -541,17 +541,20 @@ espresso_machine_grinder:
 # =============================================================================
 
 # =============================================================================
-# SPROFILER CLOUD — shot upload (first-class citizen)
+# SPROFILER CLOUD — shot upload (BETA — opt-in, not enabled by default)
 # Uploads completed shot data to Sprofiler in the Gaggiuino JSON format.
+# NOTE: This module is currently in BETA. Integration is not fully verified.
+# To enable: uncomment the block below AND the espresso_machine_sprofiler
+# entry in external_components above, then add sprofiler_token to secrets.yaml.
 # Requires a Sprofiler account and API token (see docs/sprofiler.md).
 # =============================================================================
-espresso_machine_sprofiler:
-  id: sprofiler_upload
-  http_request_id: http_client                  # ← wire the HTTP client
-  espresso_machine: my_espresso                 # ← auto-records shots on brew end
-  server: "https://sprofiler.io"               # ← or your self-hosted instance
-  api_token: !secret sprofiler_token            # ← API token from sprofiler.io account
-  profile_name: "Manual"                        # ← profile name included in shot records
+# espresso_machine_sprofiler:
+#   id: sprofiler_upload
+#   http_request_id: http_client                  # ← wire the HTTP client
+#   espresso_machine: my_espresso                 # ← auto-records shots on brew end
+#   server: "https://sprofiler.io"               # ← or your self-hosted instance
+#   api_token: !secret sprofiler_token            # ← API token from sprofiler.io account
+#   profile_name: "Manual"                        # ← profile name included in shot records
 
 # =============================================================================
 # ESPRESSO MACHINE — orchestrator (first-class citizen)
