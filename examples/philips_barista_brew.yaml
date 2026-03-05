@@ -103,7 +103,7 @@ external_components:
       - espresso_machine_grinder   # timed relay grinder with lockout
       - espresso_machine_flow_meter  # pulse-counting volumetric sensor
       # - espresso_machine_sprofiler   # Sprofiler cloud shot upload (BETA — opt-in, see docs/sprofiler.md)
-      - espresso_machine_display   # Creality ST7920 128×64 LCD menu UI (Phase 10)
+      # - espresso_machine_display   # ST7920 128×64 LCD menu UI (BETA — opt-in, see tests/test_display.yaml)
 
 # -----------------------------------------------------------------------------
 # SPI bus — used by the MAX6675/MAX31855 thermocouple board
@@ -111,7 +111,7 @@ external_components:
 spi:
   clk_pin: GPIO18     # ← CHANGE ME
   miso_pin: GPIO19    # ← CHANGE ME — thermocouple board uses MISO
-  mosi_pin: GPIO13    # ← CHANGE ME — ST7920 display uses MOSI (write-only)
+  mosi_pin: GPIO13    # ← CHANGE ME — ST7920 display uses MOSI (write-only; uncomment display section to use)
 
 # -----------------------------------------------------------------------------
 # I2C bus — available for other I2C sensors/devices (remove if not needed)
@@ -235,16 +235,16 @@ sensor:
     loop_time:
       name: "Loop Time"
       entity_category: diagnostic
-  # Rotary encoder — display UI navigation input
-  - platform: rotary_encoder
-    id: rotary_enc
-    pin_a:
-      number: GPIO32          # ← CHANGE ME — ENC_A (EXP1)
-      mode: INPUT_PULLUP
-    pin_b:
-      number: GPIO33          # ← CHANGE ME — ENC_B (EXP1)
-      mode: INPUT_PULLUP
-    resolution: 1             # 1 step/detent; try 2 or 4 for some EC11 batches
+  # Rotary encoder — display UI navigation input (BETA — opt-in, uncomment with espresso_machine_display)
+  # - platform: rotary_encoder
+  #   id: rotary_enc
+  #   pin_a:
+  #     number: GPIO32          # ← CHANGE ME — ENC_A (EXP1)
+  #     mode: INPUT_PULLUP
+  #   pin_b:
+  #     number: GPIO33          # ← CHANGE ME — ENC_B (EXP1)
+  #     mode: INPUT_PULLUP
+  #   resolution: 1             # 1 step/detent; try 2 or 4 for some EC11 batches
 
 # =============================================================================
 # FLOW METER — espresso_machine_flow_meter platform (first-class citizen)
@@ -761,12 +761,18 @@ espresso_machine:
     release_time: 10s      # how long to release (depressurise) per cycle
 
 # =============================================================================
-# DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder
+# DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder (BETA)
 # (recovered from a Creality 3D printer; connects via EXP1/EXP2 ribbon)
 #
 # The espresso_machine_display component provides a full action-hub menu:
 #   Home Screen → Brew / Steam / Grind / Settings / Power
 #   with real-time temperature + volume feedback during active sequences.
+#
+# STATUS: BETA — not enabled by default. To enable:
+#   1. Uncomment espresso_machine_display in external_components above.
+#   2. Uncomment the rotary encoder sensor block above.
+#   3. Uncomment the entire display section below.
+#   See tests/test_display.yaml for a complete working example.
 #
 # WIRING (adjust GPIOs to match your hardware):
 #   Encoder: ENC_A=GPIO32, ENC_B=GPIO33, ENC_SW=GPIO16  (EXP1 ribbon)
@@ -774,15 +780,15 @@ espresso_machine:
 # =============================================================================
 
 # ── Encoder push button ───────────────────────────────────────────────────────
-binary_sensor:
-  - platform: gpio
-    id: enc_button
-    pin:
-      number: GPIO16          # ← CHANGE ME — ENC_SW (EXP1)
-      mode: INPUT_PULLUP
-      inverted: true
-    filters:
-      - delayed_on: 10ms
+# binary_sensor:
+#   - platform: gpio
+#     id: enc_button
+#     pin:
+#       number: GPIO16          # ← CHANGE ME — ENC_SW (EXP1)
+#       mode: INPUT_PULLUP
+#       inverted: true
+#     filters:
+#       - delayed_on: 10ms
 
 # ── Fonts (optional — built-in 5×7 pixel font is used when not configured) ───
 # Option 1 — built-in font, zero configuration (default when this block is absent):
@@ -811,38 +817,38 @@ binary_sensor:
 # espresso_machine_display: block below.
 
 # ── ST7920 display (shares thermocouple SPI bus; write-only) ─────────────────
-display:
-  - platform: st7920
-    id: lcd
-    width: 128
-    height: 64
-    cs_pin: GPIO15            # ← CHANGE ME — EXP2 CS
-    update_interval: 33ms    # 30 FPS target (33 ms period); actual rate is SPI-limited
-                              # render() returns early when nothing changed (needs_redraw_ guard)
-    lambda: |-
-      id(my_display_ui).render(it);
+# display:
+#   - platform: st7920
+#     id: lcd
+#     width: 128
+#     height: 64
+#     cs_pin: GPIO15            # ← CHANGE ME — EXP2 CS
+#     update_interval: 33ms    # 30 FPS target (33 ms period); actual rate is SPI-limited
+#                               # render() returns early when nothing changed (needs_redraw_ guard)
+#     lambda: |-
+#       id(my_display_ui).render(it);
 
 # ── espresso_machine_display — wires all entities together ────────────────────
-espresso_machine_display:
-  id: my_display_ui
-  display_id: lcd
-  encoder_id: rotary_enc
-  button_id:  enc_button
-  espresso_machine: my_espresso
-  grinder: main_grinder
-  heater: heater_ctrl
-  flow_meter: brew_flow
-  # font_small: font_small   # uncomment if you declared a font: block above
-  # font_large: font_large   # uncomment if you declared a font: block above
-  theme: classic
-  long_press_ms: 1000ms
-  screensaver_timeout: 5min
-  home_actions:
-    - brew
-    - steam
-    - grind
-    - settings
-    - power
+# espresso_machine_display:
+#   id: my_display_ui
+#   display_id: lcd
+#   encoder_id: rotary_enc
+#   button_id:  enc_button
+#   espresso_machine: my_espresso
+#   grinder: main_grinder
+#   heater: heater_ctrl
+#   flow_meter: brew_flow
+#   # font_small: font_small   # uncomment if you declared a font: block above
+#   # font_large: font_large   # uncomment if you declared a font: block above
+#   theme: classic
+#   long_press_ms: 1000ms
+#   screensaver_timeout: 5min
+#   home_actions:
+#     - brew
+#     - steam
+#     - grind
+#     - settings
+#     - power
 
 # =============================================================================
 # POWER SWITCH — master on/off toggle

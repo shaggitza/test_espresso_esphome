@@ -166,7 +166,7 @@ external_components:
       - espresso_machine_mock_heater   # ← thermal simulation (temp sensor + SSR output)
       - espresso_machine_mock_pump     # ← pump + flow simulation
       # - espresso_machine_sprofiler   # Sprofiler cloud shot upload (BETA — opt-in, see docs/sprofiler.md)
-      - espresso_machine_display     # Creality ST7920 128×64 LCD menu UI (Phase 10)
+      # - espresso_machine_display     # ST7920 128×64 LCD menu UI (BETA — opt-in, see tests/test_display.yaml)
 
 # =============================================================================
 # MOCK HEATER — replaces physical thermocouple + slow_pwm + SPI
@@ -351,16 +351,16 @@ sensor:
     loop_time:
       name: "Loop Time"
       entity_category: diagnostic
-  # Rotary encoder — display UI input
-  - platform: rotary_encoder
-    id: rotary_enc
-    pin_a:
-      number: GPIO32
-      mode: INPUT_PULLUP
-    pin_b:
-      number: GPIO33
-      mode: INPUT_PULLUP
-    resolution: 1
+  # Rotary encoder — display UI input (BETA — opt-in, uncomment with espresso_machine_display)
+  # - platform: rotary_encoder
+  #   id: rotary_enc
+  #   pin_a:
+  #     number: GPIO32
+  #     mode: INPUT_PULLUP
+  #   pin_b:
+  #     number: GPIO33
+  #     mode: INPUT_PULLUP
+  #   resolution: 1
 
 # =============================================================================
 # HEATER PID — IDENTICAL to real config (uses same sensor/output IDs)
@@ -546,27 +546,33 @@ espresso_machine:
     release_time: 10s
 
 # =============================================================================
-# DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder
-# Fully enabled in the mock config to exercise the display component in CI.
+# DISPLAY — ST7920 128×64 Creality full-graphic LCD + rotary encoder (BETA)
+#
+# STATUS: BETA — not enabled by default. To enable:
+#   1. Uncomment espresso_machine_display in external_components above.
+#   2. Uncomment the rotary encoder sensor block above.
+#   3. Uncomment the entire display section below.
+#   See tests/test_display.yaml for a complete working example.
+#
 # GPIO assignments match the suggested wiring in philips_barista_brew.yaml;
 # adjust to match your actual hardware if running on a real board.
 # =============================================================================
 
 # ── SPI bus — display-only (no thermocouple SPI needed in the mock config) ──
-spi:
-  clk_pin: GPIO17     # EXP2 SCK
-  mosi_pin: GPIO13    # EXP2 SID/MOSI (display is write-only; no MISO needed)
+# spi:
+#   clk_pin: GPIO17     # EXP2 SCK
+#   mosi_pin: GPIO13    # EXP2 SID/MOSI (display is write-only; no MISO needed)
 
 # ── Encoder push button (binary_sensor — no existing binary_sensor: block yet) ──
-binary_sensor:
-  - platform: gpio
-    id: enc_button
-    pin:
-      number: GPIO16
-      mode: INPUT_PULLUP
-      inverted: true
-    filters:
-      - delayed_on: 10ms
+# binary_sensor:
+#   - platform: gpio
+#     id: enc_button
+#     pin:
+#       number: GPIO16
+#       mode: INPUT_PULLUP
+#       inverted: true
+#     filters:
+#       - delayed_on: 10ms
 
 # ── Fonts (optional — built-in 5×7 pixel font is used when not configured) ───
 # Option 1 — built-in font, zero configuration (default when this block is absent):
@@ -594,39 +600,39 @@ binary_sensor:
 # espresso_machine_display: block below.
 
 # ── ST7920 display entity ─────────────────────────────────────────────────────
-display:
-  - platform: st7920
-    id: lcd
-    width: 128
-    height: 64
-    cs_pin: GPIO15
-    update_interval: 33ms    # 30 FPS target (33 ms period); actual rate is SPI-limited
-                              # render() returns early when nothing changed (needs_redraw_ guard)
-    lambda: |-
-      id(my_display_ui).render(it);
+# display:
+#   - platform: st7920
+#     id: lcd
+#     width: 128
+#     height: 64
+#     cs_pin: GPIO15
+#     update_interval: 33ms    # 30 FPS target (33 ms period); actual rate is SPI-limited
+#                               # render() returns early when nothing changed (needs_redraw_ guard)
+#     lambda: |-
+#       id(my_display_ui).render(it);
 
 # ── espresso_machine_display — wires all entities together ────────────────────
-espresso_machine_display:
-  id: my_display_ui
-  display_id: lcd
-  encoder_id: rotary_enc
-  button_id:  enc_button
-  espresso_machine: my_espresso
-  grinder: main_grinder
-  heater: heater_ctrl
-  # flow_meter: not wired — the mock pump simulates flow internally and there
-  #   is no separate espresso_machine_flow_meter: entity in this config
-  # font_small: font_small   # uncomment if you declared a font: block above
-  # font_large: font_large   # uncomment if you declared a font: block above
-  theme: classic
-  long_press_ms: 1000ms
-  screensaver_timeout: 5min
-  home_actions:
-    - brew
-    - steam
-    - grind
-    - settings
-    - power
+# espresso_machine_display:
+#   id: my_display_ui
+#   display_id: lcd
+#   encoder_id: rotary_enc
+#   button_id:  enc_button
+#   espresso_machine: my_espresso
+#   grinder: main_grinder
+#   heater: heater_ctrl
+#   # flow_meter: not wired — the mock pump simulates flow internally and there
+#   #   is no separate espresso_machine_flow_meter: entity in this config
+#   # font_small: font_small   # uncomment if you declared a font: block above
+#   # font_large: font_large   # uncomment if you declared a font: block above
+#   theme: classic
+#   long_press_ms: 1000ms
+#   screensaver_timeout: 5min
+#   home_actions:
+#     - brew
+#     - steam
+#     - grind
+#     - settings
+#     - power
 
 # =============================================================================
 # POWER SWITCH — master on/off toggle (same as real config)
