@@ -362,6 +362,9 @@ sensor:
       number: GPIO33
       mode: INPUT_PULLUP
     resolution: 1
+
+# =============================================================================
+# HEATER PID — IDENTICAL to real config (uses same sensor/output IDs)
 #
 # This is completely unchanged from philips_barista_brew.yaml.
 # The PID has no idea it's controlling a simulated heater.
