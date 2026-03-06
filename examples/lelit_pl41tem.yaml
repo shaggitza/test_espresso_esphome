@@ -1,0 +1,432 @@
+# =============================================================================
+# ESPHome Espresso Machine Controller — Reference Device Configuration
+# Target machine: Lelit Anna PL41TEM (single boiler, NTC temp sensor, 3-way valve)
+#
+# HOW TO USE:
+#   1. Copy this file to your ESPHome config directory.
+#   2. Update every "# ← CHANGE ME" comment to match your wiring.
+#   3. Create a secrets.yaml alongside this file with your Wi-Fi credentials.
+#   4. Run:  esphome run lelit_pl41tem.yaml
+#
+# HARDWARE OVERVIEW — Lelit Anna PL41TEM:
+#   Single brass boiler (250 mL) + NTC thermistor (10 kΩ) + SSR bypass
+#   ULKA vibration pump (48 W, 15 bar max) + relay module
+#   3-way solenoid valve (brew position = energised; purge = de-energised)
+#   Steam wand: PASSIVE manual knob — no electrical steam solenoid
+#   No integrated grinder (PL41TEM ships without a grinder)
+#   Flow meter: NOT stock — see optional section below to add one
+#
+# REQUIRED HARDWARE MODIFICATIONS:
+#   1. Remove the stock Lelit PID board from the machine.
+#   2. Add a DC-input opto-isolated SSR (e.g. Fotek SSR-10DA) for heater control.
+#      Wire SSR DC+/DC- to GPIO4/GND; wire SSR AC side in series with heater live.
+#   3. Add 5 V relay modules for pump (GPIO25) and solenoid valve (GPIO26).
+#   4. Connect NTC leads to GPIO35 with a 10 kΩ upper-leg voltage divider to 3.3 V.
+#
+# IMPLEMENTATION STATUS (see FEATURES.md for the full list):
+#   ✅ NTC boiler temperature, SSR PID control, brew valve (3-way), pump relay
+#   ✅ Brew start/stop, steam temperature management, post-steam cool-down
+#   ✅ Descale and backflush maintenance routines
+#   ✅ Shot stats (time, volume) as HA sensor entities
+#   ⬜ Flow meter (optional hardware — see commented section below)
+#   ❌ Steam solenoid / grinder — not present on this machine
+#
+# SAFETY WARNING:
+#   This configuration controls the LOW-VOLTAGE side of your machine only.
+#   The 230 V heater, pump, and valve are switched via SSR/relay modules already
+#   present in your build. Never bypass galvanic isolation.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ESPHome core
+# -----------------------------------------------------------------------------
+esphome:
+  name: lelit-pl41tem
+  friendly_name: "Lelit Anna PL41TEM"
+  comment: "ESPHome espresso machine controller — github.com/shaggitza/test_espresso_esphome"
+
+esp32:
+  board: esp32dev        # ← CHANGE ME if using a different board variant
+  framework:
+    type: arduino
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+logger:
+  level: INFO
+
+# -----------------------------------------------------------------------------
+# Debug component — exposes MCU memory and loop-time metrics to HA
+# -----------------------------------------------------------------------------
+debug:
+  update_interval: 30s
+
+# -----------------------------------------------------------------------------
+# Home Assistant API
+# -----------------------------------------------------------------------------
+api:
+  encryption:
+    key: !secret ha_api_key    # generate with: esphome generate-api-key
+
+# -----------------------------------------------------------------------------
+# OTA updates
+# -----------------------------------------------------------------------------
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# -----------------------------------------------------------------------------
+# Wi-Fi
+# -----------------------------------------------------------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# -----------------------------------------------------------------------------
+# External components
+# -----------------------------------------------------------------------------
+external_components:
+  - source: github://shaggitza/test_espresso_esphome@main
+    components:
+      - espresso_machine           # orchestrator: brew + steam state machines
+      - espresso_machine_heater    # IHeater adapter wrapping climate.pid
+      - espresso_machine_valve     # solenoid valve with safety interlock
+      - espresso_machine_pump      # vibration pump (relay)
+      # - espresso_machine_flow_meter  # uncomment if a flow meter is fitted
+
+# =============================================================================
+# TEMPERATURE SENSOR — native ESPHome NTC thermistor
+#
+# The Lelit PL41TEM uses an NTC thermistor (approximately 10 kΩ at 25 °C)
+# mounted directly in the boiler body.
+#
+# WIRING (voltage divider):
+#   3.3 V ──[10 kΩ 1%]── GPIO35 ──[NTC probe]── GND
+#
+# CALIBRATION:
+#   The default B-constant of 3950 is typical for Lelit boiler NTCs.
+#   For maximum accuracy, measure resistance at two known temperatures and
+#   calculate B from: B = ln(R1/R2) / (1/T1 - 1/T2) where T is in Kelvin.
+#   See docs/pid_tuning.md for the calibration procedure.
+# =============================================================================
+sensor:
+  - platform: adc
+    id: boiler_ntc_adc
+    pin:
+      number: GPIO35     # ← CHANGE ME — analog-capable input pin
+      mode: INPUT        # GPIO34–39 are input-only; no internal pull
+    attenuation: 12db    # full 3.3 V ADC range
+    update_interval: 500ms
+    internal: true       # raw ADC; not exposed to HA
+
+  - platform: resistance
+    id: boiler_ntc_raw
+    sensor: boiler_ntc_adc
+    configuration: DOWNSTREAM   # NTC is the lower leg (between GPIO35 and GND)
+    resistor: 10kOhm
+    internal: true
+
+  - platform: ntc
+    id: boiler_temp
+    name: "Boiler Temperature"
+    sensor: boiler_ntc_raw
+    calibration:
+      b_constant: 3950           # ← CHANGE ME after calibration (typical Lelit value)
+      reference_temperature: 25°C
+      reference_resistance: 10kOhm
+    # Safety: hard over-temperature cutoff — independent of PID.
+    # Triggers if the boiler exceeds this limit, forcing the heater OFF immediately.
+    # Set ~30 °C above your highest normal setpoint (steam temp + margin).
+    on_value_range:
+      - above: 155               # °C — adjust to your machine's specification
+        then:
+          - climate.control:
+              id: main_heater
+              mode: "off"
+          - logger.log:
+              format: "SAFETY: Over-temperature cutoff (%.1f °C). Heater forced OFF."
+              args: ["x"]
+              level: ERROR
+
+  # Diagnostic sensors
+  - platform: uptime
+    name: "Uptime"
+    entity_category: diagnostic
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: internal_temperature
+    name: "ESP32 Temperature"
+    entity_category: diagnostic
+  - platform: debug
+    free:
+      name: "Heap Free"
+      entity_category: diagnostic
+    loop_time:
+      name: "Loop Time"
+      entity_category: diagnostic
+
+# =============================================================================
+# (OPTIONAL) FLOW METER — uncomment if an AB32 or compatible meter is fitted
+#
+# The PL41TEM ships without a flow meter.  If you plumb one inline between the
+# pump outlet and the 3-way solenoid valve, enable this section and uncomment
+# the espresso_machine_flow_meter in external_components above.
+#
+# WIRING:
+#   Flow meter Red  ──► 5 V
+#   Flow meter Black ──► GND
+#   Flow meter Yellow ──► GPIO34 + 10 kΩ pull-down to GND
+# =============================================================================
+# espresso_machine_flow_meter:
+#   id: brew_flow
+#   pin:
+#     number: GPIO34     # ← CHANGE ME — interrupt-capable input-only pin
+#     mode: INPUT        # no internal pull on GPIO34; use external 10 kΩ pull-down
+#   pulses_per_ml: 0.5195  # ← CHANGE ME — calibrate per your specific meter
+#   rate_sensor:
+#     name: "Flow Rate"
+#     unit_of_measurement: "mL/s"
+#   total_sensor:
+#     name: "Shot Volume"
+#     unit_of_measurement: "mL"
+
+# =============================================================================
+# HEATER SSR OUTPUT — native ESPHome slow_pwm
+#
+# A larger boiler (250 mL) benefits from a longer SSR switching period than a
+# thermoblock. 2 s is a good starting point; reduce to 1 s if PID response is slow.
+# =============================================================================
+output:
+  - platform: slow_pwm
+    id: heater_ssr
+    pin: GPIO4           # ← CHANGE ME — SSR DC-control input GPIO
+    period: 2s           # 2 s period suits a 250 mL boiler; adjust after PID tuning
+
+# =============================================================================
+# PID CLIMATE — native ESPHome climate.pid
+#
+# Lelit single-boiler PID starting parameters:
+#   kp = 0.3  — moderate proportional gain for 250 mL boiler
+#   ki = 0.003 — slow integral for thermal mass
+#   kd = 0.0  — start without derivative; add if overshoot is a problem
+#
+# Run PID autotune (button below) to find optimal values for your specific
+# machine and NTC probe position.  See docs/pid_tuning.md for guidance.
+# =============================================================================
+climate:
+  - platform: pid
+    id: main_heater
+    name: "Boiler PID"
+    sensor: boiler_temp
+    heat_output: heater_ssr
+    default_target_temperature: 93°C   # ← CHANGE ME — preferred brew temperature
+    control_parameters:
+      kp: 0.3
+      ki: 0.003
+      kd: 0.0
+
+# =============================================================================
+# IHeater ADAPTER — espresso_machine_heater platform
+#
+# Wraps the climate.pid entity so the orchestrator can call set_target_temperature()
+# and is_ready() without knowing the underlying sensor type.
+# =============================================================================
+espresso_machine_heater:
+  id: heater_ctrl
+  climate_id: main_heater
+  # temperature_tolerance: 0.5°C   # optional — treats ±0.5 °C as "at setpoint"
+
+# =============================================================================
+# VALVE — espresso_machine_valve platform
+#
+# The PL41TEM has a single 3-way solenoid valve.
+#   Energised   → brew position: pump water → portafilter
+#   De-energised → purge position: pump water → drip tray (pressure relief)
+#
+# The same entity is used as both 'brew: valve:' and 'brew: purge_valve:' in
+# the orchestrator block below.
+# =============================================================================
+espresso_machine_valve:
+  - id: brew_valve
+    name: "Brew Valve (3-way)"
+    pin: GPIO26          # ← CHANGE ME — solenoid valve relay GPIO
+
+# NOTE: There is NO steam solenoid valve on the PL41TEM.
+#       The steam wand is a passive manual knob valve.
+#       Steam temperature management is handled entirely via the PID climate entity.
+
+# =============================================================================
+# PUMP — espresso_machine_pump platform
+#
+# The ULKA vibration pump is controlled via a 5 V relay module.
+# Use type: relay for simple on/off control (appropriate for the stock pump).
+# =============================================================================
+espresso_machine_pump:
+  id: main_pump
+  name: "Brew Pump"
+  type: relay
+  pin: GPIO25            # ← CHANGE ME — pump relay GPIO
+
+# =============================================================================
+# ORCHESTRATOR — espresso_machine platform
+#
+# The orchestrator references all entities above by id: and manages the brew
+# and steam state machines.  It owns no hardware directly.
+# =============================================================================
+espresso_machine:
+  id: my_espresso
+
+  brew:
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: brew_valve
+    purge_valve: brew_valve         # 3-way valve handles brew AND purge in one body
+    target_temperature: 93°C        # ← CHANGE ME — brew temperature setpoint
+    # flow_max and flow_offset are required by the current schema.
+    # Set flow_max to a very large value to disable volumetric termination
+    # when no flow meter is fitted.  Replace with real values if a meter is added.
+    flow_max: 999ml                 # disable volumetric stop (no flow meter)
+    flow_offset: 0ml
+    # To enable volumetric termination when a flow meter is fitted, uncomment:
+    # flow_meter: brew_flow         # ← add when flow meter section is enabled
+    # flow_max: 40ml
+    # flow_offset: 5ml
+
+    # Pre-infusion (optional): low-pressure pre-wet before full extraction.
+    # Uncomment to enable.
+    # pre_infusion:
+    #   enabled: true
+    #   volume_ml: 5ml    # pre-wet volume before hold
+    #   hold_time: 5s     # low-pressure hold before full extraction
+
+    # Shot statistics exposed as HA sensor entities
+    shot_stats:
+      last_shot_time:
+        name: "Last Shot Time"
+      last_shot_volume:
+        name: "Last Shot Volume"
+
+  # Status text entity — live machine status in HA
+  status_sensor:
+    name: "Machine Status"
+
+  steam:
+    # The PL41TEM has no electrical steam solenoid.  The steam wand is a manual
+    # knob valve operated by the user.  ESPHome only manages the boiler temperature:
+    #   steam_start → raises PID setpoint to target_temperature → signals ready
+    #   User opens steam wand manually → steams milk → closes wand manually
+    #   steam_stop  → opens purge valve briefly → cools PID setpoint to cool_down_to
+    #
+    # The brew valve (3-way solenoid) is wired as the 'steam valve' so that the
+    # orchestrator can open it during the post-steam purge phase (cool-down flush).
+    heater: main_heater
+    heater_controller: heater_ctrl
+    pump: main_pump
+    valve: brew_valve               # re-use brew valve for post-steam purge path
+    purge_valve: brew_valve         # same 3-way solenoid
+    target_temperature: 125°C       # ← CHANGE ME — steam temperature setpoint
+    cool_down_to: 93°C              # ← CHANGE ME — brew temp to cool back to after steaming
+    # flow_max controls the pump duty during the STEAMING state.
+    # Set very low (0.5 ml/s) so the pump barely runs — water circulation in the
+    # boiler during steaming without pressurising the brew group.
+    flow_max: 0.5ml/s
+    purge_volume: 3ml               # flush boiler water before opening steam path
+    timeout: 5min                   # safety auto-stop (0 = disabled)
+
+  descale:
+    # Descale routine: cycles pump through the purge path to flush descaler.
+    # Requires: espresso_machine.descale_start action from HA.
+    cycles: 3
+    pump_time: 30s
+    soak_time: 30s
+
+  backflush:
+    # Backflush routine: alternately pressurises and releases through the brew valve.
+    # Requires a blind portafilter basket.
+    # Requires: espresso_machine.backflush_start action from HA.
+    cycles: 5
+    pressurize_time: 10s
+    release_time: 10s
+
+# =============================================================================
+# BUTTONS — native ESPHome template buttons
+# =============================================================================
+button:
+  # PID autotune — runs the ESPHome PID autotune algorithm to find kp/ki/kd.
+  # Press once, wait for the boiler to cycle several times.
+  # Check the log for the recommended PID parameters.
+  - platform: template
+    name: "PID Autotune"
+    entity_category: config
+    on_press:
+      - climate.pid.autotune: main_heater
+
+  # Brew start / stop
+  - platform: template
+    name: "Brew Start"
+    on_press:
+      - lambda: id(my_espresso).brew_start();
+
+  - platform: template
+    name: "Brew Stop"
+    on_press:
+      - lambda: id(my_espresso).brew_stop();
+
+  # Steam start / stop
+  # When steam_start is pressed:
+  #   1. Orchestrator raises PID setpoint to 125 °C (steam: target_temperature)
+  #   2. Machine waits until boiler reaches temperature — check Machine Status in HA
+  #   3. User opens steam wand knob manually
+  #   4. User steams milk
+  #   5. User closes steam wand knob manually
+  #   6. User presses Steam Stop
+  - platform: template
+    name: "Steam Start"
+    on_press:
+      - lambda: id(my_espresso).steam_start();
+
+  - platform: template
+    name: "Steam Stop"
+    on_press:
+      - lambda: id(my_espresso).steam_stop();
+
+  # Maintenance flush — pumps a set volume through the purge path
+  - platform: template
+    name: "Flush (50 mL)"
+    entity_category: config
+    on_press:
+      - espresso_machine.flush:
+          id: my_espresso
+          volume_ml: 50ml
+
+  # Descale start
+  - platform: template
+    name: "Descale Start"
+    entity_category: config
+    on_press:
+      - espresso_machine.descale_start:
+          id: my_espresso
+
+  - platform: template
+    name: "Descale Stop"
+    entity_category: config
+    on_press:
+      - lambda: id(my_espresso).descale_stop();
+
+  # Backflush start (requires blind portafilter basket)
+  - platform: template
+    name: "Backflush Start"
+    entity_category: config
+    on_press:
+      - espresso_machine.backflush_start:
+          id: my_espresso
+
+  - platform: template
+    name: "Backflush Stop"
+    entity_category: config
+    on_press:
+      - lambda: id(my_espresso).backflush_stop();

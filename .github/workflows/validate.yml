@@ -47,6 +47,7 @@ jobs:
           # Full example configs (authoritative references)
           - examples/philips_barista_brew.yaml
           - examples/philips_barista_brew_mock.yaml
+          - examples/lelit_pl41tem.yaml
 
     steps:
       - uses: actions/checkout@v4

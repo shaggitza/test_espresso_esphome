@@ -135,3 +135,20 @@ configuration and documented in the example YAML.
 | Weight-based grinder dose exit (`target_dose:` on grinder) | Phase 13 | Stops grind when portafilter scale reaches target; falls back to `default_grind_time` |
 | Shot statistics extended (weight + brew ratio) | Phase 13 | `last_shot_weight_g`, `last_shot_brew_ratio` HA sensor entities |
 | Pressure transducer | Future | Requires ADC + transducer hardware |
+
+---
+
+## Supported Machine Types
+
+See [`docs/other_machines.md`](docs/other_machines.md) for the full compatibility matrix, hardware
+topology diagrams, YAML snippets, and required modifications for each machine type.
+
+| Machine type | Example models | Example config | Status |
+|---|---|---|---|
+| **Single thermoblock** | Philips Barista Brew (reference) | [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) | ✅ Reference build |
+| **Single boiler — NTC + SSR bypass** | **Lelit Anna PL41TEM** | [`examples/lelit_pl41tem.yaml`](examples/lelit_pl41tem.yaml) | ✅ Validated; see `docs/other_machines.md §5` |
+| **Single boiler — SSR bypass** | Gaggia Classic, Rancilio Silvia | see `docs/other_machines.md §4` | ✅ Works with zero new code |
+| **GaggiaMate PCB** | Gaggia Classic, Breville Barista Express | see `docs/other_machines.md §6` | ✅ Works; `examples/gaggiamate.yaml` planned |
+| **Dual thermoblock** | DeLonghi Dinamica Pro | see `docs/other_machines.md §7` | ✅ Works; `examples/dual_thermoblock.yaml` planned |
+| **Dual boiler** | Breville Dual Boiler, ECM Synchronika | see `docs/other_machines.md §8` | ✅ Works; `examples/dual_boiler.yaml` planned |
+| **HX / E61** | Rocket Appartamento, Lelit Bianca | see `docs/other_machines.md §12` | ✅ Works; `examples/hx_e61.yaml` planned |
