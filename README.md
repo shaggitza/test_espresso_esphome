@@ -8,6 +8,18 @@ semi-automatic espresso machine — designed specifically around the
 **Philips Barista Brew** (integrated grinder, single thermoblock, steam wand, volumetric flow meter)
 but written to be generic enough for other machines with similar hardware.
 
+**Supported machine types** (see [`docs/other_machines.md`](docs/other_machines.md) for full details):
+
+| Machine type | Example models | Example YAML |
+|---|---|---|
+| Single thermoblock | **Philips Barista Brew** (reference build) | [`examples/philips_barista_brew.yaml`](examples/philips_barista_brew.yaml) |
+| Single boiler — NTC + SSR bypass | **Lelit Anna PL41TEM** | [`examples/lelit_pl41tem.yaml`](examples/lelit_pl41tem.yaml) |
+| Single boiler — NTC + SSR bypass | Gaggia Classic (modded), Rancilio Silvia | see `docs/other_machines.md §4` |
+| GaggiaMate PCB | Gaggia Classic, Breville Barista Express | see `docs/other_machines.md §6` |
+| Dual thermoblock | DeLonghi Dinamica Pro | see `docs/other_machines.md §7` |
+| Dual boiler | Breville Dual Boiler, ECM Synchronika | see `docs/other_machines.md §8` |
+| HX / E61 | Rocket Appartamento, Lelit Bianca | see `docs/other_machines.md §12` |
+
 > ⚠️ **USE AT YOUR OWN RISK.** Working with espresso machines involves mains voltage on the high-voltage
 > side. This project **only** addresses the low-voltage (3.3 V / 5 V) control side. Always maintain
 > proper galvanic isolation between the LV controller board and the 220 V side. If you are unsure,
@@ -79,10 +91,22 @@ See [`docs/wiring.md`](docs/wiring.md) for a full pin-out and connection diagram
 
 ### 2. Copy the example configuration
 
+For the **Philips Barista Brew** (reference build):
+
 ```bash
 cp examples/philips_barista_brew.yaml my_espresso.yaml
 # Edit my_espresso.yaml to match your pin assignments and Wi-Fi credentials
 ```
+
+For the **Lelit Anna PL41TEM** (single boiler with NTC sensor):
+
+```bash
+cp examples/lelit_pl41tem.yaml my_espresso.yaml
+# Edit my_espresso.yaml to match your pin assignments and Wi-Fi credentials
+```
+
+For other machine types, see [`docs/other_machines.md`](docs/other_machines.md) for
+YAML snippets and compatibility notes.
 
 ### 3. Flash with ESPHome
 

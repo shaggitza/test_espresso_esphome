@@ -247,6 +247,11 @@ Tasks:
 - [x] `docs/pid_tuning.md` — PID tuning guide for thermoblock machines
 - [x] `docs/home_assistant.md` — HA dashboard YAML cards for the espresso machine
 - [x] `docs/troubleshooting.md` — common issues and fixes
+- [x] `docs/other_machines.md §5` — Lelit Anna PL41TEM compatibility plan, specs, hardware
+       topology, GPIO mapping, YAML snippet, compatibility table, and required modifications
+- [x] `examples/lelit_pl41tem.yaml` — validated reference config for Lelit Anna PL41TEM
+- [ ] `docs/wiring.md` — add Lelit PL41TEM SSR bypass wiring section
+- [ ] `docs/pid_tuning.md` — add NTC calibration procedure for Lelit boiler probe
 - [ ] Tag v1.0.0 release
 
 ---
